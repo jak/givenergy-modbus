@@ -1,13 +1,30 @@
 {
   "name": "givenergy-modbus",
   "version": "0.1.0",
+  "description": "Native Node.js client for GivEnergy inverters over their proprietary Modbus TCP protocol",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "prepublishOnly": "npm test && npm run build"
+  },
+  "keywords": [
+    "givenergy",
+    "inverter",
+    "modbus",
+    "solar",
+    "battery",
+    "home-automation"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
   },
   "devDependencies": {
     "@types/node": "^25.3.3",
