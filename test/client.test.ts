@@ -1,0 +1,163 @@
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { createServer, type Server, type Socket } from 'net';
+import { Client } from '../src/client.js';
+
+// Build a fake read request frame for testing
+function fakeReadRequest(slave: number, base: number, count: number): Buffer {
+  // Minimal transparent frame: header(8) + serial(10) + padding(8) + slave+fc+base+count+crc
+  const serial = Buffer.alloc(10, 0x2a); // 10 '*' chars
+  const padding = Buffer.from([0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
+  const sub = Buffer.from([
+    slave, 0x04,
+    (base >> 8) & 0xFF, base & 0xFF,
+    (count >> 8) & 0xFF, count & 0xFF,
+    0x00, 0x00, // crc placeholder
+  ]);
+  const body = Buffer.concat([serial, padding, sub]);
+  const payloadLen = body.length + 2;
+  return Buffer.from([
+    0x59, 0x59, 0x00, 0x01,
+    (payloadLen >> 8) & 0xFF, payloadLen & 0xFF,
+    0x01, 0x02,
+    ...Array.from(body),
+  ]);
+}
+
+// Build a minimal heartbeat request frame (what the inverter sends to us)
+function buildHeartbeatRequestFrame(serial: string): Buffer {
+  const serialBuf = Buffer.from(serial.padStart(10, '*'), 'latin1');
+  const payloadLen = 2 + 10 + 1; // uid + fid + serial + type = 13
+  return Buffer.from([
+    0x59, 0x59, 0x00, 0x01,
+    (payloadLen >> 8) & 0xFF, payloadLen & 0xFF,
+    0x01, 0x01, // uid=1, fid=1 (heartbeat)
+    ...Array.from(serialBuf),
+    0x00, // data_adapter_type
+  ]);
+}
+
+// Wait for server to accept a connection (poll serverSockets array)
+function waitForServerSocket(serverSockets: Socket[], timeoutMs: number): Promise<Socket> {
+  return new Promise((resolve, reject) => {
+    const deadline = Date.now() + timeoutMs;
+    const poll = () => {
+      if (serverSockets.length > 0) {
+        resolve(serverSockets[0]);
+      } else if (Date.now() >= deadline) {
+        reject(new Error('timeout waiting for server socket'));
+      } else {
+        setImmediate(poll);
+      }
+    };
+    poll();
+  });
+}
+
+// Wait for data to arrive on a socket
+function waitForData(socket: Socket, timeoutMs: number): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('timeout waiting for data')), timeoutMs);
+    socket.once('data', (data) => {
+      clearTimeout(timer);
+      resolve(data);
+    });
+  });
+}
+
+describe('Client', () => {
+  let server: Server;
+  let serverPort: number;
+  let serverSockets: Socket[];
+
+  beforeEach(async () => {
+    serverSockets = [];
+    server = createServer(socket => serverSockets.push(socket));
+    await new Promise<void>(resolve => {
+      server.listen(0, () => {
+        serverPort = (server.address() as { port: number }).port;
+        resolve();
+      });
+    });
+  });
+
+  afterEach(async () => {
+    serverSockets.forEach(s => s.destroy());
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  });
+
+  it('connects to inverter on specified host and port', async () => {
+    const client = new Client({ host: '127.0.0.1', port: serverPort });
+    await client.connect();
+    expect(serverSockets.length).toBe(1);
+    await client.close();
+  });
+
+  it('responds to heartbeat frame sent by inverter', async () => {
+    // The inverter sends HeartbeatRequest every ~3 minutes.
+    // If the client doesn't respond within 5 seconds, the TCP connection drops.
+    // Heartbeat response bypasses the 250ms TX throttle for immediate delivery.
+    const client = new Client({ host: '127.0.0.1', port: serverPort });
+    await client.connect();
+
+    // Wait for server to accept the connection before sending data
+    const serverSocket = await waitForServerSocket(serverSockets, 1000);
+
+    const heartbeatReq = buildHeartbeatRequestFrame('CE1234G567');
+    serverSocket.write(heartbeatReq);
+
+    const response = await waitForData(serverSocket, 1000);
+    expect(response).toBeDefined();
+    expect(response[7]).toBe(0x01); // function code: heartbeat
+
+    await client.close();
+  });
+
+  it('rejects sendRequest if not connected', async () => {
+    const client = new Client({ host: '127.0.0.1', port: serverPort });
+    await expect(
+      client.sendRequest(fakeReadRequest(0x31, 0, 60))
+    ).rejects.toThrow();
+  });
+
+  it('times out and rejects sendRequest when no response arrives', async () => {
+    // Server accepts the connection but never responds.
+    // Client should timeout and reject the promise.
+    const client = new Client({
+      host: '127.0.0.1', port: serverPort,
+      retries: 0, timeout: 100,
+    });
+    await client.connect();
+
+    const start = Date.now();
+    await expect(
+      client.sendRequest(fakeReadRequest(0x31, 0, 60))
+    ).rejects.toThrow();
+    const elapsed = Date.now() - start;
+    expect(elapsed).toBeGreaterThanOrEqual(100);
+
+    await client.close();
+  });
+
+  it('retries on timeout up to configured count', async () => {
+    // Python: while tries <= retries: send, wait timeout, sleep(0.5), retry
+    // Default: retries=5. Here we use retries=2 to keep test fast.
+    // Total time >= retries × (timeout + 500ms sleep between retries)
+    const client = new Client({
+      host: '127.0.0.1', port: serverPort,
+      retries: 2, timeout: 50,
+    });
+    await client.connect();
+
+    const start = Date.now();
+    await expect(
+      client.sendRequest(fakeReadRequest(0x31, 0, 60))
+    ).rejects.toThrow();
+    const elapsed = Date.now() - start;
+
+    // With retries=2: initial(50ms) + sleep(500ms) + retry1(50ms) + sleep(500ms) + retry2(50ms)
+    // At minimum ~1000ms+ but we check a conservative threshold
+    expect(elapsed).toBeGreaterThan(900);
+
+    await client.close();
+  });
+});
