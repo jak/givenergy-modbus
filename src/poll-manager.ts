@@ -3,6 +3,7 @@ import { Client } from './client.js';
 import { buildSnapshot, type RegisterCache } from './snapshot-builder.js';
 import { encodeReadHoldingRegistersRequest, encodeReadInputRegistersRequest } from './pdu/encode.js';
 import type { InverterSnapshot } from './model/inverter-snapshot.js';
+import { detectGeneration, type InverterGeneration } from './generation.js';
 
 export interface PollManagerOptions {
   host: string;
@@ -35,16 +36,6 @@ const INPUT_REGISTER_RANGES = [
   { base: 0,   count: 60 },
   { base: 180, count: 60 },
 ];
-const HOLDING_REGISTER_RANGES_PARTIAL = [
-  { base: 0,   count: 60 },
-  { base: 180, count: 60 }, // HR(180) = e_battery_discharge_total_2
-];
-const HOLDING_REGISTER_RANGES_FULL = [
-  { base: 0,   count: 60 },
-  { base: 60,  count: 60 },
-  { base: 180, count: 60 }, // HR(180) = e_battery_discharge_total_2
-  { base: 240, count: 60 }, // HR(240-299) = Gen3 timeslots (charge slots 2-10, discharge slots 3-10)
-];
 
 /** Pause between sequential register reads — matches GivTCP's 250ms inter-frame delay */
 const INTER_READ_DELAY_MS = 250;
@@ -62,6 +53,7 @@ export class PollManager extends EventEmitter {
   private _lastFullRefresh = 0;
   private _previousSnapshot: InverterSnapshot | null = null;
   private _polling = false;
+  private _generation: InverterGeneration | null = null;
 
   // Register caches
   private _inputRegisters = new Map<number, number>();
@@ -170,7 +162,7 @@ export class PollManager extends EventEmitter {
         await this._delay(INTER_READ_DELAY_MS);
       }
 
-      const holdingRanges = doFull ? HOLDING_REGISTER_RANGES_FULL : HOLDING_REGISTER_RANGES_PARTIAL;
+      const holdingRanges = this._holdingRanges(doFull);
       for (const { base, count } of holdingRanges) {
         await this._readRange('holding', base, count);
         await this._delay(INTER_READ_DELAY_MS);
@@ -215,6 +207,11 @@ export class PollManager extends EventEmitter {
         batteryRegisterCaches: this._batteryRegisters,
       });
 
+      if (this._generation === null && snapshot !== null) {
+        this._generation = detectGeneration(snapshot.serialNumber);
+        this.emit('debug', `detected inverter generation: ${this._generation}`);
+      }
+
       this._handlePollResult(snapshot, null);
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
@@ -223,6 +220,24 @@ export class PollManager extends EventEmitter {
     } finally {
       this._polling = false;
     }
+  }
+
+  private _holdingRanges(full: boolean): Array<{base: number, count: number}> {
+    const gen = this._generation ?? 'gen3'; // default to gen3 until detected
+    if (gen === 'three_phase') {
+      return full
+        ? [{ base: 0, count: 60 }, { base: 60, count: 60 }, { base: 180, count: 60 }, { base: 1080, count: 60 }]
+        : [{ base: 0, count: 60 }, { base: 180, count: 60 }, { base: 1080, count: 60 }];
+    }
+    if (gen === 'gen2') {
+      return full
+        ? [{ base: 0, count: 60 }, { base: 60, count: 60 }, { base: 180, count: 60 }]
+        : [{ base: 0, count: 60 }, { base: 180, count: 60 }];
+    }
+    // gen3
+    return full
+      ? [{ base: 0, count: 60 }, { base: 60, count: 60 }, { base: 180, count: 60 }, { base: 240, count: 60 }]
+      : [{ base: 0, count: 60 }, { base: 180, count: 60 }];
   }
 
   private _delay(ms: number): Promise<void> {
