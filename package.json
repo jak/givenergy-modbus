@@ -16,7 +16,8 @@
     "script:discover": "node scripts/discover.mjs",
     "script:snapshot": "node scripts/snapshot.mjs",
     "script:monitor": "node scripts/monitor.mjs",
-    "script:write-test": "node scripts/write-test.mjs"
+    "script:write-test": "node scripts/write-test.mjs",
+    "script:dump-registers": "node scripts/dump-registers.mjs"
   },
   "keywords": [
     "givenergy",
