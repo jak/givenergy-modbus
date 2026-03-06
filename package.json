@@ -17,7 +17,8 @@
     "script:snapshot": "node scripts/snapshot.mjs",
     "script:monitor": "node scripts/monitor.mjs",
     "script:write-test": "node scripts/write-test.mjs",
-    "script:dump-registers": "node scripts/dump-registers.mjs"
+    "script:dump-registers": "node scripts/dump-registers.mjs",
+    "docs": "typedoc"
   },
   "keywords": [
     "givenergy",
@@ -33,6 +34,7 @@
   },
   "devDependencies": {
     "@types/node": "^25.3.3",
+    "typedoc": "^0.28.17",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
   }

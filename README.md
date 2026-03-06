@@ -34,121 +34,34 @@ if (devices.length === 0) {
   process.exit(1);
 }
 
-const inverter = new GivEnergyInverter({ host: devices[0].host });
+// Connect and auto-detect inverter generation (gen2, gen3, three-phase)
+const inverter = await GivEnergyInverter.connect({ host: devices[0].host });
 
 // Listen for data updates (every ~15 seconds)
-inverter.on('data', snapshot => {
+inverter.on('data', (snapshot) => {
   console.log(`Solar: ${snapshot.solarPower}W`);
   console.log(`Battery: ${snapshot.stateOfCharge}%`);
   console.log(`Grid: ${snapshot.gridPower}W (+ = export)`);
 });
 
 // Listen for connection loss
-inverter.on('lost', err => {
+inverter.on('lost', (err) => {
   console.error('Connection lost:', err.message);
 });
 
-await inverter.start();
-
 // Read the latest snapshot at any time
 const snapshot = inverter.getData();
+
+// Control the inverter
+await inverter.setMode('eco');
+await inverter.setChargeSlot(1, { start: '00:30', end: '04:30', targetStateOfCharge: 100 });
+await inverter.setChargeRate(2600);
+await inverter.syncDateTime();
 ```
 
-## API
+## API documentation
 
-### `discover(subnet?): Promise<DiscoveredDevice[]>`
-
-Scans the local network for GivEnergy inverters by probing TCP port 8899.
-
-- `subnet` — optional CIDR string (e.g. `'192.168.1.0/24'`). Auto-detected from the default network interface if omitted.
-- Returns an array of `{ host: string }` objects.
-
-### `GivEnergyInverter`
-
-```ts
-new GivEnergyInverter(options: GivEnergyInverterOptions)
-```
-
-| Option | Type | Default | Description |
-|---|---|---|---|
-| `host` | `string` | required | Inverter IP address |
-| `port` | `number` | `8899` | Modbus TCP port |
-| `pollIntervalMs` | `number` | `15000` | Fast poll interval (ms) |
-
-**Events**
-
-| Event | Payload | Description |
-|---|---|---|
-| `data` | `InverterSnapshot` | Emitted after each successful poll |
-| `lost` | `Error` | Emitted when the connection is lost after retries |
-
-**Methods**
-
-| Method | Description |
-|---|---|
-| `start(): Promise<void>` | Connect and begin polling |
-| `stop(): Promise<void>` | Stop polling and disconnect |
-| `getData(): InverterSnapshot` | Return the most recent snapshot |
-| `setChargeSlot(slot, config): Promise<void>` | Set charge time slot (slot: `1\|2`, config: `{ start, end, targetStateOfCharge? }`) |
-| `setDischargeSlot(slot, config): Promise<void>` | Set discharge time slot (slot: `1\|2`, config: `{ start, end }`) |
-| `setMode(mode): Promise<void>` | Set operating mode: `'normal'`, `'eco'`, `'grid_charge'`, `'battery_discharge'` |
-| `setTargetStateOfCharge(percent): Promise<void>` | Set charge target SOC (0–100) |
-
-Time strings use `"HH:MM"` format, e.g. `"04:30"`.
-
-### `InverterSnapshot`
-
-Snapshot of inverter state at a point in time. All GivEnergy protocol quirks (validation, scaling, signed integers) have been applied.
-
-**Identity**
-| Field | Type | Description |
-|---|---|---|
-| `serialNumber` | `string` | 10-character inverter serial |
-| `modelCode` | `number` | Raw device type code |
-
-**Real-time power (watts)**
-| Field | Type | Description |
-|---|---|---|
-| `solarPower` | `number` | Total PV generation |
-| `batteryPower` | `number` | Battery power (+ charging, − discharging) |
-| `gridPower` | `number` | Grid power (+ export, − import) |
-| `loadPower` | `number` | House load demand |
-
-**Battery state**
-| Field | Type | Description |
-|---|---|---|
-| `stateOfCharge` | `number` | Battery SOC % (0–100) |
-| `batteryVoltage` | `number` | Battery voltage (V) |
-| `batteryCurrent` | `number` | Battery current (A) |
-
-**Grid**
-| Field | Type | Description |
-|---|---|---|
-| `gridVoltage` | `number` | AC grid voltage (V) |
-| `gridFrequency` | `number` | AC grid frequency (Hz) |
-
-**Energy totals (kWh)**
-| Field | Type | Description |
-|---|---|---|
-| `pvEnergyTotalKwh` | `number` | Lifetime PV generation |
-| `batteryChargeEnergyTotalKwh` | `number` | Lifetime battery charge |
-| `batteryDischargeEnergyTotalKwh` | `number` | Lifetime battery discharge |
-| `gridImportEnergyTotalKwh` | `number` | Lifetime grid import |
-| `gridExportEnergyTotalKwh` | `number` | Lifetime grid export |
-
-**Configuration**
-| Field | Type | Description |
-|---|---|---|
-| `chargeSlot1` | `TimeSlot` | Charge time slot 1 |
-| `dischargeSlot1` | `TimeSlot` | Discharge time slot 1 |
-| `enableCharge` | `boolean` | Charge enabled flag |
-| `enableDischarge` | `boolean` | Discharge enabled flag |
-| `chargeTargetStateOfCharge` | `number` | Charge target SOC % |
-| `systemTime` | `Date` | Inverter clock |
-| `powerFlows` | `PowerFlows` | Derived power flow directions |
-| `batteries` | `BatterySnapshot[]` | Attached battery modules |
-
-Each `BatterySnapshot` includes `serialNumber`, `stateOfCharge`, `voltage`, `current`, `temperatureMax`, `temperatureMin`, `cycleCount`, and 16 `cellVoltages`.
+Full API reference is available at **[jak.github.io/givenergy-modbus](https://jak.github.io/givenergy-modbus/)** — auto-generated from source with TypeDoc.
 
 ## Protocol note
 
