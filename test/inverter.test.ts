@@ -1,39 +1,59 @@
 import { describe, it, expect } from 'vitest';
 import { GivEnergyInverter } from '../src/inverter.js';
+import { Gen2Inverter } from '../src/inverters/gen2.js';
+import { Gen3Inverter } from '../src/inverters/gen3.js';
+import { ThreePhaseInverter } from '../src/inverters/three-phase.js';
 
 describe('GivEnergyInverter', () => {
-  it('throws from getData() if not started', () => {
-    const inv = new GivEnergyInverter({ host: '192.168.1.100' });
-    expect(() => inv.getData()).toThrow('not started');
+  it('exposes a static connect() factory method', () => {
+    expect(typeof GivEnergyInverter.connect).toBe('function');
   });
 
-  it('extends EventEmitter', () => {
-    const inv = new GivEnergyInverter({ host: '192.168.1.100' });
-    expect(typeof inv.on).toBe('function');
-    expect(typeof inv.emit).toBe('function');
+  it('exposes shared control methods on prototype', () => {
+    // Verify method signatures exist on the abstract class prototype
+    // (subclasses inherit these shared methods)
+    expect(typeof GivEnergyInverter.prototype.setMode).toBe('function');
+    expect(typeof GivEnergyInverter.prototype.setDateTime).toBe('function');
+    expect(typeof GivEnergyInverter.prototype.syncDateTime).toBe('function');
+    expect(typeof GivEnergyInverter.prototype.reboot).toBe('function');
+    expect(typeof GivEnergyInverter.prototype.stop).toBe('function');
+    expect(typeof GivEnergyInverter.prototype.getData).toBe('function');
+    expect(typeof GivEnergyInverter.prototype.unsafe_writeRegister).toBe('function');
   });
 
-  it('exposes start() and stop() as async methods', () => {
-    const inv = new GivEnergyInverter({ host: '192.168.1.100' });
-    expect(typeof inv.start).toBe('function');
-    expect(typeof inv.stop).toBe('function');
+  it('Gen2Inverter exposes generation-specific methods', () => {
+    expect(typeof Gen2Inverter.prototype.setChargeScheduleEnabled).toBe('function');
+    expect(typeof Gen2Inverter.prototype.setDischargeScheduleEnabled).toBe('function');
+    expect(typeof Gen2Inverter.prototype.setChargeTarget).toBe('function');
+    expect(typeof Gen2Inverter.prototype.setChargeSlot).toBe('function');
+    expect(typeof Gen2Inverter.prototype.setChargeSlots).toBe('function');
+    expect(typeof Gen2Inverter.prototype.setDischargeSlot).toBe('function');
+    expect(typeof Gen2Inverter.prototype.setDischargeSlots).toBe('function');
+    expect(typeof Gen2Inverter.prototype.setChargeRate).toBe('function');
+    expect(typeof Gen2Inverter.prototype.setChargeRatePercent).toBe('function');
+    expect(typeof Gen2Inverter.prototype.setDischargeRate).toBe('function');
+    expect(typeof Gen2Inverter.prototype.setDischargeRatePercent).toBe('function');
+    expect(typeof Gen2Inverter.prototype.setBatteryReserve).toBe('function');
+    expect(typeof Gen2Inverter.prototype.setBatteryPowerReserve).toBe('function');
   });
 
-  it('exposes write methods', () => {
-    // No acronyms in the API — these names are intentional
-    const inv = new GivEnergyInverter({ host: '192.168.1.100' });
-    expect(typeof inv.setChargeSlot).toBe('function');
-    expect(typeof inv.setDischargeSlot).toBe('function');
-    expect(typeof inv.setMode).toBe('function');
-    expect(typeof inv.setTargetStateOfCharge).toBe('function');
+  it('Gen3Inverter exposes generation-specific methods including Gen3-only', () => {
+    expect(typeof Gen3Inverter.prototype.setChargeScheduleEnabled).toBe('function');
+    expect(typeof Gen3Inverter.prototype.setChargeSlot).toBe('function');
+    expect(typeof Gen3Inverter.prototype.setExportLimit).toBe('function');
+    expect(typeof Gen3Inverter.prototype.setBatteryPauseMode).toBe('function');
+    expect(typeof Gen3Inverter.prototype.setPauseSlot).toBe('function');
   });
 
-  it('forwards data and lost events from PollManager', () => {
-    const inv = new GivEnergyInverter({ host: '192.168.1.100' });
-    // Just verify the event listeners can be registered
-    const dataHandler = () => {};
-    const lostHandler = () => {};
-    expect(() => inv.on('data', dataHandler)).not.toThrow();
-    expect(() => inv.on('lost', lostHandler)).not.toThrow();
+  it('ThreePhaseInverter exposes generation-specific methods', () => {
+    expect(typeof ThreePhaseInverter.prototype.setChargeScheduleEnabled).toBe('function');
+    expect(typeof ThreePhaseInverter.prototype.setChargeSlot).toBe('function');
+    expect(typeof ThreePhaseInverter.prototype.setDischargeSlot).toBe('function');
+  });
+
+  it('all subclasses extend GivEnergyInverter', () => {
+    expect(Gen2Inverter.prototype).toBeInstanceOf(GivEnergyInverter);
+    expect(Gen3Inverter.prototype).toBeInstanceOf(GivEnergyInverter);
+    expect(ThreePhaseInverter.prototype).toBeInstanceOf(GivEnergyInverter);
   });
 });

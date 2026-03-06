@@ -282,13 +282,12 @@ describe('Integration: GivEnergyInverter with mock inverter', () => {
     }
 
     const mock = await startMockInverter();
-    const inv = new GivEnergyInverter({
+    const inv = await GivEnergyInverter.connect({
       host: '127.0.0.1',
       port: mock.port,
     });
 
     try {
-      await inv.start();
       const snapshot = inv.getData();
       expect(snapshot).toBeDefined();
       expect(snapshot.serialNumber).toBe('SA1234B567');
@@ -310,19 +309,19 @@ describe('Integration: GivEnergyInverter with mock inverter', () => {
     }
 
     const mock = await startMockInverter();
-    const inv = new GivEnergyInverter({
+    const snapshots: any[] = [];
+
+    const inv = await GivEnergyInverter.connect({
       host: '127.0.0.1',
       port: mock.port,
       pollIntervalMs: 100,
     });
-
-    const snapshots: any[] = [];
     inv.on('data', (s: any) => snapshots.push(s));
 
     try {
-      await inv.start();
-      // Already got one from start(), wait for another
-      await new Promise(r => setTimeout(r, 200));
+      // connect() already completed one poll. The next poll fires 100ms later
+      // and takes ~4s to complete (inter-read delays + push soak). Wait 6s.
+      await new Promise(r => setTimeout(r, 6000));
       expect(snapshots.length).toBeGreaterThanOrEqual(1);
     } finally {
       await inv.stop();
