@@ -190,20 +190,12 @@ function formatSerial(regs, start, count) {
   return s;
 }
 
-const inverter = new GivEnergyInverter({ host });
+console.log(`Connecting to ${host}...`);
+const inverter = await GivEnergyInverter.connect({ host });
 
 if (debug) {
   inverter.on('debug', (msg) => console.log(`  [debug] ${msg}`));
 }
-
-const snapshotPromise = new Promise((resolve, reject) => {
-  inverter.once('data', resolve);
-  inverter.once('lost', reject);
-});
-
-console.log(`Connecting to ${host}...`);
-await inverter.start();
-await snapshotPromise;
 
 // Access the raw register caches from the poll manager
 const pm = inverter.pollManager ?? inverter._pollManager ?? null;
@@ -218,11 +210,11 @@ if (!hrCache) {
 
 // Read extended register blocks (240-299, 300-359) that the poll manager doesn't read
 // We need to trigger reads for these ranges
-try {
-  const { encodeReadHoldingRegistersRequest } = await import('../dist/pdu/encode.js');
-  const client = pm.client ?? pm._client;
-  const serial = client?.dataAdapterSerial ?? '**********';
+const { encodeReadHoldingRegistersRequest, encodeReadInputRegistersRequest, encodeReadMeterProductRegistersRequest } = await import('../dist/pdu/encode.js');
+const client = pm.client ?? pm._client;
+const serial = client?.dataAdapterSerial ?? '**********';
 
+try {
   for (const base of [240, 300, 360, 420, 480]) {
     console.log(`Reading extended HR block ${base}-${base + 59}...`);
     const frame = encodeReadHoldingRegistersRequest({
@@ -240,6 +232,56 @@ try {
   }
 } catch (e) {
   console.log(`Could not read extended registers: ${e.message}`);
+}
+
+// Read meter registers: scan slaves 0x01-0x08
+// Data registers: fc=4 (read input registers), base=60, count=60
+// Product registers: fc=22 (read meter product registers), base=60, count=60
+const meterDataCaches = new Map();
+const meterProductCaches = new Map();
+const METER_SLAVES = [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08];
+
+for (const slave of METER_SLAVES) {
+  console.log(`Reading meter data (slave=0x${slave.toString(16).padStart(2, '0')}, fc=4, base=60)...`);
+  try {
+    const frame = encodeReadInputRegistersRequest({
+      dataAdapterSerial: serial,
+      slaveAddress: slave,
+      baseRegister: 60,
+      registerCount: 60,
+    });
+    const values = await client.sendRequest(frame);
+    // Check if valid: v_phase_1 (offset 0 = register 60) should be non-zero
+    if (values[0] === 0) {
+      console.log(`  Meter 0x${slave.toString(16).padStart(2, '0')}: no data (v_phase_1 = 0), skipping remaining meters`);
+      continue;
+    }
+    const cache = new Map();
+    values.forEach((v, i) => cache.set(60 + i, v));
+    meterDataCaches.set(slave, cache);
+    console.log(`  Meter 0x${slave.toString(16).padStart(2, '0')}: found (${values.length} registers)`);
+  } catch (e) {
+    console.log(`  Meter 0x${slave.toString(16).padStart(2, '0')}: not responding (${e.message})`);
+    continue;
+  }
+
+  // Read product info via fc=22 for meters that responded to data read
+  console.log(`Reading meter product (slave=0x${slave.toString(16).padStart(2, '0')}, fc=22, base=60)...`);
+  try {
+    const prodFrame = encodeReadMeterProductRegistersRequest({
+      dataAdapterSerial: serial,
+      slaveAddress: slave,
+      baseRegister: 60,
+      registerCount: 60,
+    });
+    const prodValues = await client.sendRequest(prodFrame);
+    const prodCache = new Map();
+    prodValues.forEach((v, i) => prodCache.set(60 + i, v));
+    meterProductCaches.set(slave, prodCache);
+    console.log(`  Meter product 0x${slave.toString(16).padStart(2, '0')}: ok (${prodValues.length} registers)`);
+  } catch (e) {
+    console.log(`  Meter product 0x${slave.toString(16).padStart(2, '0')}: not available (${e.message})`);
+  }
 }
 
 await inverter.stop();
@@ -287,28 +329,63 @@ console.log('\n=== INPUT REGISTERS ===\n');
 const irSorted = [...irCache.keys()].sort((a, b) => a - b);
 const IR_NAMES = {
   0: 'inverter_status',
+  1: 'v_pv1 (deci)',
+  2: 'v_pv2 (deci)',
+  3: 'v_p_bus',
+  4: 'v_n_bus',
   5: 'v_ac1 (deci)',
-  9: 'f_ac1',
+  6: 'e_battery_throughput_total_h',
+  7: 'e_battery_throughput_total_l',
+  8: 'i_pv1',
+  9: 'i_pv2',
+  10: 'i_ac1',
   11: 'e_pv_total_h',
   12: 'e_pv_total_l',
-  13: 'f_ac1 (alt)',
+  13: 'f_ac1',
+  15: 'v_highbrigh_bus',
+  17: 'e_pv1_day (deci)',
   18: 'p_pv1',
+  19: 'e_pv2_day (deci)',
   20: 'p_pv2',
   21: 'e_grid_out_total_h',
   22: 'e_grid_out_total_l',
+  23: 'e_solar_diverter',
+  24: 'p_inverter_out (signed)',
+  25: 'e_grid_out_day (deci)',
+  26: 'e_grid_in_day (deci)',
   27: 'e_inverter_in_total_h',
   28: 'e_inverter_in_total_l',
   29: 'e_discharge_year',
   30: 'p_grid_out (signed)',
+  31: 'p_eps_backup',
   32: 'e_grid_in_total_h',
   33: 'e_grid_in_total_l',
+  35: 'e_inverter_in_day (deci)',
+  36: 'e_battery_charge_today (deci)',
+  37: 'e_battery_discharge_today (deci)',
+  38: 'inverter_countdown',
   41: 'temp_inverter_heatsink (deci)',
   42: 'p_load_demand',
+  43: 'p_grid_apparent',
+  44: 'e_inverter_out_day (deci)',
+  45: 'e_inverter_out_total_h',
+  46: 'e_inverter_out_total_l',
+  47: 'work_time_total_h',
+  48: 'work_time_total_l',
+  49: 'system_mode',
   50: 'v_battery (centi)',
   51: 'i_battery (signed, centi)',
   52: 'p_battery (signed)',
+  53: 'v_eps_backup (deci)',
+  54: 'f_eps_backup (deci)',
+  55: 'temp_charger (deci)',
+  56: 'temp_battery (deci)',
+  58: 'i_grid_port',
   59: 'battery_percent',
+  180: 'e_battery_discharge_total_2 (deci)',
   181: 'e_battery_charge_total_2 (deci)',
+  182: 'e_battery_discharge_today_2 (deci)',
+  183: 'e_battery_charge_today_2 (deci)',
 };
 
 for (const addr of irSorted) {
@@ -317,4 +394,80 @@ for (const addr of irSorted) {
   const hex = `0x${raw.toString(16).padStart(4, '0')}`;
   const label = name ? `  ${name}` : '';
   console.log(`  IR(${String(addr).padStart(3)}) = ${String(raw).padStart(5)}  ${hex}${label}`);
+}
+
+// Dump meter data registers
+const METER_DATA_NAMES = {
+  60: 'v_phase_1 (deci)',
+  61: 'v_phase_2 (deci)',
+  62: 'v_phase_3 (deci)',
+  63: 'i_phase_1 (centi)',
+  64: 'i_phase_2 (centi)',
+  65: 'i_phase_3 (centi)',
+  66: 'i_ln (centi)',
+  67: 'i_total (centi)',
+  68: 'p_active_phase_1 (signed)',
+  69: 'p_active_phase_2 (signed)',
+  70: 'p_active_phase_3 (signed)',
+  71: 'p_active_total (signed)',
+  72: 'p_reactive_phase_1 (signed)',
+  73: 'p_reactive_phase_2 (signed)',
+  74: 'p_reactive_phase_3 (signed)',
+  75: 'p_reactive_total (signed)',
+  76: 'p_apparent_phase_1 (signed)',
+  77: 'p_apparent_phase_2 (signed)',
+  78: 'p_apparent_phase_3 (signed)',
+  79: 'p_apparent_total (signed)',
+  80: 'pf_phase_1 (signed, /10000)',
+  81: 'pf_phase_2 (signed, /10000)',
+  82: 'pf_phase_3 (signed, /10000)',
+  83: 'pf_total (signed, /10000)',
+  84: 'frequency (centi)',
+  85: 'e_import_active (deci)',
+  86: 'e_import_reactive (deci)',
+  87: 'e_export_active (deci)',
+  88: 'e_export_reactive (deci)',
+};
+
+for (const [slave, cache] of meterDataCaches) {
+  console.log(`\n=== METER 0x${slave.toString(16).padStart(2, '0')} DATA REGISTERS (fc=4) ===\n`);
+  const addrs = [...cache.keys()].sort((a, b) => a - b);
+  for (const addr of addrs) {
+    const raw = cache.get(addr);
+    const name = METER_DATA_NAMES[addr];
+    const hex = `0x${raw.toString(16).padStart(4, '0')}`;
+    const label = name ? `  ${name}` : '';
+    console.log(`  IR(${String(addr).padStart(3)}) = ${String(raw).padStart(5)}  ${hex}${label}`);
+  }
+}
+
+// Dump meter product registers
+const METER_PRODUCT_NAMES = {
+  60: 'serial_number [60-61]',
+  62: 'factory_code [62-63]',
+  64: 'meter_type',
+  65: 'hardware_version',
+  66: 'software_version',
+  67: 'modbus_id',
+  68: 'baud_rate',
+};
+
+for (const [slave, cache] of meterProductCaches) {
+  console.log(`\n=== METER 0x${slave.toString(16).padStart(2, '0')} PRODUCT REGISTERS (fc=22) ===\n`);
+  const addrs = [...cache.keys()].sort((a, b) => a - b);
+  // Show serial and factory code as strings
+  if (cache.has(60) && cache.has(61)) {
+    console.log(`  Serial:       "${formatSerial(cache, 60, 2)}"`);
+  }
+  if (cache.has(62) && cache.has(63)) {
+    console.log(`  Factory code: "${formatSerial(cache, 62, 2)}"`);
+  }
+  console.log();
+  for (const addr of addrs) {
+    const raw = cache.get(addr);
+    const name = METER_PRODUCT_NAMES[addr];
+    const hex = `0x${raw.toString(16).padStart(4, '0')}`;
+    const label = name ? `  ${name}` : '';
+    console.log(`  MR(${String(addr).padStart(3)}) = ${String(raw).padStart(5)}  ${hex}${label}`);
+  }
 }

@@ -49,7 +49,7 @@ describe('Register Lookup Tables', () => {
     });
 
     it('defines p_battery at IR(52) — signed', () => {
-      // Battery power: positive = charging, negative = discharging
+      // Battery power: positive = discharging, negative = charging
       expect(INVERTER_INPUT_REGISTERS['p_battery'].address).toBe(52);
     });
 

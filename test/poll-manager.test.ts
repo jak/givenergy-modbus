@@ -51,6 +51,7 @@ const mockSnapshot: InverterSnapshot = {
     gridToBattery: 0,
   },
   batteries: [],
+  meters: [],
 };
 
 describe('PollManager', () => {

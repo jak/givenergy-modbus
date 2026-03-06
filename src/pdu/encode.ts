@@ -106,6 +106,20 @@ export function encodeReadInputRegistersRequest(req: ReadRegistersRequest): Buff
 }
 
 /**
+ * Encode a Read Meter Product Registers request (GivEnergy fc=0x16/22).
+ *
+ * Structurally identical to a read input registers request but uses
+ * a custom function code. Used to read meter identity: serial number,
+ * factory code (model), hardware/software version.
+ */
+export function encodeReadMeterProductRegistersRequest(req: ReadRegistersRequest): Buffer {
+  const innerEnc = new PayloadEncoder();
+  innerEnc.addUint16(req.baseRegister);
+  innerEnc.addUint16(req.registerCount);
+  return buildTransparentFrame(req.dataAdapterSerial, req.slaveAddress, 0x16, innerEnc.payload);
+}
+
+/**
  * Encode a Write Single Holding Register request (Modbus fc=0x06).
  */
 export function encodeWriteHoldingRegisterRequest(req: WriteHoldingRegisterRequest): Buffer {

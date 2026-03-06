@@ -25,6 +25,16 @@ export function toCenti(raw: number): number {
 }
 
 /**
+ * Convert a raw CT meter power factor register to a -1.0..1.0 value.
+ * The meter stores PF as signed int16 × 10000 (e.g. 9979 → 0.9979, -8413 → -0.8413).
+ *
+ * Note: GivTCP uses toMilli (÷1000), but ÷10000 matches the GivEnergy cloud CSV export.
+ */
+export function toPowerFactor(raw: number): number {
+  return toInt16(raw) / 10000;
+}
+
+/**
  * Combine two consecutive 16-bit registers into a 32-bit unsigned value.
  * High word comes first (big-endian register order).
  *

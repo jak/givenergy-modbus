@@ -1,7 +1,11 @@
 import { EventEmitter } from 'events';
 import { Client } from './client.js';
 import { buildSnapshot, type RegisterCache } from './snapshot-builder.js';
-import { encodeReadHoldingRegistersRequest, encodeReadInputRegistersRequest } from './pdu/encode.js';
+import {
+  encodeReadHoldingRegistersRequest,
+  encodeReadInputRegistersRequest,
+  encodeReadMeterProductRegistersRequest,
+} from './pdu/encode.js';
 import type { InverterSnapshot } from './model/inverter-snapshot.js';
 import { detectGeneration, type InverterGeneration } from './generation.js';
 
@@ -16,6 +20,11 @@ const INVERTER_SLAVE = 0x11;
 const BATTERY_REGISTER_START = 60;
 const BATTERY_REGISTER_COUNT = 60;
 const LV_BATTERY_SLAVES = [0x32, 0x33, 0x34, 0x35, 0x36, 0x37];
+const METER_SLAVES = [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08];
+const METER_DATA_REGISTER_START = 60;
+const METER_DATA_REGISTER_COUNT = 29; // IR 60-88
+const METER_PRODUCT_REGISTER_START = 60;
+const METER_PRODUCT_REGISTER_COUNT = 9; // MR 60-68
 
 /**
  * Register ranges to read per poll cycle.
@@ -59,6 +68,8 @@ export class PollManager extends EventEmitter {
   private _inputRegisters = new Map<number, number>();
   private _holdingRegisters = new Map<number, number>();
   private _batteryRegisters = new Map<number, Map<number, number>>();
+  private _meterDataRegisters = new Map<number, Map<number, number>>();
+  private _meterProductRegisters = new Map<number, Map<number, number>>();
 
   constructor(options: PollManagerOptions) {
     super();
@@ -194,7 +205,50 @@ export class PollManager extends EventEmitter {
             break;
           }
         }
+        // Scan meters on all 8 slaves — meters can be non-contiguous, so use
+        // continue (not break) when one doesn't respond.
+        for (const slave of METER_SLAVES) {
+          try {
+            this.emit('debug', `reading meter data (slave=0x${slave.toString(16)}, base=${METER_DATA_REGISTER_START}, count=${METER_DATA_REGISTER_COUNT})`);
+            const dataFrame = encodeReadInputRegistersRequest({
+              dataAdapterSerial: this.client.dataAdapterSerial,
+              slaveAddress: slave,
+              baseRegister: METER_DATA_REGISTER_START,
+              registerCount: METER_DATA_REGISTER_COUNT,
+            });
+            const dataValues = await this.client.sendRequest(dataFrame);
+            this.emit('debug', `meter 0x${slave.toString(16)} data ok (${dataValues.length} values)`);
+            const dataCache = this._meterDataRegisters.get(slave) ?? new Map<number, number>();
+            dataValues.forEach((v, i) => dataCache.set(METER_DATA_REGISTER_START + i, v));
+            this._meterDataRegisters.set(slave, dataCache);
+
+            // Read product info for meters that responded
+            this.emit('debug', `reading meter product (slave=0x${slave.toString(16)}, base=${METER_PRODUCT_REGISTER_START}, count=${METER_PRODUCT_REGISTER_COUNT})`);
+            const productFrame = encodeReadMeterProductRegistersRequest({
+              dataAdapterSerial: this.client.dataAdapterSerial,
+              slaveAddress: slave,
+              baseRegister: METER_PRODUCT_REGISTER_START,
+              registerCount: METER_PRODUCT_REGISTER_COUNT,
+            });
+            const productValues = await this.client.sendRequest(productFrame);
+            this.emit('debug', `meter 0x${slave.toString(16)} product ok (${productValues.length} values)`);
+            const productCache = this._meterProductRegisters.get(slave) ?? new Map<number, number>();
+            productValues.forEach((v, i) => productCache.set(METER_PRODUCT_REGISTER_START + i, v));
+            this._meterProductRegisters.set(slave, productCache);
+          } catch {
+            this.emit('debug', `meter 0x${slave.toString(16)} did not respond, continuing scan`);
+            continue;
+          }
+        }
+
         this._lastFullRefresh = now;
+      }
+
+      // Build combined meter caches for snapshot builder
+      const meterRegisterCaches = new Map<number, { data: Map<number, number>; product: Map<number, number> }>();
+      for (const [slave, data] of this._meterDataRegisters) {
+        const product = this._meterProductRegisters.get(slave) ?? new Map<number, number>();
+        meterRegisterCaches.set(slave, { data, product });
       }
 
       const cache: RegisterCache = {
@@ -205,6 +259,7 @@ export class PollManager extends EventEmitter {
       const snapshot = buildSnapshot(cache, {
         previousSnapshot: this._previousSnapshot,
         batteryRegisterCaches: this._batteryRegisters,
+        meterRegisterCaches,
       });
 
       if (this._generation === null && snapshot !== null) {

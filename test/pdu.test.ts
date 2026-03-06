@@ -3,6 +3,7 @@ import { encodeHeartbeatResponse } from '../src/pdu/heartbeat.js';
 import {
   encodeReadHoldingRegistersRequest,
   encodeReadInputRegistersRequest,
+  encodeReadMeterProductRegistersRequest,
   encodeWriteHoldingRegisterRequest,
 } from '../src/pdu/encode.js';
 import { decodePdu } from '../src/pdu/decode.js';
@@ -123,6 +124,21 @@ describe('Read Registers Request Encoding', () => {
     expect(frame[27]).toBe(0x04);
   });
 
+  it('encodes ReadMeterProductRegistersRequest with function code 0x16 (22)', () => {
+    // GivEnergy custom function code for reading meter identity registers
+    // (serial number, factory code, hardware/software version).
+    // Structurally identical to fc=4 but uses fc=22 in the transparent frame.
+    const frame = encodeReadMeterProductRegistersRequest({
+      dataAdapterSerial: 'CE1234G567',
+      slaveAddress: 0x01, // meter slave 1
+      baseRegister: 60,
+      registerCount: 60,
+    });
+    expect(frame[7]).toBe(0x02); // outer: transparent
+    expect(frame[26]).toBe(0x01); // slave address
+    expect(frame[27]).toBe(0x16); // inner: read meter product registers (22)
+  });
+
   it('encodes WriteHoldingRegisterRequest with function code 0x06', () => {
     const frame = encodeWriteHoldingRegisterRequest({
       dataAdapterSerial: 'CE1234G567',
@@ -198,6 +214,23 @@ describe('PDU Decoding', () => {
     if (pdu.type === 'transparent') {
       expect(pdu.inverterSerial).toBeDefined();
       expect(pdu.inverterSerial.length).toBe(10);
+    }
+  });
+
+  it('decodes meter product registers response (fc=22)', () => {
+    // Meter product info uses GivEnergy custom fc=22 but the frame layout
+    // is identical to a standard read registers response.
+    const frame = buildReadHoldingResponse(0x01, 60, 2, [0x3230, 0x3633], false);
+    // Patch the transparent function code from 0x03 to 0x16 (22)
+    // Byte 27 = slave(26) + 1 = transparent fc
+    frame[27] = 0x16;
+    const pdu = decodePdu(frame);
+    expect(pdu.type).toBe('transparent');
+    if (pdu.type === 'transparent') {
+      expect(pdu.transparentFunctionCode).toBe(22);
+      expect(pdu.slaveAddress).toBe(0x01);
+      expect(pdu.registerValues).toEqual([0x3230, 0x3633]);
+      expect(pdu.error).toBe(false);
     }
   });
 

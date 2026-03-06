@@ -3,6 +3,7 @@ import {
   toMilli,
   toDeci,
   toCenti,
+  toPowerFactor,
   toUint32,
   toInt16,
   registersToString,
@@ -38,6 +39,29 @@ describe('Register Converters', () => {
       // Battery voltage (IR 50) is stored in hundredths of a volt.
       // A raw value of 5120 means 51.20V.
       expect(toCenti(5120)).toBeCloseTo(51.20);
+    });
+  });
+
+  describe('toPowerFactor', () => {
+    it('converts signed int16 ÷ 10000 for -1.0..1.0 range', () => {
+      // Verified against GivEnergy cloud CSV export.
+      // CT meter PF registers store signed int16 × 10000.
+      // GivTCP uses toMilli (÷1000), but ÷10000 matches the GivEnergy cloud CSV export.
+      expect(toPowerFactor(9979)).toBeCloseTo(0.9979, 4);
+      expect(toPowerFactor(9970)).toBeCloseTo(0.9970, 4);
+    });
+
+    it('handles negative power factor (import direction)', () => {
+      // Raw 0xDF13 = 57107 unsigned, but int16 = -8429 → PF = -0.8429
+      expect(toPowerFactor(57107)).toBeCloseTo(-0.8429, 4);
+    });
+
+    it('handles unity power factor', () => {
+      expect(toPowerFactor(10000)).toBeCloseTo(1.0, 4);
+    });
+
+    it('handles zero power factor', () => {
+      expect(toPowerFactor(0)).toBe(0);
     });
   });
 

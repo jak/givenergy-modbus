@@ -10,6 +10,7 @@
  */
 import type { TimeSlot, TimeSlotConfig } from './register-types.js';
 import type { BatterySnapshot } from './battery-snapshot.js';
+import type { MeterSnapshot } from './meter-snapshot.js';
 import type { PowerFlows } from '../power-flow.js';
 
 /** Fields shared by all inverter generations */
@@ -23,7 +24,7 @@ interface BaseSnapshot {
   // Real-time power (watts)
   /** Total solar generation: p_pv1 (IR 18) + p_pv2 (IR 20) */
   solarPower: number;
-  /** Battery power: positive = charging, negative = discharging (IR 52, signed int16) */
+  /** Battery power: positive = discharging, negative = charging (IR 52, signed int16) */
   batteryPower: number;
   /** Grid power: positive = export, negative = import (IR 30, signed int16) */
   gridPower: number;
@@ -91,6 +92,9 @@ interface BaseSnapshot {
 
   // Attached batteries
   batteries: BatterySnapshot[];
+
+  // Attached CT meters
+  meters: MeterSnapshot[];
 }
 
 export interface Gen2Snapshot extends BaseSnapshot {

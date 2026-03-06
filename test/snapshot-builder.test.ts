@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildSnapshot, buildBatterySnapshot, type RegisterCache } from '../src/snapshot-builder.js';
+import { buildSnapshot, buildBatterySnapshot, buildMeterSnapshot, type RegisterCache } from '../src/snapshot-builder.js';
 
 /**
  * Build a minimal but valid register cache for testing.
@@ -16,7 +16,7 @@ import { buildSnapshot, buildBatterySnapshot, type RegisterCache } from '../src/
  *   HR(0)   = device_type_code
  *   IR(59)  = battery_percent (SOC)
  *   IR(13)  = f_ac1 (AC frequency)
- *   IR(52)  = p_battery (signed, positive=charging)
+ *   IR(52)  = p_battery (signed, positive=discharging)
  *   IR(30)  = p_grid_out (signed, positive=export)
  *   IR(42)  = p_load_demand
  *   IR(18)  = p_pv1, IR(20) = p_pv2
@@ -507,6 +507,154 @@ describe('SnapshotBuilder', () => {
       cache.set(80, 52000);
       const bat = buildBatterySnapshot(cache);
       expect(bat!.voltage).toBeCloseTo(52.0, 1);
+    });
+  });
+
+  describe('buildMeterSnapshot', () => {
+    function makeMeterDataCache(): Map<number, number> {
+      const m = new Map<number, number>();
+      // Voltage — toDeci: 2432 → 243.2V (phase 1 only for single-phase)
+      m.set(60, 2432);  // v_phase_1
+      m.set(61, 0);     // v_phase_2
+      m.set(62, 0);     // v_phase_3
+      // Current — toCenti: 1523 → 15.23A
+      m.set(63, 1523);  // i_phase_1
+      m.set(64, 0);
+      m.set(65, 0);
+      // Active power — int16: 65236 unsigned → -300W (import)
+      m.set(68, 65236); // p_active_phase_1 (0xFED4 = -300)
+      m.set(69, 0);
+      m.set(70, 0);
+      m.set(71, 65236); // p_active_total
+      // Reactive power — int16
+      m.set(72, 100);   // 100 VAR
+      m.set(73, 0);
+      m.set(74, 0);
+      m.set(75, 100);
+      // Apparent power
+      m.set(76, 320);   // 320 VA
+      m.set(77, 0);
+      m.set(78, 0);
+      m.set(79, 320);
+      // Power factor — int16 ÷ 10000: 9979 → 0.9979
+      m.set(80, 9979);
+      m.set(81, 0);
+      m.set(82, 0);
+      m.set(83, 9979);
+      // Frequency — toCenti: 5001 → 50.01 Hz
+      m.set(84, 5001);
+      // Energy — toDeci: 50086 → 5008.6 kWh
+      m.set(85, 50086); // e_import_active
+      m.set(86, 100);   // e_import_reactive → 10.0
+      m.set(87, 200);   // e_export_active → 20.0
+      m.set(88, 50);    // e_export_reactive → 5.0
+      return m;
+    }
+
+    function makeMeterProductCache(): Map<number, number> {
+      const m = new Map<number, number>();
+      // Serial number — uint32: (31 << 16) | 32006 = 2063622
+      m.set(60, 31);    // high word
+      m.set(61, 32006); // low word
+      // Factory code — string: "GivE"
+      m.set(62, (0x47 << 8) | 0x69); // "Gi"
+      m.set(63, (0x76 << 8) | 0x45); // "vE"
+      m.set(64, 1);     // meter_type
+      m.set(65, 3);     // hardware_version
+      m.set(66, 7);     // software_version
+      return m;
+    }
+
+    it('builds a single-phase meter snapshot with correct scaling', () => {
+      const meter = buildMeterSnapshot(0x01, makeMeterDataCache(), makeMeterProductCache());
+      expect(meter).not.toBeNull();
+      expect(meter!.slaveAddress).toBe(0x01);
+      // Product info
+      expect(meter!.serialNumber).toBe(2063622);
+      expect(meter!.factoryCode).toBe('GivE');
+      expect(meter!.meterType).toBe(1);
+      expect(meter!.hardwareVersion).toBe(3);
+      expect(meter!.softwareVersion).toBe(7);
+    });
+
+    it('applies toDeci for voltage (three-phase tuple shape)', () => {
+      const meter = buildMeterSnapshot(0x01, makeMeterDataCache(), makeMeterProductCache());
+      expect(meter!.voltage[0]).toBeCloseTo(243.2, 1);
+      expect(meter!.voltage[1]).toBe(0);  // single-phase: phases 2 & 3 are 0
+      expect(meter!.voltage[2]).toBe(0);
+    });
+
+    it('applies toCenti for current', () => {
+      const meter = buildMeterSnapshot(0x01, makeMeterDataCache(), makeMeterProductCache());
+      expect(meter!.current[0]).toBeCloseTo(15.23, 2);
+    });
+
+    it('applies toInt16 for signed active power (negative = import)', () => {
+      const meter = buildMeterSnapshot(0x01, makeMeterDataCache(), makeMeterProductCache());
+      expect(meter!.activePower[0]).toBe(-300);
+      expect(meter!.activePowerTotal).toBe(-300);
+    });
+
+    it('applies toPowerFactor (÷10000) for power factor', () => {
+      // Scaling verified against GivEnergy cloud CSV export.
+      // GivTCP uses toMilli (÷1000), but ÷10000 matches the cloud CSV values.
+      const meter = buildMeterSnapshot(0x01, makeMeterDataCache(), makeMeterProductCache());
+      expect(meter!.powerFactor[0]).toBeCloseTo(0.9979, 4);
+      expect(meter!.powerFactorTotal).toBeCloseTo(0.9979, 4);
+    });
+
+    it('applies toCenti for frequency', () => {
+      const meter = buildMeterSnapshot(0x01, makeMeterDataCache(), makeMeterProductCache());
+      expect(meter!.frequency).toBeCloseTo(50.01, 2);
+    });
+
+    it('applies toDeci for energy registers (single 16-bit, overflows at 6553.5 kWh)', () => {
+      const meter = buildMeterSnapshot(0x01, makeMeterDataCache(), makeMeterProductCache());
+      expect(meter!.importActiveEnergyKwh).toBeCloseTo(5008.6, 1);
+      expect(meter!.exportActiveEnergyKwh).toBeCloseTo(20.0, 1);
+    });
+
+    it('returns null when v_phase_1 is 0 (no meter present)', () => {
+      const data = makeMeterDataCache();
+      data.set(60, 0); // v_phase_1 = 0 → no meter
+      expect(buildMeterSnapshot(0x01, data, makeMeterProductCache())).toBeNull();
+    });
+
+    it('returns null when data cache is empty', () => {
+      expect(buildMeterSnapshot(0x01, new Map(), new Map())).toBeNull();
+    });
+
+    it('handles negative power factor (import direction)', () => {
+      const data = makeMeterDataCache();
+      // 0xDF13 = 57107 unsigned → int16 = -8429 → ÷10000 = -0.8429
+      data.set(80, 57107);
+      data.set(83, 57107);
+      const meter = buildMeterSnapshot(0x01, data, makeMeterProductCache());
+      expect(meter!.powerFactor[0]).toBeCloseTo(-0.8429, 4);
+    });
+
+    it('builds with empty product cache (product info defaults to 0)', () => {
+      const meter = buildMeterSnapshot(0x01, makeMeterDataCache(), new Map());
+      expect(meter).not.toBeNull();
+      expect(meter!.serialNumber).toBe(0);
+      expect(meter!.factoryCode).toBe('\x00\x00\x00\x00');
+    });
+
+    it('integrates into inverter snapshot via meterRegisterCaches', () => {
+      const cache = makeValidCache();
+      const meterCaches = new Map([[0x01, {
+        data: makeMeterDataCache(),
+        product: makeMeterProductCache(),
+      }]]);
+      const snapshot = buildSnapshot(cache, { meterRegisterCaches: meterCaches });
+      expect(snapshot!.meters).toHaveLength(1);
+      expect(snapshot!.meters[0].serialNumber).toBe(2063622);
+      expect(snapshot!.meters[0].slaveAddress).toBe(0x01);
+    });
+
+    it('returns empty meters array when no meter caches provided', () => {
+      const snapshot = buildSnapshot(makeValidCache());
+      expect(snapshot!.meters).toHaveLength(0);
     });
   });
 });

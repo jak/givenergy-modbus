@@ -35,22 +35,14 @@ function waitForEnter(prompt) {
   });
 }
 
-const inverter = new GivEnergyInverter({ host });
+console.log(`Connecting to ${host}...`);
+const inverter = await GivEnergyInverter.connect({ host });
 
 if (debug) {
   inverter.on('debug', (msg) => console.log(`  [debug] ${msg}`));
 }
 
-console.log(`Connecting to ${host}...`);
-
-const snapshotPromise = new Promise((resolve, reject) => {
-  inverter.once('data', resolve);
-  inverter.once('lost', reject);
-});
-
-await inverter.start();
-
-const snapshot = await snapshotPromise;
+const snapshot = inverter.getData();
 console.log(`Connected. SoC=${snapshot.stateOfCharge}%`);
 
 // Step 1: set to test value

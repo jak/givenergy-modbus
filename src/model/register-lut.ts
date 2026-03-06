@@ -250,7 +250,7 @@ export const INVERTER_INPUT_REGISTERS: Record<string, RegisterDef> = {
   v_battery: { type: 'IR', address: 50 },
   /** signed int16 */
   i_battery: { type: 'IR', address: 51 },
-  /** signed int16 — positive = charging, negative = discharging */
+  /** signed int16 — positive = discharging, negative = charging */
   p_battery: { type: 'IR', address: 52 },
   v_eps_backup: { type: 'IR', address: 53 },
   f_eps_backup: { type: 'IR', address: 54 },
@@ -339,34 +339,60 @@ export const BATTERY_REGISTERS: Record<string, RegisterDef> = {
  * Function code 0x04 read. Addresses are relative to the meter's slave address.
  */
 export const METER_REGISTERS: Record<string, RegisterDef> = {
-  // ── Block 60–88 ─────────────────────────────────────────────────────────────
+  // ── Block 60–88 (fc=4, read input registers) ─────────────────────────────────
+  // Scaling verified against GivEnergy cloud CSV export (2026-03-06)
+  /** toDeci → V */
   v_phase_1: { type: 'IR', address: 60 },
   v_phase_2: { type: 'IR', address: 61 },
   v_phase_3: { type: 'IR', address: 62 },
+  /** toCenti → A */
   i_phase_1: { type: 'IR', address: 63 },
   i_phase_2: { type: 'IR', address: 64 },
   i_phase_3: { type: 'IR', address: 65 },
   i_ln: { type: 'IR', address: 66 },
   i_total: { type: 'IR', address: 67 },
+  /** int16 → W (signed: negative = import, positive = export) */
   p_active_phase_1: { type: 'IR', address: 68 },
   p_active_phase_2: { type: 'IR', address: 69 },
   p_active_phase_3: { type: 'IR', address: 70 },
   p_active_total: { type: 'IR', address: 71 },
+  /** int16 → VAR */
   p_reactive_phase_1: { type: 'IR', address: 72 },
   p_reactive_phase_2: { type: 'IR', address: 73 },
   p_reactive_phase_3: { type: 'IR', address: 74 },
   p_reactive_total: { type: 'IR', address: 75 },
+  /** int16 → VA */
   p_apparent_phase_1: { type: 'IR', address: 76 },
   p_apparent_phase_2: { type: 'IR', address: 77 },
   p_apparent_phase_3: { type: 'IR', address: 78 },
   p_apparent_total: { type: 'IR', address: 79 },
+  /** int16, ÷10000 → power factor -1.0..1.0 (GivTCP uses toMilli ÷1000, but ÷10000 matches cloud CSV) */
   pf_phase_1: { type: 'IR', address: 80 },
   pf_phase_2: { type: 'IR', address: 81 },
   pf_phase_3: { type: 'IR', address: 82 },
   pf_total: { type: 'IR', address: 83 },
+  /** toCenti → Hz */
   frequency: { type: 'IR', address: 84 },
+  /** toDeci → kWh (single 16-bit, overflows at 6553.5 kWh) */
   e_import_active: { type: 'IR', address: 85 },
   e_import_reactive: { type: 'IR', address: 86 },
   e_export_active: { type: 'IR', address: 87 },
   e_export_reactive: { type: 'IR', address: 88 },
+};
+
+/**
+ * Product info registers on the CT meter slave address space (0x01–0x08).
+ * Function code 0x16 (22) read — GivEnergy custom, NOT standard Modbus.
+ * Addresses are relative to the meter's slave address.
+ */
+export const METER_PRODUCT_REGISTERS: Record<string, RegisterDef> = {
+  /** uint32 from MR(60,61) — numeric serial, NOT a string */
+  serial_number: { type: 'IR', address: 60, length: 2 },
+  /** 2 registers × 2 bytes = 4-char factory code string (e.g. "GivE") */
+  factory_code: { type: 'IR', address: 62, length: 2 },
+  meter_type: { type: 'IR', address: 64 },
+  hardware_version: { type: 'IR', address: 65 },
+  software_version: { type: 'IR', address: 66 },
+  modbus_id: { type: 'IR', address: 67 },
+  baud_rate: { type: 'IR', address: 68 },
 };

@@ -9,6 +9,7 @@
 
 import type { InverterSnapshot } from './model/inverter-snapshot.js';
 import type { BatterySnapshot } from './model/battery-snapshot.js';
+import type { MeterSnapshot } from './model/meter-snapshot.js';
 import type { TimeSlot, TimeSlotConfig } from './model/register-types.js';
 import {
   toDeci,
@@ -16,6 +17,7 @@ import {
   toUint32,
   toInt16,
   toMilli,
+  toPowerFactor,
   registersToString,
   toTimeslot,
 } from './model/converters.js';
@@ -43,6 +45,8 @@ export interface SnapshotBuilderOptions {
   previousSnapshot?: InverterSnapshot | null;
   /** slaveAddr → IR register cache for each battery */
   batteryRegisterCaches?: Map<number, Map<number, number>>;
+  /** slaveAddr → { data: IR cache (fc=4), product: MR cache (fc=22) } for each meter */
+  meterRegisterCaches?: Map<number, { data: Map<number, number>; product: Map<number, number> }>;
   isHighVoltage?: boolean;
 }
 
@@ -63,7 +67,11 @@ export function buildSnapshot(
   cache: RegisterCache,
   options: SnapshotBuilderOptions = {},
 ): InverterSnapshot | null {
-  const { previousSnapshot = null, batteryRegisterCaches = new Map() } = options;
+  const {
+    previousSnapshot = null,
+    batteryRegisterCaches = new Map(),
+    meterRegisterCaches = new Map(),
+  } = options;
 
   // ── Sanity check ──────────────────────────────────────────────────────────
   // Reject obviously corrupt data — all register quirks manifest simultaneously.
@@ -93,7 +101,7 @@ export function buildSnapshot(
   // p_pv1: IR(18), p_pv2: IR(20) — both unsigned watts
   const solarPower = getIR(cache, 18) + getIR(cache, 20);
 
-  // p_battery: IR(52) — signed int16; positive = charging, negative = discharging
+  // p_battery: IR(52) — signed int16; positive = discharging, negative = charging
   const batteryPower = toInt16(getIR(cache, 52));
 
   // p_grid_out: IR(30) — signed int16; positive = export, negative = import
@@ -222,8 +230,10 @@ export function buildSnapshot(
   const systemTime = applyTimeFallback(reportedTime, previousTime);
 
   // ── Power flows ───────────────────────────────────────────────────────────
-  const chargeWatts = batteryPower > 0 ? batteryPower : 0;
-  const dischargeWatts = batteryPower < 0 ? -batteryPower : 0;
+  // p_battery sign convention: positive = discharging, negative = charging
+  // (matches GivTCP: Battery_power >= 0 → discharge_power)
+  const dischargeWatts = batteryPower > 0 ? batteryPower : 0;
+  const chargeWatts = batteryPower < 0 ? -batteryPower : 0;
   const exportWatts = gridPower > 0 ? gridPower : 0;
   const importWatts = gridPower < 0 ? -gridPower : 0;
 
@@ -242,6 +252,15 @@ export function buildSnapshot(
     const bat = buildBatterySnapshot(irCache);
     if (bat !== null) {
       batteries.push(bat);
+    }
+  }
+
+  // ── Meters ──────────────────────────────────────────────────────────────
+  const meters: MeterSnapshot[] = [];
+  for (const [slaveAddr, caches] of meterRegisterCaches) {
+    const meter = buildMeterSnapshot(slaveAddr, caches.data, caches.product);
+    if (meter !== null) {
+      meters.push(meter);
     }
   }
 
@@ -303,6 +322,7 @@ export function buildSnapshot(
     systemTime,
     powerFlows,
     batteries,
+    meters,
   } as InverterSnapshot;
 }
 
@@ -366,5 +386,119 @@ export function buildBatterySnapshot(
     temperatureMin,
     cycleCount,
     cellVoltages,
+  };
+}
+
+/**
+ * Build a MeterSnapshot from a CT meter's data and product register caches.
+ *
+ * Returns null if v_phase_1 is 0 (no meter present at this address).
+ * Meter slaves are 0x01–0x08; unlike batteries they can be non-contiguous.
+ *
+ * Scaling verified against GivEnergy cloud CSV export.
+ */
+export function buildMeterSnapshot(
+  slaveAddress: number,
+  dataCache: Map<number, number>,
+  productCache: Map<number, number>,
+): MeterSnapshot | null {
+  function getData(address: number): number {
+    return dataCache.get(address) ?? 0;
+  }
+  function getProduct(address: number): number {
+    return productCache.get(address) ?? 0;
+  }
+
+  // v_phase_1 at IR(60) — if 0, no meter present
+  if (getData(60) === 0) {
+    return null;
+  }
+
+  // Product info from fc=22 registers
+  const serialNumber = toUint32(getProduct(60), getProduct(61));
+  const factoryCodeRegs = [getProduct(62), getProduct(63)];
+  const factoryCode = registersToString(factoryCodeRegs);
+  const meterType = getProduct(64);
+  const hardwareVersion = getProduct(65);
+  const softwareVersion = getProduct(66);
+
+  // Voltage — toDeci → V
+  const voltage: [number, number, number] = [
+    toDeci(getData(60)),
+    toDeci(getData(61)),
+    toDeci(getData(62)),
+  ];
+
+  // Current — toCenti → A
+  const current: [number, number, number] = [
+    toCenti(getData(63)),
+    toCenti(getData(64)),
+    toCenti(getData(65)),
+  ];
+
+  // Active power — int16 → W (signed: negative = import)
+  const activePower: [number, number, number] = [
+    toInt16(getData(68)),
+    toInt16(getData(69)),
+    toInt16(getData(70)),
+  ];
+  const activePowerTotal = toInt16(getData(71));
+
+  // Reactive power — int16 → VAR
+  const reactivePower: [number, number, number] = [
+    toInt16(getData(72)),
+    toInt16(getData(73)),
+    toInt16(getData(74)),
+  ];
+  const reactivePowerTotal = toInt16(getData(75));
+
+  // Apparent power — int16 → VA
+  const apparentPower: [number, number, number] = [
+    toInt16(getData(76)),
+    toInt16(getData(77)),
+    toInt16(getData(78)),
+  ];
+  const apparentPowerTotal = toInt16(getData(79));
+
+  // Power factor — int16 ÷ 10000 → -1.0..1.0
+  // Note: GivTCP uses toMilli (÷1000), but ÷10000 matches the GivEnergy cloud CSV export
+  const powerFactor: [number, number, number] = [
+    toPowerFactor(getData(80)),
+    toPowerFactor(getData(81)),
+    toPowerFactor(getData(82)),
+  ];
+  const powerFactorTotal = toPowerFactor(getData(83));
+
+  // Frequency — toCenti → Hz
+  const frequency = toCenti(getData(84));
+
+  // Energy — toDeci → kWh (single 16-bit registers, overflow at 6553.5 kWh)
+  const importActiveEnergyKwh = toDeci(getData(85));
+  const importReactiveEnergy = toDeci(getData(86));
+  const exportActiveEnergyKwh = toDeci(getData(87));
+  const exportReactiveEnergy = toDeci(getData(88));
+
+  return {
+    slaveAddress,
+    serialNumber,
+    factoryCode,
+    meterType,
+    hardwareVersion,
+    softwareVersion,
+    voltage,
+    current,
+    activePower,
+    activePowerTotal,
+    reactivePower,
+    reactivePowerTotal,
+    apparentPower,
+    apparentPowerTotal,
+    powerFactor,
+    powerFactorTotal,
+    frequency,
+    importActiveEnergyKwh,
+    importReactiveEnergy,
+    exportActiveEnergyKwh,
+    exportReactiveEnergy,
   };
 }

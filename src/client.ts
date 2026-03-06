@@ -153,7 +153,7 @@ export class Client {
   private _dispatchResponse(pdu: TransparentPdu): void {
     // Always forward register data to the cache — even unsolicited push data is useful
     const fc = pdu.transparentFunctionCode;
-    if (!pdu.error && (fc === 3 || fc === 4) && pdu.registerValues.length > 0) {
+    if (!pdu.error && (fc === 3 || fc === 4 || fc === 22) && pdu.registerValues.length > 0) {
       this.onRegisterData(pdu.slaveAddress, fc, pdu.baseRegister, pdu.registerValues);
     }
 

@@ -22,12 +22,6 @@ if (!host) {
   console.log(`Using ${host}`);
 }
 
-const inverter = new GivEnergyInverter({ host });
-
-if (debug) {
-  inverter.on('debug', (msg) => console.log(`  [debug] ${msg}`));
-}
-
 function formatLine(s) {
   const now = new Date();
   const time = now.toTimeString().slice(0, 8);
@@ -35,6 +29,15 @@ function formatLine(s) {
   const grid = s.gridPower >= 0 ? `+${s.gridPower}` : `${s.gridPower}`;
   return `[${time}] solar=${s.solarPower}W  battery=${bat}W (${s.stateOfCharge}%)  grid=${grid}W  load=${s.loadPower}W`;
 }
+
+console.log(`Connecting to ${host}...`);
+const inverter = await GivEnergyInverter.connect({ host });
+
+if (debug) {
+  inverter.on('debug', (msg) => console.log(`  [debug] ${msg}`));
+}
+
+console.log(formatLine(inverter.getData()));
 
 inverter.on('data', (snapshot) => {
   console.log(formatLine(snapshot));
@@ -49,6 +52,3 @@ process.on('SIGINT', async () => {
   await inverter.stop();
   process.exit(0);
 });
-
-console.log(`Connecting to ${host}...`);
-await inverter.start();

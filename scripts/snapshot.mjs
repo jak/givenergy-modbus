@@ -51,8 +51,8 @@ console.log(`System time: ${s.systemTime.toISOString()}`);
 
 console.log('\n--- Real-time Power ---');
 console.log(`Solar:    ${s.solarPower} W`);
-console.log(`Battery:  ${s.batteryPower >= 0 ? '+' : ''}${s.batteryPower} W`);
-console.log(`Grid:     ${s.gridPower >= 0 ? '+' : ''}${s.gridPower} W`);
+console.log(`Battery:  ${s.batteryPower >= 0 ? '+' : ''}${s.batteryPower} W (${s.batteryPower > 0 ? 'discharging' : s.batteryPower < 0 ? 'charging' : 'idle'})`);
+console.log(`Grid:     ${s.gridPower >= 0 ? '+' : ''}${s.gridPower} W (${s.gridPower > 0 ? 'exporting' : s.gridPower < 0 ? 'importing' : 'idle'})`);
 console.log(`Load:     ${s.loadPower} W`);
 
 console.log('\n--- Battery ---');
@@ -98,9 +98,40 @@ for (const [i, slot] of s.dischargeSlots.entries()) {
   console.log(`  Slot ${i + 1}: ${slot.start} - ${slot.end}${target}`);
 }
 
+console.log('\n--- Power Flows ---');
+const pf = s.powerFlows;
+console.log(`Solar → House:   ${pf.solarToHouse} W`);
+console.log(`Solar → Battery: ${pf.solarToBattery} W`);
+console.log(`Solar → Grid:    ${pf.solarToGrid} W`);
+console.log(`Battery → House: ${pf.batteryToHouse} W`);
+console.log(`Battery → Grid:  ${pf.batteryToGrid} W`);
+console.log(`Grid → House:    ${pf.gridToHouse} W`);
+console.log(`Grid → Battery:  ${pf.gridToBattery} W`);
+
 if (s.batteries.length > 0) {
   console.log('\n--- Batteries ---');
   for (const [i, b] of s.batteries.entries()) {
     console.log(`Battery ${i + 1}: SoC=${b.stateOfCharge}% V=${b.voltage}V serial=${b.serialNumber} cycles=${b.cycleCount}`);
+    console.log(`  Charged: ${b.chargeEnergyTotalKwh} kWh  Discharged: ${b.dischargeEnergyTotalKwh} kWh`);
+    console.log(`  Temp: ${b.temperatureMin}-${b.temperatureMax} °C  Cycles: ${b.cycleCount}`);
+    console.log(`  Cells: ${b.cellVoltages.map(v => v.toFixed(3)).join(', ')} V`);
+  }
+}
+
+if (s.meters.length > 0) {
+  console.log('\n--- CT Meters ---');
+  for (const [i, m] of s.meters.entries()) {
+    const phases = m.voltage[1] !== 0 ? '3-phase' : '1-phase';
+    console.log(`Meter ${i + 1} (slave 0x${m.slaveAddress.toString(16).padStart(2, '0')}): ${phases} serial=${m.serialNumber} factory=${m.factoryCode}`);
+    console.log(`  Type: ${m.meterType}  HW: ${m.hardwareVersion}  SW: ${m.softwareVersion}`);
+    console.log(`  Voltage:  ${m.voltage.map(v => v.toFixed(1) + 'V').join(' / ')}`);
+    console.log(`  Current:  ${m.current.map(a => a.toFixed(2) + 'A').join(' / ')}`);
+    console.log(`  Active:   ${m.activePower.map(w => w + 'W').join(' / ')}  Total: ${m.activePowerTotal}W`);
+    console.log(`  Reactive: ${m.reactivePower.map(w => w + 'VAR').join(' / ')}  Total: ${m.reactivePowerTotal}VAR`);
+    console.log(`  Apparent: ${m.apparentPower.map(w => w + 'VA').join(' / ')}  Total: ${m.apparentPowerTotal}VA`);
+    console.log(`  PF:       ${m.powerFactor.map(p => p.toFixed(4)).join(' / ')}  Total: ${m.powerFactorTotal.toFixed(4)}`);
+    console.log(`  Freq:     ${m.frequency.toFixed(2)} Hz`);
+    console.log(`  Import:   ${m.importActiveEnergyKwh} kWh (active)  ${m.importReactiveEnergy} kVARh (reactive)`);
+    console.log(`  Export:   ${m.exportActiveEnergyKwh} kWh (active)  ${m.exportReactiveEnergy} kVARh (reactive)`);
   }
 }
