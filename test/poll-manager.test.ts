@@ -4,7 +4,8 @@ import type { InverterSnapshot } from '../src/model/inverter-snapshot.js';
 
 // Minimal mock snapshot
 const mockSnapshot: InverterSnapshot = {
-  serialNumber: 'SA1234B567',
+  generation: 'gen3',
+  serialNumber: 'EE1234B567',
   modelCode: 0x2003,
   solarPower: 1000,
   batteryPower: 500,
@@ -91,7 +92,7 @@ describe('PollManager', () => {
     pm.emit('data', mockSnapshot);
 
     expect(received).toHaveLength(1);
-    expect(received[0].serialNumber).toBe('SA1234B567');
+    expect(received[0].serialNumber).toBe('EE1234B567');
   });
 
   it('increments failure count when poll produces null snapshot', () => {

@@ -9,7 +9,7 @@
 
 import type { InverterSnapshot } from './model/inverter-snapshot.js';
 import type { BatterySnapshot } from './model/battery-snapshot.js';
-import type { TimeSlotConfig } from './model/register-types.js';
+import type { TimeSlot, TimeSlotConfig } from './model/register-types.js';
 import {
   toDeci,
   toCenti,
@@ -26,7 +26,13 @@ import {
   applyTimeFallback,
   applyFrequencyScaling,
 } from './validation.js';
-import { CHARGE_SLOT_REGISTERS, DISCHARGE_SLOT_REGISTERS } from './timeslot-registers.js';
+import {
+  CHARGE_SLOT_REGISTERS,
+  DISCHARGE_SLOT_REGISTERS,
+  THREE_PHASE_CHARGE_SLOT_REGISTERS,
+  THREE_PHASE_DISCHARGE_SLOT_REGISTERS,
+} from './timeslot-registers.js';
+import { detectGeneration } from './generation.js';
 
 export interface RegisterCache {
   inputRegisters: Map<number, number>;
@@ -78,6 +84,7 @@ export function buildSnapshot(
   // serial_number: HR(13-17), 5 registers, 10-char ASCII string
   const serialRegs = [13, 14, 15, 16, 17].map(a => getHR(cache, a));
   const serialNumber = registersToString(serialRegs);
+  const generation = detectGeneration(serialNumber);
 
   // device_type_code: HR(0)
   const modelCode = getHR(cache, 0);
@@ -132,18 +139,36 @@ export function buildSnapshot(
   const gridExportEnergyTotalKwh = toDeci(toUint32(getIR(cache, 21), getIR(cache, 22)));
 
   // ── Charge/discharge timeslots ───────────────────────────────────────────
-  // Gen3 inverters support up to 10 charge and 10 discharge timeslots,
-  // each with a per-slot target state of charge. Gen2 inverters only
-  // populate slots 1-2; the remaining slots read as 00:00-00:00 / SOC 0.
-  const chargeSlots: TimeSlotConfig[] = CHARGE_SLOT_REGISTERS.map(reg => ({
-    ...toTimeslot(getHR(cache, reg.start), getHR(cache, reg.end)),
-    targetStateOfCharge: getHR(cache, reg.targetStateOfCharge),
-  }));
+  // Gen3: 10 charge + 10 discharge slots, each with a per-slot target SOC.
+  // Gen2: 1 charge slot (HR 94/95), 2 discharge slots (HR 56/57, HR 44/45).
+  // three_phase: 2 charge slots (HR 1113-1116), 2 discharge slots (HR 1118-1121).
+  let chargeSlots: TimeSlot[] | TimeSlotConfig[];
+  let dischargeSlots: TimeSlot[] | TimeSlotConfig[];
 
-  const dischargeSlots: TimeSlotConfig[] = DISCHARGE_SLOT_REGISTERS.map(reg => ({
-    ...toTimeslot(getHR(cache, reg.start), getHR(cache, reg.end)),
-    targetStateOfCharge: getHR(cache, reg.targetStateOfCharge),
-  }));
+  if (generation === 'gen3') {
+    chargeSlots = CHARGE_SLOT_REGISTERS.map(reg => ({
+      ...toTimeslot(getHR(cache, reg.start), getHR(cache, reg.end)),
+      targetStateOfCharge: getHR(cache, reg.targetStateOfCharge),
+    }));
+    dischargeSlots = DISCHARGE_SLOT_REGISTERS.map(reg => ({
+      ...toTimeslot(getHR(cache, reg.start), getHR(cache, reg.end)),
+      targetStateOfCharge: getHR(cache, reg.targetStateOfCharge),
+    }));
+  } else if (generation === 'three_phase') {
+    chargeSlots = THREE_PHASE_CHARGE_SLOT_REGISTERS.map(reg =>
+      toTimeslot(getHR(cache, reg.start), getHR(cache, reg.end))
+    );
+    dischargeSlots = THREE_PHASE_DISCHARGE_SLOT_REGISTERS.map(reg =>
+      toTimeslot(getHR(cache, reg.start), getHR(cache, reg.end))
+    );
+  } else {
+    // Gen2: 1 charge slot, 2 discharge slots
+    chargeSlots = [toTimeslot(getHR(cache, 94), getHR(cache, 95))];
+    dischargeSlots = [
+      toTimeslot(getHR(cache, 56), getHR(cache, 57)),
+      toTimeslot(getHR(cache, 44), getHR(cache, 45)),
+    ];
+  }
 
   // enable_charge: HR(96)
   const enableCharge = getHR(cache, 96) !== 0;
@@ -216,6 +241,7 @@ export function buildSnapshot(
   }
 
   return {
+    generation,
     serialNumber,
     modelCode,
     solarPower,
@@ -241,7 +267,7 @@ export function buildSnapshot(
     systemTime,
     powerFlows,
     batteries,
-  };
+  } as InverterSnapshot;
 }
 
 /**

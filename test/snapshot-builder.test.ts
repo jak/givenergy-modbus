@@ -43,8 +43,8 @@ function makeValidCache(): RegisterCache {
   hr.set(30, 1);    // modbus_address: 1 (valid, < 100)
   hr.set(33, 1);    // user_code: 1 (valid, < 100)
 
-  // Serial number: HR(13-17) = 'SA1234B567'
-  const serial = 'SA1234B567';
+  // Serial number: HR(13-17) = 'EE1234B567' (EE prefix → gen3)
+  const serial = 'EE1234B567';
   for (let i = 0; i < 5; i++) {
     hr.set(13 + i, (serial.charCodeAt(i * 2) << 8) | serial.charCodeAt(i * 2 + 1));
   }
@@ -108,6 +108,26 @@ function makeValidCache(): RegisterCache {
   return { inputRegisters: ir, holdingRegisters: hr };
 }
 
+/** Gen2 cache: CE prefix serial → gen2 generation */
+function makeGen2Cache(): RegisterCache {
+  const cache = makeValidCache();
+  const serial = 'CE1234B567';
+  for (let i = 0; i < 5; i++) {
+    cache.holdingRegisters.set(13 + i, (serial.charCodeAt(i * 2) << 8) | serial.charCodeAt(i * 2 + 1));
+  }
+  return cache;
+}
+
+/** Three-phase cache: SA prefix serial → three_phase generation */
+function makeThreePhaseCache(): RegisterCache {
+  const cache = makeValidCache();
+  const serial = 'SA1234B567';
+  for (let i = 0; i < 5; i++) {
+    cache.holdingRegisters.set(13 + i, (serial.charCodeAt(i * 2) << 8) | serial.charCodeAt(i * 2 + 1));
+  }
+  return cache;
+}
+
 describe('SnapshotBuilder', () => {
   describe('buildSnapshot', () => {
     it('returns null when heatsink temperature exceeds 100°C sanity threshold', () => {
@@ -121,7 +141,7 @@ describe('SnapshotBuilder', () => {
     it('returns a snapshot with the serial number from holding registers', () => {
       const snapshot = buildSnapshot(makeValidCache());
       expect(snapshot).not.toBeNull();
-      expect(snapshot!.serialNumber).toBe('SA1234B567');
+      expect(snapshot!.serialNumber).toBe('EE1234B567');
     });
 
     it('returns a snapshot with all required fields', () => {
@@ -198,7 +218,23 @@ describe('SnapshotBuilder', () => {
       expect(snapshot!.dischargeSlots[0].end).toBe('00:00');
     });
 
-    it('reads all 10 charge and discharge slots', () => {
+    it('sets generation field from serial prefix', () => {
+      // EE prefix → gen3
+      const gen3Snapshot = buildSnapshot(makeValidCache());
+      expect(gen3Snapshot!.generation).toBe('gen3');
+
+      // SA prefix → three_phase
+      const threePhaseCache = makeThreePhaseCache();
+      const threePhaseSnapshot = buildSnapshot(threePhaseCache);
+      expect(threePhaseSnapshot!.generation).toBe('three_phase');
+
+      // CE prefix → gen2
+      const gen2Cache = makeGen2Cache();
+      const gen2Snapshot = buildSnapshot(gen2Cache);
+      expect(gen2Snapshot!.generation).toBe('gen2');
+    });
+
+    it('reads all 10 charge and discharge slots for Gen3', () => {
       // Gen3 inverters have 10 timeslots. Unset slots read as 00:00-00:00 / SOC 0.
       const snapshot = buildSnapshot(makeValidCache());
       expect(snapshot!.chargeSlots).toHaveLength(10);
@@ -209,7 +245,9 @@ describe('SnapshotBuilder', () => {
       for (let i = 1; i < 10; i++) {
         expect(snapshot!.chargeSlots[i].start).toBe('00:00');
         expect(snapshot!.chargeSlots[i].end).toBe('00:00');
-        expect(snapshot!.chargeSlots[i].targetStateOfCharge).toBe(0);
+        // targetStateOfCharge is present on gen3 slots
+        const slot = snapshot!.chargeSlots[i] as { targetStateOfCharge: number };
+        expect(slot.targetStateOfCharge).toBe(0);
       }
     });
 
@@ -220,9 +258,46 @@ describe('SnapshotBuilder', () => {
       cache.holdingRegisters.set(244, 430);  // 04:30
       cache.holdingRegisters.set(245, 80);   // 80% target SOC
       const snapshot = buildSnapshot(cache);
+      const slot2 = snapshot!.chargeSlots[1] as { start: string; end: string; targetStateOfCharge: number };
+      expect(slot2.start).toBe('01:00');
+      expect(slot2.end).toBe('04:30');
+      expect(slot2.targetStateOfCharge).toBe(80);
+    });
+
+    it('Gen2: returns 1 charge slot and 2 discharge slots without targetStateOfCharge', () => {
+      const cache = makeGen2Cache();
+      cache.holdingRegisters.set(94, 0);    // charge slot 1 start: 00:00
+      cache.holdingRegisters.set(95, 430);  // charge slot 1 end: 04:30
+      cache.holdingRegisters.set(56, 100);  // discharge slot 1 start: 01:00
+      cache.holdingRegisters.set(57, 200);  // discharge slot 1 end: 02:00
+      cache.holdingRegisters.set(44, 300);  // discharge slot 2 start: 03:00
+      cache.holdingRegisters.set(45, 400);  // discharge slot 2 end: 04:00
+      const snapshot = buildSnapshot(cache);
+      expect(snapshot!.generation).toBe('gen2');
+      expect(snapshot!.chargeSlots).toHaveLength(1);
+      expect(snapshot!.dischargeSlots).toHaveLength(2);
+      expect(snapshot!.chargeSlots[0].start).toBe('00:00');
+      expect(snapshot!.chargeSlots[0].end).toBe('04:30');
+      expect('targetStateOfCharge' in snapshot!.chargeSlots[0]).toBe(false);
+    });
+
+    it('three_phase: returns 2 charge slots and 2 discharge slots from three-phase registers', () => {
+      const cache = makeThreePhaseCache();
+      cache.holdingRegisters.set(1113, 0);    // charge slot 1 start: 00:00
+      cache.holdingRegisters.set(1114, 430);  // charge slot 1 end: 04:30
+      cache.holdingRegisters.set(1115, 100);  // charge slot 2 start: 01:00
+      cache.holdingRegisters.set(1116, 200);  // charge slot 2 end: 02:00
+      cache.holdingRegisters.set(1118, 0);    // discharge slot 1 start
+      cache.holdingRegisters.set(1119, 0);    // discharge slot 1 end
+      cache.holdingRegisters.set(1120, 0);    // discharge slot 2 start
+      cache.holdingRegisters.set(1121, 0);    // discharge slot 2 end
+      const snapshot = buildSnapshot(cache);
+      expect(snapshot!.generation).toBe('three_phase');
+      expect(snapshot!.chargeSlots).toHaveLength(2);
+      expect(snapshot!.dischargeSlots).toHaveLength(2);
+      expect(snapshot!.chargeSlots[0].end).toBe('04:30');
       expect(snapshot!.chargeSlots[1].start).toBe('01:00');
-      expect(snapshot!.chargeSlots[1].end).toBe('04:30');
-      expect(snapshot!.chargeSlots[1].targetStateOfCharge).toBe(80);
+      expect('targetStateOfCharge' in snapshot!.chargeSlots[0]).toBe(false);
     });
 
     it('reads enable_charge flag correctly', () => {

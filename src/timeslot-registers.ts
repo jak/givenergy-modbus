@@ -44,3 +44,20 @@ export const DISCHARGE_SLOT_REGISTERS: TimeslotRegisters[] = [
   { start: 294, end: 295, targetStateOfCharge: 296 }, // Slot 9
   { start: 297, end: 298, targetStateOfCharge: 299 }, // Slot 10
 ];
+
+export interface SimpleTimeslotRegisters {
+  start: number;
+  end: number;
+}
+
+/** Three-phase charge slot registers (2 slots only, no per-slot SOC targets) */
+export const THREE_PHASE_CHARGE_SLOT_REGISTERS: SimpleTimeslotRegisters[] = [
+  { start: 1113, end: 1114 }, // Slot 1
+  { start: 1115, end: 1116 }, // Slot 2
+];
+
+/** Three-phase discharge slot registers (2 slots only) */
+export const THREE_PHASE_DISCHARGE_SLOT_REGISTERS: SimpleTimeslotRegisters[] = [
+  { start: 1118, end: 1119 }, // Slot 1
+  { start: 1120, end: 1121 }, // Slot 2
+];
