@@ -60,22 +60,26 @@ export class Gen2Inverter extends GivEnergyInverter {
   }
 
   async setChargeRate(watts: number): Promise<void> {
+    if (watts < 0) throw new RangeError(`charge rate must be >= 0, got ${watts}`);
     const percent = Math.round(Math.min(watts / 100, 50));
-    await this.writeRegister(111, Math.max(0, Math.min(percent, 50)));
+    await this.writeRegister(111, Math.min(percent, 50));
   }
 
   async setChargeRatePercent(percent: number): Promise<void> {
     validateRatePercent(percent);
+    // BATTERY_CHARGE_LIMIT_AC — also used by Gen1/Gen2
     await this.writeRegister(313, percent);
   }
 
   async setDischargeRate(watts: number): Promise<void> {
+    if (watts < 0) throw new RangeError(`discharge rate must be >= 0, got ${watts}`);
     const percent = Math.round(Math.min(watts / 100, 50));
-    await this.writeRegister(112, Math.max(0, Math.min(percent, 50)));
+    await this.writeRegister(112, Math.min(percent, 50));
   }
 
   async setDischargeRatePercent(percent: number): Promise<void> {
     validateRatePercent(percent);
+    // BATTERY_DISCHARGE_LIMIT_AC — also used by Gen1/Gen2
     await this.writeRegister(314, percent);
   }
 

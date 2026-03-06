@@ -6,6 +6,7 @@ import {
   validateRatePercent,
   timeToInt,
 } from '../inverter.js';
+import { THREE_PHASE_CHARGE_SLOT_REGISTERS, THREE_PHASE_DISCHARGE_SLOT_REGISTERS } from '../timeslot-registers.js';
 
 export class ThreePhaseInverter extends GivEnergyInverter {
   async setChargeScheduleEnabled(enabled: boolean): Promise<void> {
@@ -24,17 +25,12 @@ export class ThreePhaseInverter extends GivEnergyInverter {
   }
 
   async setChargeSlot(slot: number, config: TimeSlotInput): Promise<void> {
+    if (slot < 1 || slot > 2) throw new RangeError(`Three-phase inverter supports charge slots 1-2, got ${slot}`);
     validateTime(config.start);
     validateTime(config.end);
-    if (slot === 1) {
-      await this.writeRegister(1113, timeToInt(config.start));
-      await this.writeRegister(1114, timeToInt(config.end));
-    } else if (slot === 2) {
-      await this.writeRegister(1115, timeToInt(config.start));
-      await this.writeRegister(1116, timeToInt(config.end));
-    } else {
-      throw new RangeError(`Three-phase inverter supports charge slots 1-2, got ${slot}`);
-    }
+    const regs = THREE_PHASE_CHARGE_SLOT_REGISTERS[slot - 1];
+    await this.writeRegister(regs.start, timeToInt(config.start));
+    await this.writeRegister(regs.end, timeToInt(config.end));
     // targetStateOfCharge silently ignored on 3ph (global target via setChargeTarget)
   }
 
@@ -45,17 +41,12 @@ export class ThreePhaseInverter extends GivEnergyInverter {
   }
 
   async setDischargeSlot(slot: number, config: TimeSlotInput): Promise<void> {
+    if (slot < 1 || slot > 2) throw new RangeError(`Three-phase inverter supports discharge slots 1-2, got ${slot}`);
     validateTime(config.start);
     validateTime(config.end);
-    if (slot === 1) {
-      await this.writeRegister(1118, timeToInt(config.start));
-      await this.writeRegister(1119, timeToInt(config.end));
-    } else if (slot === 2) {
-      await this.writeRegister(1120, timeToInt(config.start));
-      await this.writeRegister(1121, timeToInt(config.end));
-    } else {
-      throw new RangeError(`Three-phase inverter supports discharge slots 1-2, got ${slot}`);
-    }
+    const regs = THREE_PHASE_DISCHARGE_SLOT_REGISTERS[slot - 1];
+    await this.writeRegister(regs.start, timeToInt(config.start));
+    await this.writeRegister(regs.end, timeToInt(config.end));
   }
 
   async setDischargeSlots(configs: TimeSlotInput[]): Promise<void> {
@@ -65,8 +56,9 @@ export class ThreePhaseInverter extends GivEnergyInverter {
   }
 
   async setChargeRate(watts: number): Promise<void> {
+    if (watts < 0) throw new RangeError(`charge rate must be >= 0, got ${watts}`);
     const percent = Math.round(Math.min(watts / 50, 100));
-    await this.writeRegister(1110, Math.max(0, Math.min(percent, 100)));
+    await this.writeRegister(1110, Math.min(percent, 100));
   }
 
   async setChargeRatePercent(percent: number): Promise<void> {
@@ -75,8 +67,9 @@ export class ThreePhaseInverter extends GivEnergyInverter {
   }
 
   async setDischargeRate(watts: number): Promise<void> {
+    if (watts < 0) throw new RangeError(`discharge rate must be >= 0, got ${watts}`);
     const percent = Math.round(Math.min(watts / 50, 100));
-    await this.writeRegister(1108, Math.max(0, Math.min(percent, 100)));
+    await this.writeRegister(1108, Math.min(percent, 100));
   }
 
   async setDischargeRatePercent(percent: number): Promise<void> {
