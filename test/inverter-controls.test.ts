@@ -487,6 +487,12 @@ describe('ThreePhaseInverter controls', () => {
     await expect((inv as any).setChargeSlot(3, { start: '01:00', end: '02:00' })).rejects.toThrow(RangeError);
   }, 20000);
 
+  it('rejects discharge slot > 2', async () => {
+    await expect(
+      inv.setDischargeSlot(3, { start: '01:00', end: '02:00' }),
+    ).rejects.toThrow(RangeError);
+  }, 20000);
+
   it('setDischargeSlot(1, ...) writes HR(1118) and HR(1119)', async () => {
     mock.writtenRegisters.length = 0;
     await (inv as any).setDischargeSlot(1, { start: '05:00', end: '06:00' });
