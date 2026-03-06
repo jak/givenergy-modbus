@@ -22,23 +22,27 @@ if (!host) {
   console.log(`Using ${host}`);
 }
 
-const inverter = new GivEnergyInverter({ host });
+// connect() detects generation and returns the appropriate inverter subclass
+const inverter = await GivEnergyInverter.connect({ host });
 
 if (debug) {
   inverter.on('debug', (msg) => console.log(`  [debug] ${msg}`));
 }
 
-// Register listener BEFORE start() to avoid missing the first 'data' event
-const snapshotPromise = new Promise((resolve, reject) => {
-  inverter.once('data', resolve);
-  inverter.once('lost', reject);
-});
-
-await inverter.start();
-
-const s = await snapshotPromise;
+// connect() waits for the first complete poll, so getData() is immediately available
+const s = inverter.getData();
 
 await inverter.stop();
+
+// Generation determines slot counts and available features
+const GENERATION_LABELS = {
+  gen2: 'Gen2 (single-phase, 1 charge slot / 2 discharge slots)',
+  gen3: 'Gen3 (single-phase, 10 charge slots / 10 discharge slots)',
+  three_phase: 'Three-phase (2 charge slots / 2 discharge slots)',
+};
+
+console.log('\n=== GivEnergy Inverter Snapshot ===');
+console.log(`Generation:  ${GENERATION_LABELS[s.generation] ?? s.generation}`);
 
 console.log('\n--- Identity ---');
 console.log(`Serial:      ${s.serialNumber}`);
@@ -69,11 +73,21 @@ console.log(`Grid import:        ${s.gridImportEnergyTotalKwh} kWh`);
 console.log(`Grid export:        ${s.gridExportEnergyTotalKwh} kWh`);
 
 console.log('\n--- Config ---');
-console.log(`Charge slot 1:    ${s.chargeSlot1.start} - ${s.chargeSlot1.end}`);
-console.log(`Discharge slot 1: ${s.dischargeSlot1.start} - ${s.dischargeSlot1.end}`);
 console.log(`Enable charge:    ${s.enableCharge}`);
 console.log(`Enable discharge: ${s.enableDischarge}`);
 console.log(`Charge target:    ${s.chargeTargetStateOfCharge}%`);
+
+console.log('\n--- Charge Slots ---');
+for (const [i, slot] of s.chargeSlots.entries()) {
+  const target = 'targetStateOfCharge' in slot ? ` → ${slot.targetStateOfCharge}%` : '';
+  console.log(`  Slot ${i + 1}: ${slot.start} - ${slot.end}${target}`);
+}
+
+console.log('\n--- Discharge Slots ---');
+for (const [i, slot] of s.dischargeSlots.entries()) {
+  const target = 'targetStateOfCharge' in slot ? ` → ${slot.targetStateOfCharge}%` : '';
+  console.log(`  Slot ${i + 1}: ${slot.start} - ${slot.end}${target}`);
+}
 
 if (s.batteries.length > 0) {
   console.log('\n--- Batteries ---');
