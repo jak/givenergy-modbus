@@ -4,7 +4,7 @@
  * Assembled by buildSnapshot() in snapshot-builder.ts from raw Modbus register caches.
  * All GivEnergy protocol quirks (validation, fallbacks, scaling) have been applied.
  */
-import type { TimeSlot } from './register-types.js';
+import type { TimeSlotConfig } from './register-types.js';
 import type { BatterySnapshot } from './battery-snapshot.js';
 import type { PowerFlows } from '../power-flow.js';
 
@@ -55,16 +55,16 @@ export interface InverterSnapshot {
   /** Total grid export energy in kWh — uint32 IR(21,22) via toDeci */
   gridExportEnergyTotalKwh: number;
 
-  // Charge configuration
-  /** Charge time slot 1 from HR(94-95) */
-  chargeSlot1: TimeSlot;
-  /** Discharge time slot 1 from HR(56-57) */
-  dischargeSlot1: TimeSlot;
+  // Charge/discharge timeslots (up to 10 per Gen3 inverters)
+  /** Charge timeslots with per-slot target state of charge */
+  chargeSlots: TimeSlotConfig[];
+  /** Discharge timeslots with per-slot target state of charge */
+  dischargeSlots: TimeSlotConfig[];
   /** Enable charge flag from HR(96) */
   enableCharge: boolean;
   /** Enable discharge flag from HR(59) */
   enableDischarge: boolean;
-  /** Charge target SOC % from HR(116) */
+  /** Legacy charge target SOC % from HR(116) — applies to slot 1 on Gen2 */
   chargeTargetStateOfCharge: number;
 
   // Inverter time (with year-2000 fallback applied)

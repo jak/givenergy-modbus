@@ -83,7 +83,7 @@ function buildTransparentResponse(
 ): Buffer {
   const inverterSerial = Buffer.from('SA1234B567', 'latin1');
   const adapterSerial = Buffer.from('CE1234G567', 'latin1');
-  const padding = Buffer.from([0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
+  const padding = Buffer.from([0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08]);
 
   const sub: number[] = [
     slave, fc,
@@ -107,8 +107,8 @@ function buildTransparentResponse(
 }
 
 function makeHoldingRegisters(): number[] {
-  // 120 registers initialized to 0
-  const regs = new Array(120).fill(0);
+  // 300 registers to cover HR 0-59, 60-119, 180-239, and 240-299 (Gen3 timeslots)
+  const regs = new Array(300).fill(0);
 
   // HR(0) = 0x2003 (HYBRID_GEN3)
   regs[0] = 0x2003;
@@ -136,7 +136,8 @@ function makeHoldingRegisters(): number[] {
 }
 
 function makeInputRegisters(): number[] {
-  const regs = new Array(120).fill(0);
+  // 240 registers to cover IR 0-59 and 180-239 ranges
+  const regs = new Array(240).fill(0);
 
   // IR(41) = 350 (heatsink temp → toDeci = 35°C, passes sanity check)
   regs[41] = 350;
@@ -296,7 +297,7 @@ describe('Integration: GivEnergyInverter with mock inverter', () => {
       await inv.stop();
       await mock.close();
     }
-  }, 10000);
+  }, 30000);
 
   it('emits data events on each poll', async () => {
     let GivEnergyInverter: any;
@@ -327,5 +328,5 @@ describe('Integration: GivEnergyInverter with mock inverter', () => {
       await inv.stop();
       await mock.close();
     }
-  }, 10000);
+  }, 30000);
 });

@@ -1,8 +1,8 @@
 import { EventEmitter } from 'events';
 import { PollManager, type PollManagerOptions } from './poll-manager.js';
 import { encodeWriteHoldingRegisterRequest } from './pdu/encode.js';
+import { CHARGE_SLOT_REGISTERS, DISCHARGE_SLOT_REGISTERS } from './timeslot-registers.js';
 import type { InverterSnapshot } from './model/inverter-snapshot.js';
-import type { TimeSlot } from './model/register-types.js';
 
 export interface GivEnergyInverterOptions {
   host: string;
@@ -25,6 +25,7 @@ export class GivEnergyInverter extends EventEmitter {
     // Forward events from poll manager
     this.pollManager.on('data', (snapshot: InverterSnapshot) => this.emit('data', snapshot));
     this.pollManager.on('lost', (err: Error) => this.emit('lost', err));
+    this.pollManager.on('debug', (msg: string) => this.emit('debug', msg));
   }
 
   getData(): InverterSnapshot {
@@ -42,32 +43,39 @@ export class GivEnergyInverter extends EventEmitter {
   /**
    * Set a charge time slot.
    *
-   * @param slot - 1 or 2 (charge slot number)
+   * @param slot - 1 to 10 (charge slot number)
    * @param config - start/end times in "HH:MM" format, optional target SOC
    */
-  async setChargeSlot(slot: 1 | 2, config: { start: string; end: string; targetStateOfCharge?: number }): Promise<void> {
-    // Charge slot 1: HR(94)=start, HR(95)=end
-    // Charge slot 2: HR(31)=start, HR(32)=end
-    const [startReg, endReg] = slot === 1 ? [94, 95] : [31, 32];
-    await this._writeRegister(startReg, timeToInt(config.start));
-    await this._writeRegister(endReg, timeToInt(config.end));
+  async setChargeSlot(slot: number, config: { start: string; end: string; targetStateOfCharge?: number }): Promise<void> {
+    const regs = CHARGE_SLOT_REGISTERS[slot - 1];
+    if (!regs) throw new RangeError(`charge slot must be 1-10, got ${slot}`);
+    validateTime(config.start);
+    validateTime(config.end);
+    await this.writeRegister(regs.start, timeToInt(config.start));
+    await this.writeRegister(regs.end, timeToInt(config.end));
     if (config.targetStateOfCharge !== undefined) {
-      await this._writeRegister(116, config.targetStateOfCharge);
+      validateStateOfCharge(config.targetStateOfCharge);
+      await this.writeRegister(regs.targetStateOfCharge, config.targetStateOfCharge);
     }
   }
 
   /**
    * Set a discharge time slot.
    *
-   * @param slot - 1 or 2 (discharge slot number)
-   * @param config - start/end times in "HH:MM" format
+   * @param slot - 1 to 10 (discharge slot number)
+   * @param config - start/end times in "HH:MM" format, optional target SOC
    */
-  async setDischargeSlot(slot: 1 | 2, config: { start: string; end: string }): Promise<void> {
-    // Discharge slot 1: HR(56)=start, HR(57)=end
-    // Discharge slot 2: HR(44)=start, HR(45)=end
-    const [startReg, endReg] = slot === 1 ? [56, 57] : [44, 45];
-    await this._writeRegister(startReg, timeToInt(config.start));
-    await this._writeRegister(endReg, timeToInt(config.end));
+  async setDischargeSlot(slot: number, config: { start: string; end: string; targetStateOfCharge?: number }): Promise<void> {
+    const regs = DISCHARGE_SLOT_REGISTERS[slot - 1];
+    if (!regs) throw new RangeError(`discharge slot must be 1-10, got ${slot}`);
+    validateTime(config.start);
+    validateTime(config.end);
+    await this.writeRegister(regs.start, timeToInt(config.start));
+    await this.writeRegister(regs.end, timeToInt(config.end));
+    if (config.targetStateOfCharge !== undefined) {
+      validateStateOfCharge(config.targetStateOfCharge);
+      await this.writeRegister(regs.targetStateOfCharge, config.targetStateOfCharge);
+    }
   }
 
   /**
@@ -81,20 +89,48 @@ export class GivEnergyInverter extends EventEmitter {
       grid_charge: 4,
       battery_discharge: 0,
     };
-    await this._writeRegister(27, modeMap[mode]);
+    await this.writeRegister(27, modeMap[mode]);
   }
 
   /**
-   * Set the target state of charge for charging.
+   * Set the legacy target state of charge for charging (HR 116).
+   * On Gen2 inverters this is the only charge target. On Gen3, prefer
+   * per-slot targets via setChargeSlot().
    *
-   * @param percent - 0-100
+   * @param percent - 4-100
    */
   async setTargetStateOfCharge(percent: number): Promise<void> {
-    await this._writeRegister(116, Math.max(0, Math.min(100, percent)));
+    validateStateOfCharge(percent);
+    await this.writeRegister(116, percent);
   }
 
-  private async _writeRegister(register: number, value: number): Promise<void> {
-    // Access the client through the poll manager
+  /**
+   * Enable or disable charging. Controls HR(96).
+   */
+  async setEnableCharge(enabled: boolean): Promise<void> {
+    await this.writeRegister(96, enabled ? 1 : 0);
+  }
+
+  /**
+   * Enable or disable discharging. Controls HR(59).
+   */
+  async setEnableDischarge(enabled: boolean): Promise<void> {
+    await this.writeRegister(59, enabled ? 1 : 0);
+  }
+
+  /**
+   * Write a raw holding register value. Bypasses all validation.
+   * Prefer the typed API methods (setChargeSlot, setMode, etc.) which
+   * validate inputs and use the correct register addresses.
+   *
+   * @param register - holding register address
+   * @param value - uint16 value to write
+   */
+  async unsafe_writeRegister(register: number, value: number): Promise<void> {
+    return this.writeRegister(register, value);
+  }
+
+  private async writeRegister(register: number, value: number): Promise<void> {
     const client = (this.pollManager as any).client;
     const frame = encodeWriteHoldingRegisterRequest({
       dataAdapterSerial: (this.pollManager as any).dataAdapterSerial ?? '**********',
@@ -110,4 +146,18 @@ export class GivEnergyInverter extends EventEmitter {
 function timeToInt(time: string): number {
   const [h, m] = time.split(':').map(Number);
   return h * 100 + m;
+}
+
+function validateTime(time: string): void {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(time);
+  if (!match) throw new RangeError(`invalid time format "${time}", expected "HH:MM"`);
+  const h = Number(match[1]);
+  const m = Number(match[2]);
+  if (h > 23 || m > 59) throw new RangeError(`invalid time "${time}", hour must be 0-23 and minute 0-59`);
+}
+
+function validateStateOfCharge(percent: number): void {
+  if (!Number.isInteger(percent) || percent < 4 || percent > 100) {
+    throw new RangeError(`state of charge must be an integer 4-100, got ${percent}`);
+  }
 }

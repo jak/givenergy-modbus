@@ -9,10 +9,14 @@ export interface BatterySnapshot {
   serialNumber: string;
   /** State of charge 0-100% from IR(100) */
   stateOfCharge: number;
-  /** Voltage in V — from cap_remaining uint32 IR(88-89) via toCenti */
+  /** Voltage in V — sum of all cell voltages from IR(80) via toMilli */
   voltage: number;
   /** Current in A */
   current: number;
+  /** Battery discharge energy total in kWh — from IR(105) via toDeci */
+  dischargeEnergyTotalKwh: number;
+  /** Battery charge energy total in kWh — from IR(106) via toDeci */
+  chargeEnergyTotalKwh: number;
   /** Maximum cell temperature in °C — from IR(103) via toDeci */
   temperatureMax: number;
   /** Minimum cell temperature in °C — from IR(104) via toDeci */

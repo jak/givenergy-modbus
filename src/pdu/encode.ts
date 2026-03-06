@@ -55,24 +55,21 @@ function buildTransparentFrame(
   bodyEnc.addUint8(0x01); // uid
   bodyEnc.addUint8(0x02); // fid: transparent
   bodyEnc.addString(dataAdapterSerial, 10);
-  // 8-byte padding specific to GivEnergy transparent frames
+  // 8-byte padding: 64-bit big-endian uint with value 0x08
+  bodyEnc.addUint8(0x00);
+  bodyEnc.addUint8(0x00);
+  bodyEnc.addUint8(0x00);
+  bodyEnc.addUint8(0x00);
+  bodyEnc.addUint8(0x00);
+  bodyEnc.addUint8(0x00);
+  bodyEnc.addUint8(0x00);
   bodyEnc.addUint8(0x08);
-  bodyEnc.addUint8(0x00);
-  bodyEnc.addUint8(0x00);
-  bodyEnc.addUint8(0x00);
-  bodyEnc.addUint8(0x00);
-  bodyEnc.addUint8(0x00);
-  bodyEnc.addUint8(0x00);
-  bodyEnc.addUint8(0x00);
   bodyEnc.addUint8(slaveAddress);
   bodyEnc.addUint8(innerFc);
   for (const byte of innerPayload) {
     bodyEnc.addUint8(byte);
   }
   bodyEnc.addUint16(swappedCrc);
-  // GivEnergy quirk: transparent frames include a trailing null byte.
-  // This makes the frame length 1 byte larger than the strict minimum.
-  bodyEnc.addUint8(0x00);
 
   const body = bodyEnc.payload;
 

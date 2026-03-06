@@ -66,7 +66,7 @@ function makeValidCache(): RegisterCache {
   ir.set(20, 0);    // p_pv2: 0W
 
   // Voltage/current
-  ir.set(50, 4800); // v_battery: 4800 raw → toDeci = 480V... use raw, converter handles
+  ir.set(50, 4800); // v_battery: 4800 raw → toCenti = 48.0V
   ir.set(51, 0);    // i_battery: 0A
   ir.set(5, 2320);  // v_ac1: 2320 raw → toDeci = 232V
 
@@ -82,7 +82,8 @@ function makeValidCache(): RegisterCache {
   hr.set(116, 100); // charge_target_soc: 100%
 
   // System time: HR(35-40) = 2024-06-15 14:30:00
-  hr.set(35, 2024); // year
+  // GivEnergy stores year as 2-digit offset from 2000 (e.g. 24 = 2024)
+  hr.set(35, 24); // year: 2000 + 24 = 2024
   hr.set(36, 6);    // month
   hr.set(37, 15);   // day
   hr.set(38, 14);   // hour
@@ -134,8 +135,9 @@ describe('SnapshotBuilder', () => {
       expect(typeof snapshot!.gridFrequency).toBe('number');
       expect(typeof snapshot!.inverterHeatsinkTemp).toBe('number');
       expect(snapshot!.systemTime).toBeInstanceOf(Date);
-      expect(snapshot!.chargeSlot1).toHaveProperty('start');
-      expect(snapshot!.chargeSlot1).toHaveProperty('end');
+      expect(snapshot!.chargeSlots).toBeInstanceOf(Array);
+      expect(snapshot!.chargeSlots[0]).toHaveProperty('start');
+      expect(snapshot!.chargeSlots[0]).toHaveProperty('end');
       expect(snapshot!.batteries).toBeInstanceOf(Array);
       expect(snapshot!.powerFlows).toBeDefined();
     });
@@ -186,14 +188,41 @@ describe('SnapshotBuilder', () => {
 
     it('reads charge slot 1 correctly', () => {
       const snapshot = buildSnapshot(makeValidCache());
-      expect(snapshot!.chargeSlot1.start).toBe('00:00');
-      expect(snapshot!.chargeSlot1.end).toBe('04:30');
+      expect(snapshot!.chargeSlots[0].start).toBe('00:00');
+      expect(snapshot!.chargeSlots[0].end).toBe('04:30');
     });
 
     it('reads discharge slot 1 correctly', () => {
       const snapshot = buildSnapshot(makeValidCache());
-      expect(snapshot!.dischargeSlot1.start).toBe('00:00');
-      expect(snapshot!.dischargeSlot1.end).toBe('00:00');
+      expect(snapshot!.dischargeSlots[0].start).toBe('00:00');
+      expect(snapshot!.dischargeSlots[0].end).toBe('00:00');
+    });
+
+    it('reads all 10 charge and discharge slots', () => {
+      // Gen3 inverters have 10 timeslots. Unset slots read as 00:00-00:00 / SOC 0.
+      const snapshot = buildSnapshot(makeValidCache());
+      expect(snapshot!.chargeSlots).toHaveLength(10);
+      expect(snapshot!.dischargeSlots).toHaveLength(10);
+      // Slot 1 was set in the cache
+      expect(snapshot!.chargeSlots[0].end).toBe('04:30');
+      // Slots 2-10 default to 00:00
+      for (let i = 1; i < 10; i++) {
+        expect(snapshot!.chargeSlots[i].start).toBe('00:00');
+        expect(snapshot!.chargeSlots[i].end).toBe('00:00');
+        expect(snapshot!.chargeSlots[i].targetStateOfCharge).toBe(0);
+      }
+    });
+
+    it('reads per-slot target state of charge for Gen3 timeslots', () => {
+      const cache = makeValidCache();
+      // Set Gen3 charge slot 2: HR(243)=start, HR(244)=end, HR(245)=target SOC
+      cache.holdingRegisters.set(243, 100);  // 01:00
+      cache.holdingRegisters.set(244, 430);  // 04:30
+      cache.holdingRegisters.set(245, 80);   // 80% target SOC
+      const snapshot = buildSnapshot(cache);
+      expect(snapshot!.chargeSlots[1].start).toBe('01:00');
+      expect(snapshot!.chargeSlots[1].end).toBe('04:30');
+      expect(snapshot!.chargeSlots[1].targetStateOfCharge).toBe(80);
     });
 
     it('reads enable_charge flag correctly', () => {
@@ -227,7 +256,7 @@ describe('SnapshotBuilder', () => {
 
     it('falls back to previous system time when year is 2000', () => {
       const cache = makeValidCache();
-      cache.holdingRegisters.set(35, 2000); // year 2000 = RTC not synced
+      cache.holdingRegisters.set(35, 0); // year 2000 + 0 = 2000 = RTC not synced
       const prevTime = new Date('2024-01-01T12:00:00');
       const prevSnapshot = { systemTime: prevTime } as any;
       const snapshot = buildSnapshot(cache, { previousSnapshot: prevSnapshot });
@@ -288,14 +317,11 @@ describe('SnapshotBuilder', () => {
       for (let i = 0; i < 16; i++) {
         m.set(60 + i, 3250);
       }
-      // cap_remaining: IR(88, 89) as uint32
-      m.set(88, 0);
-      m.set(89, 9500); // 9500 → toCenti = 95.0V (voltage from cap_remaining)
-      // v_out: IR(82, 83) as uint32
-      m.set(82, 0);
-      m.set(83, 4800);
-      // i_battery current (not directly in battery regs, but voltage from v_cells_sum)
-      m.set(80, 0);
+      // v_cells_sum: IR(80) → toMilli → V (sum of all cell voltages)
+      m.set(80, 52000); // 52000 → toMilli = 52.0V
+      // Energy totals
+      m.set(105, 500); // e_battery_discharge_total → toDeci = 50.0 kWh
+      m.set(106, 800); // e_battery_charge_total → toDeci = 80.0 kWh
       return m;
     }
 
@@ -333,13 +359,12 @@ describe('SnapshotBuilder', () => {
       expect(buildBatterySnapshot(cache)).toBeNull();
     });
 
-    it('computes voltage from cap_remaining as uint32 via toCenti', () => {
+    it('computes voltage from v_cells_sum via toMilli', () => {
       const cache = makeBatteryCache();
-      // cap_remaining: IR(88) high=0, IR(89) low=9500 → toUint32(0,9500) = 9500 → toCenti = 95.0
-      cache.set(88, 0);
-      cache.set(89, 9500);
+      // v_cells_sum: IR(80) = 52000 → toMilli = 52.0V
+      cache.set(80, 52000);
       const bat = buildBatterySnapshot(cache);
-      expect(bat!.voltage).toBeCloseTo(95.0, 1);
+      expect(bat!.voltage).toBeCloseTo(52.0, 1);
     });
   });
 });

@@ -12,7 +12,11 @@
     "build": "tsc",
     "test": "vitest run",
     "test:watch": "vitest",
-    "prepublishOnly": "npm test && npm run build"
+    "prepublishOnly": "npm test && npm run build",
+    "script:discover": "node scripts/discover.mjs",
+    "script:snapshot": "node scripts/snapshot.mjs",
+    "script:monitor": "node scripts/monitor.mjs",
+    "script:write-test": "node scripts/write-test.mjs"
   },
   "keywords": [
     "givenergy",

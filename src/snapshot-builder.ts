@@ -9,6 +9,7 @@
 
 import type { InverterSnapshot } from './model/inverter-snapshot.js';
 import type { BatterySnapshot } from './model/battery-snapshot.js';
+import type { TimeSlotConfig } from './model/register-types.js';
 import {
   toDeci,
   toCenti,
@@ -24,8 +25,8 @@ import {
   applyStateOfChargeFallback,
   applyTimeFallback,
   applyFrequencyScaling,
-  applyEnergyRegisterFallback,
 } from './validation.js';
+import { CHARGE_SLOT_REGISTERS, DISCHARGE_SLOT_REGISTERS } from './timeslot-registers.js';
 
 export interface RegisterCache {
   inputRegisters: Map<number, number>;
@@ -102,11 +103,11 @@ export function buildSnapshot(
   const previousSoc = previousSnapshot?.stateOfCharge ?? null;
   const stateOfCharge = applyStateOfChargeFallback(reportedSoc, previousSoc, isCalibrating);
 
-  // v_battery: IR(50) — battery voltage, toDeci → V
-  const batteryVoltage = toDeci(getIR(cache, 50));
+  // v_battery: IR(50) — battery voltage, toCenti → V
+  const batteryVoltage = toCenti(getIR(cache, 50));
 
-  // i_battery: IR(51) — signed int16 → A
-  const batteryCurrent = toInt16(getIR(cache, 51));
+  // i_battery: IR(51) — signed int16, toCenti → A
+  const batteryCurrent = toCenti(toInt16(getIR(cache, 51)));
 
   // ── Grid ──────────────────────────────────────────────────────────────────
   // v_ac1: IR(5) — AC voltage, toDeci → V
@@ -120,15 +121,9 @@ export function buildSnapshot(
   // e_pv_total: IR(11, 12) — uint32, toDeci → kWh
   const pvEnergyTotalKwh = toDeci(toUint32(getIR(cache, 11), getIR(cache, 12)));
 
-  // Battery charge total — primary: e_inverter_in_total IR(27, 28), toDeci
-  // Battery discharge total — primary: e_discharge_year IR(29) (single-reg placeholder)
-  // Secondary registers: e_battery_charge_total_2 IR(181), e_battery_discharge_total_2 IR(180)
-  const primaryCharge = toDeci(toUint32(getIR(cache, 27), getIR(cache, 28)));
-  const primaryDischarge = toDeci(getIR(cache, 29));
-  const secondaryCharge = toDeci(getIR(cache, 181));
-  const secondaryDischarge = toDeci(getIR(cache, 180));
-  const { charge: batteryChargeEnergyTotalKwh, discharge: batteryDischargeEnergyTotalKwh } =
-    applyEnergyRegisterFallback(primaryCharge, primaryDischarge, secondaryCharge, secondaryDischarge);
+  // Battery charge/discharge totals are computed after battery snapshots are built,
+  // using the battery module's own registers (IR 105/106) as primary source.
+  // Placeholder — filled in below after battery snapshot construction.
 
   // e_grid_in_total: IR(32, 33) — uint32, toDeci → kWh (import)
   const gridImportEnergyTotalKwh = toDeci(toUint32(getIR(cache, 32), getIR(cache, 33)));
@@ -136,12 +131,19 @@ export function buildSnapshot(
   // e_grid_out_total: IR(21, 22) — uint32, toDeci → kWh (export)
   const gridExportEnergyTotalKwh = toDeci(toUint32(getIR(cache, 21), getIR(cache, 22)));
 
-  // ── Charge configuration ──────────────────────────────────────────────────
-  // charge_slot_1: HR(94) start, HR(95) end
-  const chargeSlot1 = toTimeslot(getHR(cache, 94), getHR(cache, 95));
+  // ── Charge/discharge timeslots ───────────────────────────────────────────
+  // Gen3 inverters support up to 10 charge and 10 discharge timeslots,
+  // each with a per-slot target state of charge. Gen2 inverters only
+  // populate slots 1-2; the remaining slots read as 00:00-00:00 / SOC 0.
+  const chargeSlots: TimeSlotConfig[] = CHARGE_SLOT_REGISTERS.map(reg => ({
+    ...toTimeslot(getHR(cache, reg.start), getHR(cache, reg.end)),
+    targetStateOfCharge: getHR(cache, reg.targetStateOfCharge),
+  }));
 
-  // discharge_slot_1: HR(56) start, HR(57) end
-  const dischargeSlot1 = toTimeslot(getHR(cache, 56), getHR(cache, 57));
+  const dischargeSlots: TimeSlotConfig[] = DISCHARGE_SLOT_REGISTERS.map(reg => ({
+    ...toTimeslot(getHR(cache, reg.start), getHR(cache, reg.end)),
+    targetStateOfCharge: getHR(cache, reg.targetStateOfCharge),
+  }));
 
   // enable_charge: HR(96)
   const enableCharge = getHR(cache, 96) !== 0;
@@ -149,12 +151,13 @@ export function buildSnapshot(
   // enable_discharge: HR(59)
   const enableDischarge = getHR(cache, 59) !== 0;
 
-  // charge_target_soc: HR(116)
+  // charge_target_soc: HR(116) — legacy single target, applies to slot 1 on Gen2
   const chargeTargetStateOfCharge = getHR(cache, 116);
 
   // ── System time ───────────────────────────────────────────────────────────
   // system_time: HR(35-40) — year, month, day, hour, minute, second
-  const year = getHR(cache, 35);
+  // GivEnergy stores the year as a 2-digit offset from 2000 (e.g. 26 = 2026)
+  const year = 2000 + getHR(cache, 35);
   const month = getHR(cache, 36);
   const day = getHR(cache, 37);
   const hour = getHR(cache, 38);
@@ -188,6 +191,30 @@ export function buildSnapshot(
     }
   }
 
+  // Battery charge/discharge totals:
+  //   Primary: battery module registers IR(106)/IR(105) (summed across all batteries)
+  //   Fallback: inverter registers IR(181) charge / HR(180) discharge
+  //   Last resort: IR(27,28) e_inverter_in_total / IR(29) e_discharge_year
+  let batteryChargeEnergyTotalKwh = 0;
+  let batteryDischargeEnergyTotalKwh = 0;
+  if (batteries.length > 0) {
+    // Sum across all battery modules (GivTCP does this per-battery)
+    batteryChargeEnergyTotalKwh = batteries.reduce((sum, b) => sum + b.chargeEnergyTotalKwh, 0);
+    batteryDischargeEnergyTotalKwh = batteries.reduce((sum, b) => sum + b.dischargeEnergyTotalKwh, 0);
+  }
+  if (batteryChargeEnergyTotalKwh === 0 && batteryDischargeEnergyTotalKwh === 0) {
+    // No battery data — fall back to inverter registers
+    const invCharge = toDeci(getIR(cache, 181));
+    const invDischarge = toDeci(getHR(cache, 180));
+    if (invCharge !== 0 || invDischarge !== 0) {
+      batteryChargeEnergyTotalKwh = invCharge;
+      batteryDischargeEnergyTotalKwh = invDischarge;
+    } else {
+      batteryChargeEnergyTotalKwh = toDeci(toUint32(getIR(cache, 27), getIR(cache, 28)));
+      batteryDischargeEnergyTotalKwh = toDeci(getIR(cache, 29));
+    }
+  }
+
   return {
     serialNumber,
     modelCode,
@@ -206,8 +233,8 @@ export function buildSnapshot(
     batteryDischargeEnergyTotalKwh,
     gridImportEnergyTotalKwh,
     gridExportEnergyTotalKwh,
-    chargeSlot1,
-    dischargeSlot1,
+    chargeSlots,
+    dischargeSlots,
     enableCharge,
     enableDischarge,
     chargeTargetStateOfCharge,
@@ -242,11 +269,16 @@ export function buildBatterySnapshot(
   // soc: IR(100)
   const stateOfCharge = get(100);
 
-  // cap_remaining: IR(88, 89) — uint32, toCenti → Ah (used as voltage proxy per task spec)
-  const voltage = toCenti(toUint32(get(88), get(89)));
+  // v_cells_sum: IR(80) — sum of all cell voltages, toMilli → V
+  const voltage = toMilli(get(80));
 
   // Battery current — not directly available in battery registers; default 0
   const current = 0;
+
+  // e_battery_discharge_total: IR(105) — toDeci → kWh
+  const dischargeEnergyTotalKwh = toDeci(get(105));
+  // e_battery_charge_total: IR(106) — toDeci → kWh
+  const chargeEnergyTotalKwh = toDeci(get(106));
 
   // t_max: IR(103), t_min: IR(104) — toDeci → °C
   const temperatureMax = toDeci(get(103));
@@ -266,6 +298,8 @@ export function buildBatterySnapshot(
     stateOfCharge,
     voltage,
     current,
+    dischargeEnergyTotalKwh,
+    chargeEnergyTotalKwh,
     temperatureMax,
     temperatureMin,
     cycleCount,

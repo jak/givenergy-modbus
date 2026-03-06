@@ -14,3 +14,8 @@ export interface TimeSlot {
   /** "HH:MM" format */
   end: string;
 }
+
+export interface TimeSlotConfig extends TimeSlot {
+  /** Target state of charge 0-100% for this timeslot */
+  targetStateOfCharge: number;
+}

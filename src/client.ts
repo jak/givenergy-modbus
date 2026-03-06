@@ -10,6 +10,9 @@ export interface ClientOptions {
   port?: number;        // default 8899
   timeout?: number;     // ms, default 4000
   retries?: number;     // default 5
+  onDebug?: (msg: string) => void;
+  /** Called for every transparent response with register data (fc=3 or fc=4), matched or not */
+  onRegisterData?: (slave: number, fc: number, base: number, values: number[]) => void;
 }
 
 interface PendingRequest {
@@ -23,19 +26,28 @@ export class Client {
   private readonly port: number;
   private readonly timeout: number;
   private readonly retries: number;
+  private readonly onDebug: (msg: string) => void;
+  private readonly onRegisterData: (slave: number, fc: number, base: number, values: number[]) => void;
 
   private socket: Socket | null = null;
   private framer = new Framer();
   private pending = new Map<string, PendingRequest>();
   private txQueue: Buffer[] = [];
   private txDraining = false;
-  private dataAdapterSerial = '**********'; // learned from first heartbeat
+  private _dataAdapterSerial = '**********';
+
+  /** The data adapter serial, learned from the first heartbeat */
+  get dataAdapterSerial(): string {
+    return this._dataAdapterSerial;
+  }
 
   constructor(options: ClientOptions) {
     this.host = options.host;
     this.port = options.port ?? 8899;
     this.timeout = options.timeout ?? 4000;
     this.retries = options.retries ?? 5;
+    this.onDebug = options.onDebug ?? (() => {});
+    this.onRegisterData = options.onRegisterData ?? (() => {});
   }
 
   connect(): Promise<void> {
@@ -56,17 +68,21 @@ export class Client {
   async sendRequest(frame: Buffer): Promise<number[]> {
     if (!this.socket) throw new Error('not connected');
 
-    // Extract shape hash from the frame for response matching
-    // Frame layout: header(8) + serial(10) + padding(8) + slave(1) + fc(1) + base(2) + count(2) + crc(2)
+    // Frame layout: header(8) + serial(10) + padding(8) + slave(1) + fc(1) + base(2) + count/value(2) + crc(2)
     const slave = frame[26];
     const fc = frame[27];
     const base = (frame[28] << 8) | frame[29];
     const count = (frame[30] << 8) | frame[31];
-    const key = shapeHash(slave, fc, base, count);
+    // For writes (fc=0x06), bytes 30-31 are the value, not a count.
+    // GivTCP's shape hash for writes uses only (slave, fc, register) — not the value.
+    const key = fc === 0x06
+      ? shapeHash(slave, fc, base, 0)
+      : shapeHash(slave, fc, base, count);
 
     let lastError: Error = new Error('timeout');
     for (let attempt = 0; attempt <= this.retries; attempt++) {
       if (attempt > 0) {
+        this.onDebug(`retry ${attempt}/${this.retries} for ${key}`);
         await new Promise(r => setTimeout(r, 500)); // inter-retry delay
       }
       try {
@@ -74,6 +90,7 @@ export class Client {
         return result;
       } catch (err) {
         lastError = err as Error;
+        this.onDebug(`attempt ${attempt} failed: ${lastError.message}`);
       }
     }
     throw lastError;
@@ -81,7 +98,6 @@ export class Client {
 
   private _sendOnce(frame: Buffer, key: string): Promise<number[]> {
     return new Promise((resolve, reject) => {
-      // Cancel any existing pending request with same shape
       const existing = this.pending.get(key);
       if (existing) {
         clearTimeout(existing.timer);
@@ -111,31 +127,49 @@ export class Client {
       const frame = this.txQueue.shift()!;
       this.socket?.write(frame);
       if (this.txQueue.length > 0) {
-        await new Promise(r => setTimeout(r, 250)); // 250ms throttle
+        await new Promise(r => setTimeout(r, 250)); // 250ms throttle between frames
       }
     }
     this.txDraining = false;
   }
 
   private _onData(data: Buffer): void {
+    this.onDebug(`received ${data.length} bytes from inverter`);
     const results = this.framer.decode(data);
     for (const result of results) {
       if (result.type !== 'frame') continue;
       const pdu = decodePdu(result.data);
       if (pdu.type === 'heartbeat') {
-        this.dataAdapterSerial = pdu.dataAdapterSerial;
-        // Immediate response, bypass queue
+        this.onDebug(`heartbeat received (serial=${pdu.dataAdapterSerial}), sending response`);
+        this._dataAdapterSerial = pdu.dataAdapterSerial;
         this.socket?.write(encodeHeartbeatResponse(pdu.dataAdapterSerial));
       } else if (pdu.type === 'transparent') {
+        this.onDebug(`transparent response received (slave=0x${pdu.slaveAddress.toString(16)}, fc=${pdu.transparentFunctionCode})`);
         this._dispatchResponse(pdu);
       }
     }
   }
 
   private _dispatchResponse(pdu: TransparentPdu): void {
-    const key = shapeHash(pdu.slaveAddress, pdu.transparentFunctionCode, pdu.baseRegister, pdu.registerCount);
+    // Always forward register data to the cache — even unsolicited push data is useful
+    const fc = pdu.transparentFunctionCode;
+    if (!pdu.error && (fc === 3 || fc === 4) && pdu.registerValues.length > 0) {
+      this.onRegisterData(pdu.slaveAddress, fc, pdu.baseRegister, pdu.registerValues);
+    }
+
+    // Also resolve any pending request waiting for this exact response shape.
+    // For writes (fc=0x06), use 0 for count to match the request key.
+    // Gen1 BPM responds with fc=134 (0x86) instead of fc=6 — normalize to match.
+    const normalizedFc = fc === 134 ? 0x06 : fc;
+    const isWrite = normalizedFc === 0x06;
+    const key = isWrite
+      ? shapeHash(pdu.slaveAddress, normalizedFc, pdu.baseRegister, 0)
+      : shapeHash(pdu.slaveAddress, normalizedFc, pdu.baseRegister, pdu.registerCount);
     const pending = this.pending.get(key);
-    if (!pending) return;
+    if (!pending) {
+      this.onDebug(`received response for ${key} but no pending request found`);
+      return;
+    }
     this.pending.delete(key);
     clearTimeout(pending.timer);
     if (pdu.error) {

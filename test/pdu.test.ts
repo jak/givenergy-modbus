@@ -33,7 +33,7 @@ function buildReadHoldingResponse(
 
   // Build full frame
   const adapterSerial = Buffer.from('CE1234G567'.padStart(10, '*'), 'latin1');
-  const padding = Buffer.from([0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
+  const padding = Buffer.from([0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08]);
   const body = Buffer.concat([
     adapterSerial,           // 10 bytes
     padding,                 // 8 bytes
@@ -51,7 +51,7 @@ function buildReadHoldingResponse(
 
 function buildWriteResponseWithCode(code: number): Buffer {
   const adapterSerial = Buffer.from('CE1234G567', 'latin1');
-  const padding = Buffer.from([0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
+  const padding = Buffer.from([0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08]);
   const inverterSerial = Buffer.from('SA1234B567', 'latin1');
   const sub = Buffer.from([
     0x11, code, // slave, fc (e.g. 134=0x86)
@@ -145,8 +145,8 @@ describe('Read Registers Request Encoding', () => {
       baseRegister: 0,
       registerCount: 60,
     });
-    // Frame should end with 2 CRC bytes (the last 2 bytes of the sub-frame)
-    expect(frame.length).toBeGreaterThan(8 + 10 + 8 + 1 + 1 + 2 + 2 + 2);
+    // Frame: 6 MBAP + 1 uid + 1 fid + 10 serial + 8 padding + 1 slave + 1 fc + 4 payload + 2 CRC = 34
+    expect(frame.length).toBeGreaterThanOrEqual(34);
   });
 });
 

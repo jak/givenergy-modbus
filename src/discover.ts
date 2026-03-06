@@ -1,5 +1,5 @@
 import * as net from 'net';
-import dgram from 'dgram';
+import * as os from 'os';
 
 /** GivEnergy inverters always listen on this port */
 const INVERTER_PORT = 8899;
@@ -44,23 +44,21 @@ export function parseSubnet(cidr: string): string[] {
 }
 
 /**
- * Detect the local subnet using the UDP trick.
- *
- * Opens a UDP socket and "connects" to a non-routable address (no packet sent).
- * The OS selects the outbound interface, giving us our local IP.
- * We then assume a /24 subnet — the true mask is not available this way.
- *
- * This mirrors GivTCP's Docker path in startup.py.
+ * Detect the local subnet by finding the first non-loopback IPv4 interface.
+ * Assumes a /24 subnet (same assumption as the UDP trick approach).
  */
 export function getLocalSubnet(): string {
-  const socket = dgram.createSocket('udp4');
-  try {
-    socket.connect(1, '10.254.254.254');
-    const address = socket.address();
-    return `${address.address}/24`;
-  } finally {
-    socket.close();
+  const ifaces = os.networkInterfaces();
+  for (const name of Object.keys(ifaces)) {
+    const iface = ifaces[name];
+    if (!iface) continue;
+    for (const info of iface) {
+      if (info.family === 'IPv4' && !info.internal && info.cidr) {
+        return info.cidr;
+      }
+    }
   }
+  throw new Error('Could not detect local subnet: no external IPv4 interface found');
 }
 
 /**
@@ -88,17 +86,27 @@ function tryConnect(host: string, port: number, timeoutMs: number): Promise<bool
   });
 }
 
+export interface DiscoverOptions {
+  subnet?: string;
+  /** Called for each host after probing it */
+  onProbe?: (host: string, found: boolean) => void;
+}
+
 /**
  * Scan a subnet for GivEnergy inverters by probing port 8899.
  *
  * Uses up to 20 concurrent connection attempts with 1s timeout each.
  * Mirrors GivTCP's findInvertor.py Threader(20) approach.
  *
- * @param subnet - Optional CIDR string. Auto-detected if not provided.
+ * @param subnetOrOptions - Optional CIDR string or options object. Subnet auto-detected if not provided.
  * @returns Array of discovered devices (host IP strings)
  */
-export async function discover(subnet?: string): Promise<DiscoveredDevice[]> {
-  const cidr = subnet ?? getLocalSubnet();
+export async function discover(subnetOrOptions?: string | DiscoverOptions): Promise<DiscoveredDevice[]> {
+  const options: DiscoverOptions = typeof subnetOrOptions === 'string'
+    ? { subnet: subnetOrOptions }
+    : (subnetOrOptions ?? {});
+
+  const cidr = options.subnet ?? getLocalSubnet();
   const hosts = parseSubnet(cidr);
   const results: DiscoveredDevice[] = [];
 
@@ -108,6 +116,7 @@ export async function discover(subnet?: string): Promise<DiscoveredDevice[]> {
     const checks = await Promise.all(
       batch.map(async host => {
         const open = await tryConnect(host, INVERTER_PORT, SCAN_TIMEOUT_MS);
+        options.onProbe?.(host, open);
         return open ? host : null;
       })
     );
