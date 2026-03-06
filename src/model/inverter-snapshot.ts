@@ -3,12 +3,17 @@
  *
  * Assembled by buildSnapshot() in snapshot-builder.ts from raw Modbus register caches.
  * All GivEnergy protocol quirks (validation, fallbacks, scaling) have been applied.
+ *
+ * The type is a discriminated union on `generation` so that timeslot types are
+ * accurate per generation: Gen3 timeslots carry `targetStateOfCharge`; Gen2 and
+ * three_phase timeslots do not.
  */
-import type { TimeSlotConfig } from './register-types.js';
+import type { TimeSlot, TimeSlotConfig } from './register-types.js';
 import type { BatterySnapshot } from './battery-snapshot.js';
 import type { PowerFlows } from '../power-flow.js';
 
-export interface InverterSnapshot {
+/** Fields shared by all inverter generations */
+interface BaseSnapshot {
   // Identity
   /** 10-character inverter serial number from HR(13-17) */
   serialNumber: string;
@@ -55,11 +60,6 @@ export interface InverterSnapshot {
   /** Total grid export energy in kWh — uint32 IR(21,22) via toDeci */
   gridExportEnergyTotalKwh: number;
 
-  // Charge/discharge timeslots (up to 10 per Gen3 inverters)
-  /** Charge timeslots with per-slot target state of charge */
-  chargeSlots: TimeSlotConfig[];
-  /** Discharge timeslots with per-slot target state of charge */
-  dischargeSlots: TimeSlotConfig[];
   /** Enable charge flag from HR(96) */
   enableCharge: boolean;
   /** Enable discharge flag from HR(59) */
@@ -76,3 +76,29 @@ export interface InverterSnapshot {
   // Attached batteries
   batteries: BatterySnapshot[];
 }
+
+export interface Gen2Snapshot extends BaseSnapshot {
+  generation: 'gen2';
+  /** Charge timeslots — start/end only, no per-slot target state of charge */
+  chargeSlots: TimeSlot[];
+  /** Discharge timeslots — start/end only, no per-slot target state of charge */
+  dischargeSlots: TimeSlot[];
+}
+
+export interface Gen3Snapshot extends BaseSnapshot {
+  generation: 'gen3';
+  /** Charge timeslots with per-slot target state of charge */
+  chargeSlots: TimeSlotConfig[];
+  /** Discharge timeslots with per-slot target state of charge */
+  dischargeSlots: TimeSlotConfig[];
+}
+
+export interface ThreePhaseSnapshot extends BaseSnapshot {
+  generation: 'three_phase';
+  /** Charge timeslots — start/end only, no per-slot target state of charge */
+  chargeSlots: TimeSlot[];
+  /** Discharge timeslots — start/end only, no per-slot target state of charge */
+  dischargeSlots: TimeSlot[];
+}
+
+export type InverterSnapshot = Gen2Snapshot | Gen3Snapshot | ThreePhaseSnapshot;
