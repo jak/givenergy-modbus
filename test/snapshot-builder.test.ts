@@ -363,6 +363,73 @@ describe('SnapshotBuilder', () => {
       expect(snapshot!.batteries[0].serialNumber).toBe('CE1234B001');
     });
 
+    it('extracts daily energy values from IR registers via toDeci', () => {
+      const cache = makeValidCache();
+      cache.inputRegisters.set(17, 15);  // e_pv1_day: 15 → toDeci = 1.5 kWh
+      cache.inputRegisters.set(19, 13);  // e_pv2_day: 13 → toDeci = 1.3 kWh
+      cache.inputRegisters.set(36, 97);  // e_battery_charge_today: 97 → 9.7 kWh
+      cache.inputRegisters.set(37, 77);  // e_battery_discharge_today: 77 → 7.7 kWh
+      cache.inputRegisters.set(26, 135); // e_grid_in_day: 135 → 13.5 kWh
+      cache.inputRegisters.set(25, 1);   // e_grid_out_day: 1 → 0.1 kWh
+      const snapshot = buildSnapshot(cache);
+      expect(snapshot!.pvEnergyTodayKwh).toBeCloseTo(2.8, 1);
+      expect(snapshot!.batteryChargeEnergyTodayKwh).toBeCloseTo(9.7, 1);
+      expect(snapshot!.batteryDischargeEnergyTodayKwh).toBeCloseTo(7.7, 1);
+      expect(snapshot!.gridImportEnergyTodayKwh).toBeCloseTo(13.5, 1);
+      expect(snapshot!.gridExportEnergyTodayKwh).toBeCloseTo(0.1, 1);
+    });
+
+    it('computes PV today as sum of PV1 and PV2 daily registers', () => {
+      const cache = makeValidCache();
+      cache.inputRegisters.set(17, 30);  // e_pv1_day: 3.0 kWh
+      cache.inputRegisters.set(19, 20);  // e_pv2_day: 2.0 kWh
+      const snapshot = buildSnapshot(cache);
+      expect(snapshot!.pvEnergyTodayKwh).toBeCloseTo(5.0, 1);
+    });
+
+    it('computes consumption total: (inverter_out - ac_charge) - (export - import)', () => {
+      const cache = makeValidCache();
+      // inverter_out_total: IR(45,46) uint32 → toDeci
+      cache.inputRegisters.set(45, 0);
+      cache.inputRegisters.set(46, 5000);  // 5000 → 500.0 kWh
+      // ac_charge_total (inverter_in): IR(27,28) — reused for battery fallback,
+      // but consumption uses them directly regardless
+      cache.inputRegisters.set(27, 0);
+      cache.inputRegisters.set(28, 1000);  // 1000 → 100.0 kWh
+      // grid export: IR(21,22)
+      cache.inputRegisters.set(21, 0);
+      cache.inputRegisters.set(22, 500);   // 500 → 50.0 kWh
+      // grid import: IR(32,33)
+      cache.inputRegisters.set(32, 0);
+      cache.inputRegisters.set(33, 2000);  // 2000 → 200.0 kWh
+      // consumption = (500 - 100) - (50 - 200) = 400 + 150 = 550
+      const snapshot = buildSnapshot(cache);
+      expect(snapshot!.consumptionEnergyTotalKwh).toBeCloseTo(550.0, 1);
+    });
+
+    it('computes consumption today using daily registers', () => {
+      const cache = makeValidCache();
+      cache.inputRegisters.set(44, 300);  // e_inverter_out_day: 30.0 kWh
+      cache.inputRegisters.set(35, 50);   // e_inverter_in_day (ac_charge): 5.0 kWh
+      cache.inputRegisters.set(25, 10);   // e_grid_out_day: 1.0 kWh
+      cache.inputRegisters.set(26, 100);  // e_grid_in_day: 10.0 kWh
+      // consumption = (30 - 5) - (1 - 10) = 25 + 9 = 34
+      const snapshot = buildSnapshot(cache);
+      expect(snapshot!.consumptionEnergyTodayKwh).toBeCloseTo(34.0, 1);
+    });
+
+    it('clamps consumption to zero when formula yields negative', () => {
+      // Edge case: export > inverter output (e.g., during grid passthrough)
+      const cache = makeValidCache();
+      cache.inputRegisters.set(44, 10);   // inverter_out_day: 1.0 kWh
+      cache.inputRegisters.set(35, 0);    // ac_charge_day: 0
+      cache.inputRegisters.set(25, 200);  // grid_out_day: 20.0 kWh (huge export)
+      cache.inputRegisters.set(26, 0);    // grid_in_day: 0
+      // consumption = (1 - 0) - (20 - 0) = -19 → clamped to 0
+      const snapshot = buildSnapshot(cache);
+      expect(snapshot!.consumptionEnergyTodayKwh).toBe(0);
+    });
+
     it('computes solar power as p_pv1 + p_pv2', () => {
       const cache = makeValidCache();
       cache.inputRegisters.set(18, 1500); // p_pv1: 1500W

@@ -65,12 +65,21 @@ console.log(`Voltage:   ${s.gridVoltage} V`);
 console.log(`Frequency: ${s.gridFrequency} Hz`);
 console.log(`Temp:      ${s.inverterHeatsinkTemp} °C`);
 
+console.log('\n--- Energy Today ---');
+console.log(`PV generated:       ${s.pvEnergyTodayKwh} kWh`);
+console.log(`Battery charged:    ${s.batteryChargeEnergyTodayKwh} kWh`);
+console.log(`Battery discharged: ${s.batteryDischargeEnergyTodayKwh} kWh`);
+console.log(`Grid import:        ${s.gridImportEnergyTodayKwh} kWh`);
+console.log(`Grid export:        ${s.gridExportEnergyTodayKwh} kWh`);
+console.log(`Consumption:        ${s.consumptionEnergyTodayKwh} kWh`);
+
 console.log('\n--- Energy Totals ---');
 console.log(`PV generated:       ${s.pvEnergyTotalKwh} kWh`);
 console.log(`Battery charged:    ${s.batteryChargeEnergyTotalKwh} kWh`);
 console.log(`Battery discharged: ${s.batteryDischargeEnergyTotalKwh} kWh`);
 console.log(`Grid import:        ${s.gridImportEnergyTotalKwh} kWh`);
 console.log(`Grid export:        ${s.gridExportEnergyTotalKwh} kWh`);
+console.log(`Consumption:        ${s.consumptionEnergyTotalKwh} kWh`);
 
 console.log('\n--- Config ---');
 console.log(`Enable charge:    ${s.enableCharge}`);

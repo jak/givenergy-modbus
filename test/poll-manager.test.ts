@@ -22,6 +22,13 @@ const mockSnapshot: InverterSnapshot = {
   batteryDischargeEnergyTotalKwh: 900,
   gridImportEnergyTotalKwh: 200,
   gridExportEnergyTotalKwh: 4800,
+  consumptionEnergyTotalKwh: 0,
+  pvEnergyTodayKwh: 2.8,
+  batteryChargeEnergyTodayKwh: 9.7,
+  batteryDischargeEnergyTodayKwh: 7.7,
+  gridImportEnergyTodayKwh: 13.5,
+  gridExportEnergyTodayKwh: 0.1,
+  consumptionEnergyTodayKwh: 12.4,
   chargeSlots: [
     { start: '00:30', end: '04:30', targetStateOfCharge: 100 },
     ...Array.from({ length: 9 }, () => ({ start: '00:00', end: '00:00', targetStateOfCharge: 0 })),

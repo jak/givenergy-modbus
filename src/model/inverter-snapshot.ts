@@ -59,6 +59,22 @@ interface BaseSnapshot {
   gridImportEnergyTotalKwh: number;
   /** Total grid export energy in kWh — uint32 IR(21,22) via toDeci */
   gridExportEnergyTotalKwh: number;
+  /** Total consumption energy in kWh — derived: (inverter_out - ac_charge) - (export - import) */
+  consumptionEnergyTotalKwh: number;
+
+  // Energy today (kWh)
+  /** PV energy generated today in kWh — e_pv1_day IR(17) + e_pv2_day IR(19) via toDeci */
+  pvEnergyTodayKwh: number;
+  /** Battery charge energy today in kWh — e_battery_charge_today IR(36) via toDeci */
+  batteryChargeEnergyTodayKwh: number;
+  /** Battery discharge energy today in kWh — e_battery_discharge_today IR(37) via toDeci */
+  batteryDischargeEnergyTodayKwh: number;
+  /** Grid import energy today in kWh — e_grid_in_day IR(26) via toDeci */
+  gridImportEnergyTodayKwh: number;
+  /** Grid export energy today in kWh — e_grid_out_day IR(25) via toDeci */
+  gridExportEnergyTodayKwh: number;
+  /** Consumption energy today in kWh — derived: (inverter_out_day - ac_charge_day) - (export_day - import_day) */
+  consumptionEnergyTodayKwh: number;
 
   /** Enable charge flag from HR(96) */
   enableCharge: boolean;

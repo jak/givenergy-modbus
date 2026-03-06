@@ -138,6 +138,35 @@ export function buildSnapshot(
   // e_grid_out_total: IR(21, 22) — uint32, toDeci → kWh (export)
   const gridExportEnergyTotalKwh = toDeci(toUint32(getIR(cache, 21), getIR(cache, 22)));
 
+  // ── Daily energy ────────────────────────────────────────────────────────
+  // All single 16-bit IR registers, toDeci → kWh
+  const pvEnergyTodayKwh = toDeci(getIR(cache, 17)) + toDeci(getIR(cache, 19));  // e_pv1_day + e_pv2_day
+  const batteryChargeEnergyTodayKwh = toDeci(getIR(cache, 36));   // e_battery_charge_today
+  const batteryDischargeEnergyTodayKwh = toDeci(getIR(cache, 37)); // e_battery_discharge_today
+  const gridImportEnergyTodayKwh = toDeci(getIR(cache, 26));       // e_grid_in_day
+  const gridExportEnergyTodayKwh = toDeci(getIR(cache, 25));       // e_grid_out_day
+
+  // ── Consumption (derived) ──────────────────────────────────────────────
+  // Formula: (inverter_out - ac_charge) - (export - import)
+  // Reference: GivTCP read.py — hybrid inverter consumption calculation
+  const round2 = (x: number) => Math.round(x * 100) / 100;
+
+  // e_inverter_out_total: IR(45, 46) — uint32, toDeci → kWh
+  const inverterOutputEnergyTotalKwh = toDeci(toUint32(getIR(cache, 45), getIR(cache, 46)));
+  // e_inverter_in_total: IR(27, 28) — uint32, toDeci → kWh (AC/grid charge energy)
+  const acChargeEnergyTotalKwh = toDeci(toUint32(getIR(cache, 27), getIR(cache, 28)));
+  // e_inverter_out_day: IR(44)
+  const inverterOutputEnergyTodayKwh = toDeci(getIR(cache, 44));
+  // e_inverter_in_day: IR(35)
+  const acChargeEnergyTodayKwh = toDeci(getIR(cache, 35));
+
+  const consumptionEnergyTotalKwh = Math.max(0,
+    round2((inverterOutputEnergyTotalKwh - acChargeEnergyTotalKwh)
+         - (gridExportEnergyTotalKwh - gridImportEnergyTotalKwh)));
+  const consumptionEnergyTodayKwh = Math.max(0,
+    round2((inverterOutputEnergyTodayKwh - acChargeEnergyTodayKwh)
+         - (gridExportEnergyTodayKwh - gridImportEnergyTodayKwh)));
+
   // ── Charge/discharge timeslots ───────────────────────────────────────────
   // Gen3: 10 charge + 10 discharge slots, each with a per-slot target SOC.
   // Gen2: 1 charge slot (HR 94/95), 2 discharge slots (HR 56/57, HR 44/45).
@@ -259,6 +288,13 @@ export function buildSnapshot(
     batteryDischargeEnergyTotalKwh,
     gridImportEnergyTotalKwh,
     gridExportEnergyTotalKwh,
+    consumptionEnergyTotalKwh,
+    pvEnergyTodayKwh,
+    batteryChargeEnergyTodayKwh,
+    batteryDischargeEnergyTodayKwh,
+    gridImportEnergyTodayKwh,
+    gridExportEnergyTodayKwh,
+    consumptionEnergyTodayKwh,
     chargeSlots,
     dischargeSlots,
     enableCharge,
