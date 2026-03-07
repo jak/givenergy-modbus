@@ -107,8 +107,9 @@ function buildTransparentResponse(
 }
 
 function makeHoldingRegisters(): number[] {
-  // 1140 registers to cover HR 0-299 (Gen3) and HR 1080-1139 (three_phase timeslots)
-  const regs = new Array(1140).fill(0);
+  // 4140 registers to cover HR 0-299 (Gen3), HR 1080-1139 (three_phase timeslots),
+  // and HR 4080-4139 (32-bit battery energy totals)
+  const regs = new Array(4140).fill(0);
 
   // HR(0) = 0x2003 (HYBRID_GEN3)
   regs[0] = 0x2003;
