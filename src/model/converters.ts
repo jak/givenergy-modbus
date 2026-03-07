@@ -85,8 +85,9 @@ export function toDuint8(raw: number): [number, number] {
  */
 export function toTimeslot(startRaw: number, endRaw: number): TimeSlot {
   const fmt = (v: number): string => {
-    const h = Math.floor(v / 100);
-    const m = v % 100;
+    const clamped = v >= 2400 ? 0 : v;
+    const h = Math.floor(clamped / 100);
+    const m = clamped % 100;
     return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
   };
   return { start: fmt(startRaw), end: fmt(endRaw) };
