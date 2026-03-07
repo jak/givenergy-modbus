@@ -145,17 +145,29 @@ describe('applyEnergyRegisterFallback', () => {
 });
 
 describe('applyFrequencyScaling', () => {
-  it('divides by 10 when value > 100', () => {
-    // Some firmware: 5000 raw → /10 → 500 (then toDeci gives 50Hz)
-    // Other firmware: 500 raw → /10 → 50 (then toDeci gives 5Hz) — caller handles
-    // Python: if GEInv.f_ac1 > 100: freq = GEInv.f_ac1 / 10
-    expect(applyFrequencyScaling(5000)).toBeCloseTo(500);
+  it('returns 50Hz for standard firmware raw=500 (deci-Hz)', () => {
+    // Fixes #7: standard firmware reports 500 (deci-Hz).
+    // toDeci first → 50.0, then 50 <= 100 → no further scaling → 50Hz.
+    // GivTCP: f_ac1 already has deci applied, then checks > 100.
     expect(applyFrequencyScaling(500)).toBeCloseTo(50);
   });
 
-  it('leaves values <= 100 unchanged', () => {
-    expect(applyFrequencyScaling(50)).toBe(50);
-    expect(applyFrequencyScaling(60)).toBe(60);
-    expect(applyFrequencyScaling(100)).toBe(100);
+  it('returns 50Hz for old firmware raw=5000 (centi-Hz)', () => {
+    // Fixes #7: old firmware reports 5000 (centi-Hz).
+    // toDeci first → 500.0, then 500 > 100 → /10 → 50Hz.
+    expect(applyFrequencyScaling(5000)).toBeCloseTo(50);
+  });
+
+  it('returns 60Hz for 60Hz grid (raw=600)', () => {
+    expect(applyFrequencyScaling(600)).toBeCloseTo(60);
+  });
+
+  it('handles boundary: raw=1000 → toDeci=100 → no extra scaling → 100Hz-ish left alone', () => {
+    // 1000 → toDeci → 100.0, 100 <= 100 → 100.0
+    expect(applyFrequencyScaling(1000)).toBeCloseTo(100);
+  });
+
+  it('handles zero gracefully', () => {
+    expect(applyFrequencyScaling(0)).toBe(0);
   });
 });

@@ -151,7 +151,7 @@ function makeInputRegisters(): number[] {
   regs[18] = 500;
   // IR(20) = 500 (p_pv2 = 500W)
   regs[20] = 500;
-  // IR(9) = 5000 (f_ac1 raw → frequencyScale → 500 → toDeci = 50Hz)
+  // IR(9) = 5000 (f_ac1 raw → deci=500 → >100 → /10 → 50Hz)
   regs[9] = 5000;
 
   return regs;

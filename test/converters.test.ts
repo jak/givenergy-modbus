@@ -168,24 +168,26 @@ describe('Register Converters', () => {
   });
 
   describe('frequencyScale', () => {
-    it('divides by 10 when centi-Hz value > 100', () => {
-      // GivEnergy firmware inconsistency: some versions report AC frequency
-      // in centi-Hz (e.g. 5000 = 50.00Hz → after /10 = 500 = 50.0Hz),
-      // others in deci-Hz (e.g. 500 = 50.0Hz → after /10 = 50Hz).
-      // Python: if f_ac1 > 100: freq = f_ac1 / 10
-      // Note: this applies the rule once; callers apply toDeci on top for Hz.
-      expect(frequencyScale(5000)).toBeCloseTo(500);
+    it('returns 50Hz for standard firmware raw=500 (deci-Hz)', () => {
+      // Fixes #7: 500 → /10 = 50.0, 50 ≤ 100 → 50Hz
       expect(frequencyScale(500)).toBeCloseTo(50);
     });
 
-    it('leaves values <= 100 unchanged', () => {
-      // Already in Hz (some newer firmware)
-      expect(frequencyScale(50)).toBe(50);
-      expect(frequencyScale(60)).toBe(60);
+    it('returns 50Hz for old firmware raw=5000 (centi-Hz)', () => {
+      // Fixes #7: 5000 → /10 = 500.0, 500 > 100 → /10 → 50Hz
+      expect(frequencyScale(5000)).toBeCloseTo(50);
     });
 
-    it('handles the boundary value 100 — no scaling', () => {
-      expect(frequencyScale(100)).toBe(100);
+    it('returns 60Hz for 60Hz grid (raw=600)', () => {
+      expect(frequencyScale(600)).toBeCloseTo(60);
+    });
+
+    it('handles boundary: raw=1000 → deci=100 → no extra scaling', () => {
+      expect(frequencyScale(1000)).toBeCloseTo(100);
+    });
+
+    it('handles zero gracefully', () => {
+      expect(frequencyScale(0)).toBe(0);
     });
   });
 

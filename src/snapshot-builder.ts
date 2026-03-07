@@ -174,9 +174,8 @@ export function buildSnapshot(
   // v_ac1: IR(5) — AC voltage, toDeci → V
   const gridVoltage = toDeci(getIR(cache, 5));
 
-  // f_ac1: IR(13) — AC frequency, firmware scaling then toDeci → Hz
-  const rawFrequency = getIR(cache, 13);
-  const gridFrequency = toDeci(applyFrequencyScaling(rawFrequency));
+  // f_ac1: IR(13) — AC frequency, deci then >100 scaling → Hz (#7)
+  const gridFrequency = applyFrequencyScaling(getIR(cache, 13));
 
   // i_ac1: IR(10) — AC current, toDeci → A
   const inverterCurrent = toDeci(getIR(cache, 10));
