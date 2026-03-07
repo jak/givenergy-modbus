@@ -24,6 +24,20 @@ const BATTERY_REGISTER_START = 60;
 const BATTERY_REGISTER_COUNT = 60;
 const LV_BATTERY_SLAVES = [0x32, 0x33, 0x34, 0x35, 0x36, 0x37];
 const METER_SLAVES = [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08];
+/** BAMS (Battery Aggregation & Management System) slave address — reports BCU count */
+const BAMS_SLAVE = 0xa0;
+/** BAMS register containing number of BCUs */
+const BAMS_NUMBER_OF_BCUS_REGISTER = 61;
+/** BCU (Battery Control Unit) base slave address — BCU N is at 0x70 + N */
+const BCU_BASE_SLAVE = 0x70;
+/** BCU register containing number of BMUs (modules) in this BCU */
+const BCU_NUMBER_OF_MODULES_REGISTER = 64;
+/** BMU (Battery Module Unit) base slave address — BMU N is at 0x50 + N */
+const BMU_BASE_SLAVE = 0x50;
+/** BMU register read count — 60 registers per module */
+const BMU_REGISTER_COUNT = 60;
+/** BMU base register offset multiplier — each BCU adds 120 to the base */
+const BMU_BCU_OFFSET = 120;
 const METER_DATA_REGISTER_START = 60;
 const METER_DATA_REGISTER_COUNT = 29; // IR 60-88
 const METER_PRODUCT_REGISTER_START = 60;
