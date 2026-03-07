@@ -129,7 +129,8 @@ console.log(`Grid → Battery:  ${pf.gridToBattery} W`);
 if (s.batteries.length > 0) {
   console.log('\n--- Batteries ---');
   for (const [i, b] of s.batteries.entries()) {
-    console.log(`Battery ${i + 1}: SoC=${b.stateOfCharge}% V=${b.voltage}V serial=${b.serialNumber} cycles=${b.cycleCount}`);
+    const stackLabel = b.stack != null ? ` stack=${b.stack}` : '';
+    console.log(`Battery ${i + 1}: SoC=${b.stateOfCharge}% V=${b.voltage}V serial=${b.serialNumber} cycles=${b.cycleCount}${stackLabel}`);
     console.log(`  Charged: ${b.chargeEnergyTotalKwh} kWh  Discharged: ${b.dischargeEnergyTotalKwh} kWh`);
     console.log(`  Temp: ${b.temperatureMin}-${b.temperatureMax} °C  Cycles: ${b.cycleCount}`);
     console.log(`  Cells: ${b.cellVoltages.map(v => v.toFixed(3)).join(', ')} V`);
