@@ -188,7 +188,9 @@ export function buildSnapshot(
 
   // ── Daily energy ────────────────────────────────────────────────────────
   // All single 16-bit IR registers, toDeci → kWh
-  const pvEnergyTodayKwh = toDeci(getIR(cache, 17)) + toDeci(getIR(cache, 19));  // e_pv1_day + e_pv2_day
+  const pvString1EnergyTodayKwh = toDeci(getIR(cache, 17));  // e_pv1_day
+  const pvString2EnergyTodayKwh = toDeci(getIR(cache, 19));  // e_pv2_day
+  const pvEnergyTodayKwh = pvString1EnergyTodayKwh + pvString2EnergyTodayKwh;
   const batteryChargeEnergyTodayKwh = toDeci(getIR(cache, 36));   // e_battery_charge_today
   const batteryDischargeEnergyTodayKwh = toDeci(getIR(cache, 37)); // e_battery_discharge_today
   const gridImportEnergyTodayKwh = toDeci(getIR(cache, 26));       // e_grid_in_day
@@ -365,6 +367,8 @@ export function buildSnapshot(
     batteryThroughputTotalKwh,
     hoursOfOperation,
     pvEnergyTodayKwh,
+    pvString1EnergyTodayKwh,
+    pvString2EnergyTodayKwh,
     batteryChargeEnergyTodayKwh,
     batteryDischargeEnergyTodayKwh,
     gridImportEnergyTodayKwh,
@@ -410,9 +414,6 @@ export function buildBatterySnapshot(
   // v_cells_sum: IR(80) — sum of all cell voltages, toMilli → V
   const voltage = toMilli(get(80));
 
-  // Battery current — not directly available in battery registers; default 0
-  const current = 0;
-
   // e_battery_discharge_total: IR(105) — toDeci → kWh
   const dischargeEnergyTotalKwh = toDeci(get(105));
   // e_battery_charge_total: IR(106) — toDeci → kWh
@@ -435,7 +436,6 @@ export function buildBatterySnapshot(
     serialNumber,
     stateOfCharge,
     voltage,
-    current,
     dischargeEnergyTotalKwh,
     chargeEnergyTotalKwh,
     temperatureMax,

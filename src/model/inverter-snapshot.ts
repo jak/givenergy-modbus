@@ -24,11 +24,18 @@ interface BaseSnapshot {
   // Real-time power (watts)
   /** Total solar generation: p_pv1 (IR 18) + p_pv2 (IR 20) */
   solarPower: number;
-  /** PV string 1 power in watts (IR 18) */
+  /** PV string 1 power in watts (IR 18) — one of the two DC inputs on the inverter */
   pvString1Power: number;
-  /** PV string 2 power in watts (IR 20) */
+  /** PV string 2 power in watts (IR 20) — the second DC input on the inverter */
   pvString2Power: number;
-  /** Battery power: positive = discharging, negative = charging (IR 52, signed int16) */
+  /**
+   * Battery power as seen by the inverter's DC bus (IR 52, signed int16).
+   * Positive = discharging into the house, negative = charging from solar/grid.
+   *
+   * This is the system-wide battery power. For per-module detail, see
+   * BatterySnapshot — though note that individual battery modules don't
+   * report their own power directly.
+   */
   batteryPower: number;
   /** Grid power: positive = export, negative = import (IR 30, signed int16) */
   gridPower: number;
@@ -51,12 +58,18 @@ interface BaseSnapshot {
   /** PV string 2 current in A (IR 9, toDeci) */
   pvString2Current: number;
 
-  // Battery state
+  // Battery state (inverter-level measurements)
+  //
+  // These come from the inverter's own battery monitoring circuit (IR 50–59).
+  // For per-module data from the BMS itself — including cell voltages,
+  // temperatures, and individual charge/discharge totals — see BatterySnapshot
+  // in the `batteries` array.
+  //
   /** State of charge 0-100% from IR(59), with fallback applied */
   stateOfCharge: number;
-  /** Battery voltage in V from IR(50) via toDeci */
+  /** Battery voltage in V from IR(50) via toCenti — measured at the inverter's DC bus */
   batteryVoltage: number;
-  /** Battery current in A from IR(51) via toInt16 */
+  /** Battery current in A from IR(51) via toInt16 then toCenti */
   batteryCurrent: number;
 
   // Grid
@@ -73,12 +86,17 @@ interface BaseSnapshot {
   /** EPS backup frequency in Hz from IR(54) via toCenti */
   epsBackupFrequency: number;
 
-  // Temperature
+  // Temperature (inverter-level sensors)
+  //
+  // These are measured by the inverter's own sensors. For the battery module's
+  // own temperature readings (which include per-cell min/max from the BMS),
+  // see BatterySnapshot.temperatureMin and BatterySnapshot.temperatureMax.
+  //
   /** Inverter heatsink temperature in °C from IR(41) via toDeci */
   inverterHeatsinkTemp: number;
-  /** Charger temperature in °C from IR(55) via toDeci — labeled "BMS Temperature" in cloud CSV */
+  /** Charger temperature in °C from IR(55) via toDeci — labeled "BMS Temperature" in the GivEnergy cloud CSV */
   chargerTemperature: number;
-  /** Battery temperature in °C from IR(56) via toDeci */
+  /** Battery temperature in °C from IR(56) via toDeci — a single reading from the inverter's sensor */
   batteryTemperature: number;
 
   // Energy totals (kWh)
@@ -102,8 +120,12 @@ interface BaseSnapshot {
   hoursOfOperation: number;
 
   // Energy today (kWh)
-  /** PV energy generated today in kWh — e_pv1_day IR(17) + e_pv2_day IR(19) via toDeci */
+  /** PV energy generated today in kWh — sum of both strings: e_pv1_day IR(17) + e_pv2_day IR(19) */
   pvEnergyTodayKwh: number;
+  /** PV string 1 energy generated today in kWh — e_pv1_day IR(17) via toDeci */
+  pvString1EnergyTodayKwh: number;
+  /** PV string 2 energy generated today in kWh — e_pv2_day IR(19) via toDeci */
+  pvString2EnergyTodayKwh: number;
   /** Battery charge energy today in kWh — e_battery_charge_today IR(36) via toDeci */
   batteryChargeEnergyTodayKwh: number;
   /** Battery discharge energy today in kWh — e_battery_discharge_today IR(37) via toDeci */

@@ -373,17 +373,21 @@ describe('SnapshotBuilder', () => {
       cache.inputRegisters.set(25, 1);   // e_grid_out_day: 1 → 0.1 kWh
       const snapshot = buildSnapshot(cache);
       expect(snapshot!.pvEnergyTodayKwh).toBeCloseTo(2.8, 1);
+      expect(snapshot!.pvString1EnergyTodayKwh).toBeCloseTo(1.5, 1);
+      expect(snapshot!.pvString2EnergyTodayKwh).toBeCloseTo(1.3, 1);
       expect(snapshot!.batteryChargeEnergyTodayKwh).toBeCloseTo(9.7, 1);
       expect(snapshot!.batteryDischargeEnergyTodayKwh).toBeCloseTo(7.7, 1);
       expect(snapshot!.gridImportEnergyTodayKwh).toBeCloseTo(13.5, 1);
       expect(snapshot!.gridExportEnergyTodayKwh).toBeCloseTo(0.1, 1);
     });
 
-    it('computes PV today as sum of PV1 and PV2 daily registers', () => {
+    it('exposes per-string PV daily energy and their sum', () => {
       const cache = makeValidCache();
       cache.inputRegisters.set(17, 30);  // e_pv1_day: 3.0 kWh
       cache.inputRegisters.set(19, 20);  // e_pv2_day: 2.0 kWh
       const snapshot = buildSnapshot(cache);
+      expect(snapshot!.pvString1EnergyTodayKwh).toBeCloseTo(3.0, 1);
+      expect(snapshot!.pvString2EnergyTodayKwh).toBeCloseTo(2.0, 1);
       expect(snapshot!.pvEnergyTodayKwh).toBeCloseTo(5.0, 1);
     });
 

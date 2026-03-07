@@ -82,7 +82,7 @@ console.log(`Charger:   ${s.chargerTemperature} °C`);
 console.log(`Battery:   ${s.batteryTemperature} °C`);
 
 console.log('\n--- Energy Today ---');
-console.log(`PV generated:       ${s.pvEnergyTodayKwh} kWh`);
+console.log(`PV generated:       ${s.pvEnergyTodayKwh} kWh (PV1: ${s.pvString1EnergyTodayKwh} kWh, PV2: ${s.pvString2EnergyTodayKwh} kWh)`);
 console.log(`Battery charged:    ${s.batteryChargeEnergyTodayKwh} kWh`);
 console.log(`Battery discharged: ${s.batteryDischargeEnergyTodayKwh} kWh`);
 console.log(`Grid import:        ${s.gridImportEnergyTodayKwh} kWh`);
