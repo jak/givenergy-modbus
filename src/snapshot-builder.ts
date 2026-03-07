@@ -49,6 +49,8 @@ export interface SnapshotBuilderOptions {
   /** slaveAddr → { data: IR cache (fc=4), product: MR cache (fc=22) } for each meter */
   meterRegisterCaches?: Map<number, { data: Map<number, number>; product: Map<number, number> }>;
   isHighVoltage?: boolean;
+  /** BCU topology discovered during HV battery scan */
+  bcuList?: Array<{ bcuIndex: number; moduleCount: number }>;
 }
 
 function getIR(cache: RegisterCache, address: number): number {
