@@ -14,5 +14,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: googleapis/release-please-action@v4
+        id: release
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Add npm and docs links to release notes
+        if: ${{ steps.release.outputs.release_created }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ steps.release.outputs.tag_name }}"
+          VERSION="${{ steps.release.outputs.version }}"
+          BODY=$(gh release view "$TAG" --json body -q .body)
+          printf -v FOOTER '\n\n---\n\n**npm:** [`givenergy-modbus@%s`](https://www.npmjs.com/package/givenergy-modbus/v/%s)\n**Docs:** [jak.github.io/givenergy-modbus](https://jak.github.io/givenergy-modbus/)' "$VERSION" "$VERSION"
+          gh release edit "$TAG" --notes "${BODY}${FOOTER}"
