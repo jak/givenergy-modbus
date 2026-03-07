@@ -8,6 +8,9 @@ export interface GivEnergyInverterOptions {
   host: string;
   port?: number;
   pollIntervalMs?: number;
+  autoReconnect?: boolean;
+  reconnectBackoffMs?: number;
+  reconnectMaxBackoffMs?: number;
 }
 
 export type InverterMode = 'eco' | 'timed_demand' | 'timed_export';
@@ -27,6 +30,10 @@ export abstract class GivEnergyInverter extends EventEmitter {
     this.pollManager.on('data', (snapshot: InverterSnapshot) => this.emit('data', snapshot));
     this.pollManager.on('lost', (err: Error) => this.emit('lost', err));
     this.pollManager.on('debug', (msg: string) => this.emit('debug', msg));
+    this.pollManager.on('reconnecting', (attempt: number, nextRetryMs: number) =>
+      this.emit('reconnecting', attempt, nextRetryMs),
+    );
+    this.pollManager.on('reconnected', () => this.emit('reconnected'));
   }
 
   static async connect(options: GivEnergyInverterOptions): Promise<GivEnergyInverter> {
@@ -34,6 +41,9 @@ export abstract class GivEnergyInverter extends EventEmitter {
       host: options.host,
       port: options.port,
       pollIntervalMs: options.pollIntervalMs,
+      autoReconnect: options.autoReconnect,
+      reconnectBackoffMs: options.reconnectBackoffMs,
+      reconnectMaxBackoffMs: options.reconnectMaxBackoffMs,
     });
     await pollManager.start();
     const snapshot = pollManager.getData();

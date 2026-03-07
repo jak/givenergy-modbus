@@ -137,7 +137,7 @@ describe('PollManager', () => {
 
   it('emits lost event after 10 consecutive failures', () => {
     // Python: if failcount >= 10: rebootaddon() — we emit 'lost' instead
-    const pm = new PollManager({ host: '127.0.0.1' });
+    const pm = new PollManager({ host: '127.0.0.1', autoReconnect: false });
     const lostEvents: Error[] = [];
     pm.on('lost', (err: Error) => lostEvents.push(err));
 
@@ -156,5 +156,147 @@ describe('PollManager', () => {
     const pm = new PollManager({ host: '127.0.0.1' });
     expect(typeof pm.start).toBe('function');
     expect(typeof pm.stop).toBe('function');
+  });
+
+  describe('auto-reconnect', () => {
+    it('does not reconnect when autoReconnect is false', () => {
+      const pm = new PollManager({ host: '127.0.0.1', autoReconnect: false });
+      const lostEvents: Error[] = [];
+      const reconnectingEvents: number[] = [];
+      pm.on('lost', (err: Error) => lostEvents.push(err));
+      pm.on('reconnecting', (attempt: number) => reconnectingEvents.push(attempt));
+
+      (pm as any)._failCount = 9;
+      (pm as any)._handlePollResult(null, new Error('connection lost'));
+
+      expect(lostEvents).toHaveLength(1);
+      expect(reconnectingEvents).toHaveLength(0);
+    });
+
+    it('emits reconnecting events with exponential backoff', async () => {
+      const pm = new PollManager({
+        host: '127.0.0.1',
+        autoReconnect: true,
+        reconnectBackoffMs: 10,
+        reconnectMaxBackoffMs: 40,
+      });
+
+      const events: Array<{ attempt: number; backoff: number }> = [];
+      pm.on('reconnecting', (attempt: number, backoff: number) => {
+        events.push({ attempt, backoff });
+        if (attempt >= 4) pm.stop();
+      });
+
+      (pm as any).client.connect = vi.fn().mockRejectedValue(new Error('refused'));
+      (pm as any).client.close = vi.fn().mockResolvedValue(undefined);
+
+      (pm as any)._failCount = 9;
+      (pm as any)._handlePollResult(null, new Error('connection lost'));
+
+      await vi.waitFor(() => expect(events.length).toBeGreaterThanOrEqual(4), { timeout: 2000 });
+
+      expect(events[0]).toEqual({ attempt: 1, backoff: 10 });
+      expect(events[1]).toEqual({ attempt: 2, backoff: 20 });
+      expect(events[2]).toEqual({ attempt: 3, backoff: 40 });
+      expect(events[3]).toEqual({ attempt: 4, backoff: 40 });
+    });
+
+    it('emits reconnected after successful reconnection', async () => {
+      const pm = new PollManager({
+        host: '127.0.0.1',
+        autoReconnect: true,
+        reconnectBackoffMs: 10,
+        reconnectMaxBackoffMs: 10,
+        pollIntervalMs: 100,
+      });
+
+      let reconnected = false;
+      pm.on('reconnected', () => { reconnected = true; });
+
+      let connectAttempt = 0;
+      (pm as any).client.connect = vi.fn().mockImplementation(async () => {
+        connectAttempt++;
+        if (connectAttempt < 2) throw new Error('refused');
+      });
+      (pm as any).client.close = vi.fn().mockResolvedValue(undefined);
+
+      // Mock _executePoll to succeed on reconnect
+      (pm as any)._executePoll = vi.fn().mockImplementation(async () => {
+        (pm as any)._cache = mockSnapshot;
+        (pm as any)._failCount = 0;
+        (pm as any)._started = true;
+      });
+
+      (pm as any)._failCount = 9;
+      (pm as any)._handlePollResult(null, new Error('connection lost'));
+
+      await vi.waitFor(() => expect(reconnected).toBe(true), { timeout: 2000 });
+
+      expect((pm as any)._pollTimer).not.toBeNull();
+      await pm.stop();
+    });
+
+    it('stop() aborts an in-progress reconnect loop', async () => {
+      const pm = new PollManager({
+        host: '127.0.0.1',
+        autoReconnect: true,
+        reconnectBackoffMs: 50,
+        reconnectMaxBackoffMs: 50,
+      });
+
+      const events: number[] = [];
+      pm.on('reconnecting', (attempt: number) => events.push(attempt));
+
+      (pm as any).client.connect = vi.fn().mockRejectedValue(new Error('refused'));
+      (pm as any).client.close = vi.fn().mockResolvedValue(undefined);
+
+      (pm as any)._failCount = 9;
+      (pm as any)._handlePollResult(null, new Error('connection lost'));
+
+      await vi.waitFor(() => expect(events.length).toBeGreaterThanOrEqual(1), { timeout: 1000 });
+      await pm.stop();
+
+      const countAfterStop = events.length;
+      await new Promise(r => setTimeout(r, 200));
+      expect(events.length).toBe(countAfterStop);
+      expect((pm as any)._reconnecting).toBe(false);
+    });
+
+    it('resets backoff after successful reconnection', async () => {
+      const pm = new PollManager({
+        host: '127.0.0.1',
+        autoReconnect: true,
+        reconnectBackoffMs: 10,
+        reconnectMaxBackoffMs: 40,
+        pollIntervalMs: 50,
+      });
+
+      const allBackoffs: number[] = [];
+      pm.on('reconnecting', (_attempt: number, backoff: number) => {
+        allBackoffs.push(backoff);
+      });
+
+      let connectAttempt = 0;
+      (pm as any).client.connect = vi.fn().mockImplementation(async () => {
+        connectAttempt++;
+        if (connectAttempt <= 2) throw new Error('refused');
+      });
+      (pm as any).client.close = vi.fn().mockResolvedValue(undefined);
+      (pm as any)._executePoll = vi.fn().mockImplementation(async () => {
+        (pm as any)._cache = mockSnapshot;
+        (pm as any)._failCount = 0;
+        (pm as any)._started = true;
+      });
+
+      (pm as any)._failCount = 9;
+      (pm as any)._handlePollResult(null, new Error('lost'));
+
+      await vi.waitFor(() => expect((pm as any)._reconnecting).toBe(false), { timeout: 2000 });
+
+      expect(allBackoffs[0]).toBe(10);
+      expect(allBackoffs[1]).toBe(20);
+
+      await pm.stop();
+    });
   });
 });

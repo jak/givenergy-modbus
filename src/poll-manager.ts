@@ -12,8 +12,11 @@ import type { InverterGeneration } from './generation.js';
 export interface PollManagerOptions {
   host: string;
   port?: number;
-  pollIntervalMs?: number;      // default 15000 (15s partial)
-  fullRefreshIntervalMs?: number; // default 60000 (60s full)
+  pollIntervalMs?: number;        // default 15000 (15s partial)
+  fullRefreshIntervalMs?: number;  // default 60000 (60s full)
+  autoReconnect?: boolean;         // default true
+  reconnectBackoffMs?: number;     // initial backoff, default 5000
+  reconnectMaxBackoffMs?: number;  // max backoff cap, default 300000 (5min)
 }
 
 const INVERTER_SLAVE = 0x11;
@@ -63,6 +66,8 @@ export class PollManager extends EventEmitter {
   private _previousSnapshot: InverterSnapshot | null = null;
   private _polling = false;
   private _generation: InverterGeneration | null = null;
+  private _reconnecting = false;
+  private _reconnectAbort = false;
 
   // Register caches
   private _inputRegisters = new Map<number, number>();
@@ -79,6 +84,9 @@ export class PollManager extends EventEmitter {
       port: options.port ?? 8899,
       pollIntervalMs: options.pollIntervalMs ?? 15_000,
       fullRefreshIntervalMs: options.fullRefreshIntervalMs ?? 60_000,
+      autoReconnect: options.autoReconnect ?? true,
+      reconnectBackoffMs: options.reconnectBackoffMs ?? 5_000,
+      reconnectMaxBackoffMs: options.reconnectMaxBackoffMs ?? 300_000,
     };
     this.client = new Client({
       host: this.options.host,
@@ -118,12 +126,14 @@ export class PollManager extends EventEmitter {
   }
 
   async stop(): Promise<void> {
+    this._reconnectAbort = true;
     if (this._pollTimer) {
       clearInterval(this._pollTimer);
       this._pollTimer = null;
     }
     await this.client.close();
     this._started = false;
+    this._reconnecting = false;
   }
 
   /**
@@ -307,9 +317,57 @@ export class PollManager extends EventEmitter {
       this.emit('data', snapshot);
     } else {
       this._failCount++;
-      if (this._failCount >= 10) {
+      if (this._failCount >= 10 && !this._reconnecting) {
         this.emit('lost', err ?? new Error('too many consecutive failures'));
+        if (this.options.autoReconnect) {
+          if (this._pollTimer) {
+            clearInterval(this._pollTimer);
+            this._pollTimer = null;
+          }
+          this._reconnectLoop();
+        }
       }
     }
+  }
+
+  private async _reconnectLoop(): Promise<void> {
+    this._reconnecting = true;
+    let attempt = 0;
+    let backoff = this.options.reconnectBackoffMs;
+
+    while (!this._reconnectAbort) {
+      attempt++;
+      this.emit('reconnecting', attempt, backoff);
+      this.emit('debug', `reconnect attempt ${attempt}, waiting ${backoff}ms`);
+
+      await this._delay(backoff);
+      if (this._reconnectAbort) break;
+
+      try {
+        await this.client.close();
+        await this.client.connect();
+        // Try a full poll to confirm the connection works
+        await this._executePoll(true);
+
+        if (this._cache && this._failCount === 0) {
+          this.emit('debug', 'reconnected successfully');
+          this.emit('reconnected');
+          this._reconnecting = false;
+          this._failCount = 0;
+          this._pollTimer = setInterval(
+            () => this._executePoll(false),
+            this.options.pollIntervalMs,
+          );
+          return;
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.emit('debug', `reconnect attempt ${attempt} failed: ${msg}`);
+      }
+
+      backoff = Math.min(backoff * 2, this.options.reconnectMaxBackoffMs);
+    }
+
+    this._reconnecting = false;
   }
 }
