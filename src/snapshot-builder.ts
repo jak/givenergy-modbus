@@ -468,6 +468,63 @@ export function buildBatterySnapshot(
   };
 }
 
+/**
+ * Build a BatterySnapshot from a single BMU (Battery Module Unit) register cache.
+ *
+ * BMU modules in HV systems report per-cell data (24 cells) but not pack-level
+ * aggregates (SOC, voltage, energy totals) — those come from the BCU.
+ *
+ * Register layout differences from LV batteries:
+ *  - 24 cell voltages at IR(60-83) instead of 16 at IR(60-75)
+ *  - 24 cell temperatures at IR(90-113) — LV batteries don't have per-cell temps
+ *  - Serial at IR(114-118) instead of IR(110-114)
+ *
+ * Returns null if serial registers are all zero (no module at this address).
+ */
+export function buildBmuSnapshot(
+  irCache: Map<number, number>,
+  bcuIndex: number,
+): BatterySnapshot | null {
+  function get(address: number): number {
+    return irCache.get(address) ?? 0;
+  }
+
+  // serial_number: IR(114-118) — 5 registers, 10-char ASCII
+  const serialRegs = [114, 115, 116, 117, 118].map(a => get(a));
+  const isAllNull = serialRegs.every(r => r === 0);
+  if (isAllNull) {
+    return null;
+  }
+  const serialNumber = registersToString(serialRegs);
+
+  // 24 cell voltages: IR(60-83) via toMilli → V
+  const cellVoltages: number[] = [];
+  for (let i = 0; i < 24; i++) {
+    cellVoltages.push(toMilli(get(60 + i)));
+  }
+
+  // 24 cell temperatures: IR(90-113) via toDeci → °C
+  const cellTemps: number[] = [];
+  for (let i = 0; i < 24; i++) {
+    cellTemps.push(toDeci(get(90 + i)));
+  }
+  const temperatureMax = Math.max(...cellTemps);
+  const temperatureMin = Math.min(...cellTemps);
+
+  return {
+    serialNumber,
+    stateOfCharge: 0,
+    voltage: 0,
+    dischargeEnergyTotalKwh: 0,
+    chargeEnergyTotalKwh: 0,
+    temperatureMax,
+    temperatureMin,
+    cycleCount: 0,
+    cellVoltages,
+    stack: bcuIndex,
+  };
+}
+
 /** Parsed BCU (Battery Control Unit) pack-level data */
 export interface BcuData {
   numberOfModules: number;

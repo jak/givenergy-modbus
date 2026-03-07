@@ -611,6 +611,71 @@ describe('SnapshotBuilder', () => {
     });
   });
 
+  describe('buildBmuSnapshot', () => {
+    function makeBmuCache(): Map<number, number> {
+      const m = new Map<number, number>();
+      // Serial number: IR(114-118) = 'HV12345678'
+      // Note: BMU serial is at IR(114-118), not IR(110-114) like LV batteries
+      const serial = 'HV12345678';
+      for (let i = 0; i < 5; i++) {
+        m.set(114 + i, (serial.charCodeAt(i * 2) << 8) | serial.charCodeAt(i * 2 + 1));
+      }
+      // 24 cell voltages: IR(60-83) = 3300 → toMilli = 3.3V
+      for (let i = 0; i < 24; i++) {
+        m.set(60 + i, 3300);
+      }
+      // 24 cell temperatures: IR(90-113) = 250 → toDeci = 25.0°C
+      for (let i = 0; i < 24; i++) {
+        m.set(90 + i, 250);
+      }
+      return m;
+    }
+
+    it('decodes BMU serial number from IR(114-118), not IR(110-114)', () => {
+      const bmu = buildBmuSnapshot(makeBmuCache(), 0);
+      expect(bmu).not.toBeNull();
+      expect(bmu!.serialNumber).toBe('HV12345678');
+    });
+
+    it('decodes 24 cell voltages via toMilli (vs 16 for LV)', () => {
+      const bmu = buildBmuSnapshot(makeBmuCache(), 0);
+      expect(bmu!.cellVoltages).toHaveLength(24);
+      expect(bmu!.cellVoltages[0]).toBeCloseTo(3.3, 2);
+      expect(bmu!.cellVoltages[23]).toBeCloseTo(3.3, 2);
+    });
+
+    it('derives temperatureMax and temperatureMin from 24 cell temperatures', () => {
+      const cache = makeBmuCache();
+      cache.set(90, 280);  // cell 1: 28.0°C (hottest)
+      cache.set(91, 220);  // cell 2: 22.0°C (coolest)
+      const bmu = buildBmuSnapshot(cache, 0);
+      expect(bmu!.temperatureMax).toBeCloseTo(28.0, 1);
+      expect(bmu!.temperatureMin).toBeCloseTo(22.0, 1);
+    });
+
+    it('sets stack field to the provided BCU index', () => {
+      const bmu = buildBmuSnapshot(makeBmuCache(), 2);
+      expect(bmu!.stack).toBe(2);
+    });
+
+    it('returns null when all serial registers are zero (no module present)', () => {
+      const cache = new Map<number, number>();
+      for (let i = 0; i < 5; i++) {
+        cache.set(114 + i, 0);
+      }
+      expect(buildBmuSnapshot(cache, 0)).toBeNull();
+    });
+
+    it('sets SOC, voltage, energy totals, and cycle count to 0 (BCU provides these)', () => {
+      const bmu = buildBmuSnapshot(makeBmuCache(), 0);
+      expect(bmu!.stateOfCharge).toBe(0);
+      expect(bmu!.voltage).toBe(0);
+      expect(bmu!.chargeEnergyTotalKwh).toBe(0);
+      expect(bmu!.dischargeEnergyTotalKwh).toBe(0);
+      expect(bmu!.cycleCount).toBe(0);
+    });
+  });
+
   describe('buildMeterSnapshot', () => {
     function makeMeterDataCache(): Map<number, number> {
       const m = new Map<number, number>();
