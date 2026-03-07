@@ -47,6 +47,14 @@ inverter.on('lost', (err) => {
   console.error(`Connection lost: ${err.message}`);
 });
 
+inverter.on('reconnecting', (attempt, nextRetryMs) => {
+  console.log(`Reconnecting... attempt ${attempt}, next retry in ${nextRetryMs}ms`);
+});
+
+inverter.on('reconnected', () => {
+  console.log('Reconnected to inverter');
+});
+
 process.on('SIGINT', async () => {
   console.log('\nStopping...');
   await inverter.stop();
