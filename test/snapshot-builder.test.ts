@@ -597,6 +597,11 @@ describe('SnapshotBuilder', () => {
       expect(buildBatterySnapshot(cache)).toBeNull();
     });
 
+    it('LV battery snapshots have no stack field by default', () => {
+      const bat = buildBatterySnapshot(makeBatteryCache());
+      expect(bat!.stack).toBeUndefined();
+    });
+
     it('computes voltage from v_cells_sum via toMilli', () => {
       const cache = makeBatteryCache();
       // v_cells_sum: IR(80) = 52000 → toMilli = 52.0V
