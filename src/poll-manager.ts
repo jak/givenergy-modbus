@@ -236,8 +236,8 @@ export class PollManager extends EventEmitter {
       await this._delay(INTER_READ_DELAY_MS);
 
       if (!bcuValues) {
-        this.emit('debug', `BCU ${bcuIndex} did not respond, stopping BCU scan`);
-        break;
+        this.emit('debug', `BCU ${bcuIndex} did not respond, continuing scan`);
+        continue;
       }
 
       // Store BCU registers
@@ -258,8 +258,8 @@ export class PollManager extends EventEmitter {
         await this._delay(INTER_READ_DELAY_MS);
 
         if (!bmuValues) {
-          this.emit('debug', `BMU ${bmuIndex} did not respond, stopping BMU scan for BCU ${bcuIndex}`);
-          break;
+          this.emit('debug', `BMU ${bmuIndex} did not respond, continuing scan for BCU ${bcuIndex}`);
+          continue;
         }
 
         // Store BMU registers normalized to base 60 for consistent snapshot building.
@@ -320,7 +320,7 @@ export class PollManager extends EventEmitter {
         if (this._deviceType !== null && isHighVoltage(this._deviceType)) {
           await this._scanHvBatteries();
         } else {
-          // LV battery scan
+          // LV battery scan — batteries can be non-contiguous (#6)
           for (const slave of LV_BATTERY_SLAVES) {
             try {
               this.emit('debug', `reading battery registers (slave=0x${slave.toString(16)}, base=${BATTERY_REGISTER_START}, count=${BATTERY_REGISTER_COUNT})`);
@@ -336,8 +336,8 @@ export class PollManager extends EventEmitter {
               batValues.forEach((v, i) => batCache.set(BATTERY_REGISTER_START + i, v));
               this._batteryRegisters.set(slave, batCache);
             } catch {
-              this.emit('debug', `battery 0x${slave.toString(16)} did not respond, stopping battery scan`);
-              break;
+              this.emit('debug', `battery 0x${slave.toString(16)} did not respond, continuing scan`);
+              continue;
             }
           }
         }
