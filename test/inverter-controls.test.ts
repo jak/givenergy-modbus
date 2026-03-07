@@ -92,7 +92,7 @@ function buildTransparentResponse(
 }
 
 function makeHoldingRegisters(serial: string): number[] {
-  const regs = new Array(1200).fill(0);
+  const regs = new Array(4140).fill(0);
 
   // HR(13-17) = serial encoded as 5×uint16
   for (let i = 0; i < 5; i++) {

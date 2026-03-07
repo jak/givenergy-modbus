@@ -59,6 +59,7 @@ const METER_PRODUCT_REGISTER_COUNT = 9; // MR 60-68
  * Holding register layout:
  *  - 0..59:   identity, time, discharge slot 1, enable discharge
  *  - 60..119: charge slots, enable charge, charge target SOC
+ *  - 4080..4139: 32-bit battery energy totals (#8)
  */
 const INPUT_REGISTER_RANGES = [
   { base: 0,   count: 60 },
@@ -417,6 +418,7 @@ export class PollManager extends EventEmitter {
 
   private _holdingRanges(full: boolean): Array<{base: number, count: number}> {
     const gen = this._generation ?? 'gen3'; // default to gen3 until detected
+    // HR(4080-4139) contains 32-bit battery energy totals that don't overflow (#8)
     if (gen === 'three_phase') {
       return full
         ? [{ base: 0, count: 60 }, { base: 60, count: 60 }, { base: 180, count: 60 }, { base: 1080, count: 60 }]
@@ -424,13 +426,13 @@ export class PollManager extends EventEmitter {
     }
     if (gen === 'gen2') {
       return full
-        ? [{ base: 0, count: 60 }, { base: 60, count: 60 }, { base: 180, count: 60 }]
-        : [{ base: 0, count: 60 }, { base: 180, count: 60 }];
+        ? [{ base: 0, count: 60 }, { base: 60, count: 60 }, { base: 180, count: 60 }, { base: 4080, count: 60 }]
+        : [{ base: 0, count: 60 }, { base: 180, count: 60 }, { base: 4080, count: 60 }];
     }
     // gen3
     return full
-      ? [{ base: 0, count: 60 }, { base: 60, count: 60 }, { base: 180, count: 60 }, { base: 240, count: 60 }]
-      : [{ base: 0, count: 60 }, { base: 180, count: 60 }];
+      ? [{ base: 0, count: 60 }, { base: 60, count: 60 }, { base: 180, count: 60 }, { base: 240, count: 60 }, { base: 4080, count: 60 }]
+      : [{ base: 0, count: 60 }, { base: 180, count: 60 }, { base: 4080, count: 60 }];
   }
 
   private _delay(ms: number): Promise<void> {
