@@ -70,6 +70,10 @@ await inverter.syncDateTime();
 
 Full API reference is available at **[jak.github.io/givenergy-modbus](https://jak.github.io/givenergy-modbus/)** — auto-generated from source with TypeDoc.
 
+## MQTT / Home Assistant
+
+If you want to bridge your inverter data to MQTT (with Home Assistant auto-discovery), see **[givenergy-mqtt](https://github.com/jak/givenergy-mqtt)** — built on top of this library.
+
 ## Protocol note
 
 GivEnergy uses a **non-standard Modbus framing** — the standard Modbus TCP Application Data Unit (MBAP) header is modified with a proprietary wrapper that includes a device serial number, data adapter address, and function codes not found in the Modbus specification. This library implements that framing directly using Node.js `net.Socket`. No external Modbus library is used.
