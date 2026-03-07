@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.1.0](https://github.com/jak/givenergy-modbus/compare/givenergy-modbus-v1.0.0...givenergy-modbus-v1.1.0) (2026-03-07)
+
+
+### Features
+
+* implement HV battery scanning ([#14](https://github.com/jak/givenergy-modbus/issues/14)) ([9022c09](https://github.com/jak/givenergy-modbus/commit/9022c09049ad6fe06a23ac538ff2ce74c1228ce5))
+
+
+### Bug Fixes
+
+* apply toDeci before frequency &gt;100 check ([#7](https://github.com/jak/givenergy-modbus/issues/7)) ([#17](https://github.com/jak/givenergy-modbus/issues/17)) ([1e21efc](https://github.com/jak/givenergy-modbus/commit/1e21efc1769f712ee2a5ec42a9be5277da09adce))
+* change license from MIT to GPL-3.0 ([#18](https://github.com/jak/givenergy-modbus/issues/18)) ([658a85b](https://github.com/jak/givenergy-modbus/commit/658a85b09d1de83390434776f274940d423b900c)), closes [#16](https://github.com/jak/givenergy-modbus/issues/16)
+* continue battery scan past non-contiguous slots ([#6](https://github.com/jak/givenergy-modbus/issues/6)) ([#15](https://github.com/jak/givenergy-modbus/issues/15)) ([bedad35](https://github.com/jak/givenergy-modbus/commit/bedad35749bed3eacc3a697f7ec9cf3de7460728))
+* filter ghost batteries with whitespace-only serial numbers ([#11](https://github.com/jak/givenergy-modbus/issues/11)) ([b03f050](https://github.com/jak/givenergy-modbus/commit/b03f050e631523eaa0038bfbd88085146ff1f13b)), closes [#3](https://github.com/jak/givenergy-modbus/issues/3)
+* normalise time slot value 2400 to 00:00 ([#12](https://github.com/jak/givenergy-modbus/issues/12)) ([f9696fe](https://github.com/jak/givenergy-modbus/commit/f9696fea18bfd4a3ae107910b7697b9aeb1f0b16))
+
 ## [1.0.0](https://github.com/jak/givenergy-modbus/compare/givenergy-modbus-v0.1.0...givenergy-modbus-v1.0.0) (2026-03-07)
 
 
