@@ -94,20 +94,17 @@ export function toTimeslot(startRaw: number, endRaw: number): TimeSlot {
 }
 
 /**
- * GivEnergy firmware frequency unit inconsistency workaround.
+ * Convert raw AC frequency register to Hz, handling firmware unit inconsistency (#7).
  *
- * Some firmware versions report AC frequency in a larger unit (values > 100),
- * while others report in a smaller unit. Values > 100 are divided by 10.
+ * Apply toDeci first, then divide by 10 if still > 100. This matches GivTCP
+ * where f_ac1 already has deci applied before the >100 check.
  *
- * After this function, apply toDeci() to get Hz.
- * - Old firmware: 5000 → frequencyScale → 500 → toDeci → 50Hz
- * - Newer firmware: 500 → frequencyScale → 50 → toDeci → 5Hz (!) — caller handles
- *
- * Reference: GivTCP read.py lines 1227-1236
- * Python: if GEInv.f_ac1 > 100: freq = GEInv.f_ac1 / 10
+ * - Standard firmware: 500 → /10 = 50.0, ≤100 → 50Hz
+ * - Old firmware: 5000 → /10 = 500.0, >100 → /10 → 50Hz
  */
 export function frequencyScale(raw: number): number {
-  return raw > 100 ? raw / 10 : raw;
+  const deci = raw / 10;
+  return deci > 100 ? deci / 10 : deci;
 }
 
 /**

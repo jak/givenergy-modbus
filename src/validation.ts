@@ -133,18 +133,19 @@ export function applyEnergyRegisterFallback(
 }
 
 /**
- * Scale AC frequency to Hz, handling firmware unit inconsistency.
+ * Convert raw AC frequency register to Hz, handling firmware unit inconsistency.
  *
- * Some GivEnergy firmware versions report AC frequency multiplied by 10
- * compared to others. Values > 100 are assumed to be in the larger unit
- * and are divided by 10 before applying the standard /10 deci conversion.
+ * GivEnergy firmware versions differ in frequency units (#7):
+ * - Standard firmware: raw value in deci-Hz (e.g. 500 = 50.0Hz)
+ * - Old firmware: raw value in centi-Hz (e.g. 5000 = 50.00Hz)
  *
- * Reference: GivTCP read.py lines 1227-1236
- * Python: if GEInv.f_ac1 > 100: freq = GEInv.f_ac1 / 10
+ * Apply toDeci first to get a base value, then divide by 10 if still > 100.
+ * This matches GivTCP where f_ac1 already has deci applied before the check.
  *
- * Note: This is separate from the toDeci() converter — apply this first,
- * then toDeci() to get Hz.
+ * @param rawFrequency - Raw register value from IR(13)
+ * @returns Frequency in Hz
  */
 export function applyFrequencyScaling(rawFrequency: number): number {
-  return rawFrequency > 100 ? rawFrequency / 10 : rawFrequency;
+  const deci = rawFrequency / 10;
+  return deci > 100 ? deci / 10 : deci;
 }

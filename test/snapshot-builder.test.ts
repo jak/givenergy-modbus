@@ -185,25 +185,21 @@ describe('SnapshotBuilder', () => {
       expect(snapshot!.stateOfCharge).toBe(65);
     });
 
-    it('applies frequency scaling: raw > 100 divided by 10', () => {
-      // Old firmware: frequency register > 100 means raw value needs /10 before toDeci.
-      // 5000 → applyFrequencyScaling → 500 → toDeci → 50.0 Hz
+    it('applies frequency scaling for old firmware centi-Hz values (#7)', () => {
+      // Old firmware: raw=5000 → /10=500 → >100 → /10 → 50Hz
       const cache = makeValidCache();
-      cache.inputRegisters.set(13, 5000); // f_ac1: old firmware centi-Hz
+      cache.inputRegisters.set(13, 5000);
       const snapshot = buildSnapshot(cache);
       expect(snapshot!.gridFrequency).toBeCloseTo(50, 0);
     });
 
-    it('does not scale frequency when raw <= 100', () => {
-      // Newer firmware: already in deci-Hz units.
-      // 500 → applyFrequencyScaling (no change, <= 100 is raw value) → toDeci → 50Hz
-      // Actually 50 raw → applyFrequencyScaling → 50 (no change) → toDeci → 5Hz
-      // The test here checks that the scaling branch is NOT entered for raw=500 (which IS > 100)
-      // So let's use a value <= 100: 50 → no scale → toDeci = 5.0Hz
+    it('applies frequency scaling for standard firmware deci-Hz values (#7)', () => {
+      // Standard firmware: raw=500 → /10=50 → ≤100 → 50Hz
+      // Previously this returned 5Hz due to wrong scaling order.
       const cache = makeValidCache();
-      cache.inputRegisters.set(13, 50); // f_ac1: 50 raw, no scaling → toDeci = 5.0Hz
+      cache.inputRegisters.set(13, 500);
       const snapshot = buildSnapshot(cache);
-      expect(snapshot!.gridFrequency).toBeCloseTo(5.0, 1);
+      expect(snapshot!.gridFrequency).toBeCloseTo(50, 0);
     });
 
     it('reads device type code as model code', () => {
