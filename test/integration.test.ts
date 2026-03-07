@@ -219,10 +219,17 @@ async function startMockInverter(): Promise<MockInverterState> {
                   allRegs = new Array(60).fill(0);
                 }
                 values = allRegs.slice(baseRegister - 60, baseRegister - 60 + registerCount);
+              } else if (slaveAddress >= 0x01 && slaveAddress <= 0x08) {
+                // Meter slaves — respond with zeros (no meter connected)
+                values = new Array(registerCount).fill(0);
               } else {
                 // Unknown slave — don't respond (triggers timeout)
                 continue;
               }
+              socket.write(buildTransparentResponse(slaveAddress, fc, baseRegister, values));
+            } else if (fc === 0x16) {
+              // Read meter product registers — respond with zeros
+              const values = new Array(registerCount).fill(0);
               socket.write(buildTransparentResponse(slaveAddress, fc, baseRegister, values));
             } else if (fc === 0x06) {
               // Write holding register — record and acknowledge
