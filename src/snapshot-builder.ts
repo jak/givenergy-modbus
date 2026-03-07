@@ -468,6 +468,47 @@ export function buildBatterySnapshot(
   };
 }
 
+/** Parsed BCU (Battery Control Unit) pack-level data */
+export interface BcuData {
+  numberOfModules: number;
+  voltage: number;
+  current: number;
+  power: number;
+  stateOfChargeMax: number;
+  stateOfChargeMin: number;
+  stateOfHealth: number;
+  chargeEnergyTotalKwh: number;
+  dischargeEnergyTotalKwh: number;
+  cycleCount: number;
+}
+
+/**
+ * Parse BCU (Battery Control Unit) register data into structured form.
+ *
+ * BCU provides pack-level aggregate data for an HV battery stack.
+ * Individual module data comes from BMU reads.
+ */
+export function parseBcuData(irCache: Map<number, number>): BcuData {
+  function get(address: number): number {
+    return irCache.get(address) ?? 0;
+  }
+
+  const socRegister = get(80);
+
+  return {
+    numberOfModules: get(64),
+    voltage: toDeci(get(73)),
+    current: toDeci(toInt16(get(76))),
+    power: toMilli(get(79)),
+    stateOfChargeMax: (socRegister >> 8) & 0xff,
+    stateOfChargeMin: socRegister & 0xff,
+    stateOfHealth: get(81),
+    chargeEnergyTotalKwh: toDeci(toUint32(get(82), get(83))),
+    dischargeEnergyTotalKwh: toDeci(toUint32(get(84), get(85))),
+    cycleCount: toDeci(get(100)),
+  };
+}
+
 /**
  * Build a MeterSnapshot from a CT meter's data and product register caches.
  *

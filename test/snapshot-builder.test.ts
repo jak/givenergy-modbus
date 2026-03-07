@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildSnapshot, buildBatterySnapshot, buildMeterSnapshot, type RegisterCache } from '../src/snapshot-builder.js';
+import { buildSnapshot, buildBatterySnapshot, buildBmuSnapshot, parseBcuData, buildMeterSnapshot, type RegisterCache } from '../src/snapshot-builder.js';
 
 /**
  * Build a minimal but valid register cache for testing.
@@ -792,6 +792,46 @@ describe('SnapshotBuilder', () => {
       data.set(71, 0);     // p_active_total = 0
       const meter = buildMeterSnapshot(0x01, data, makeMeterProductCache());
       expect(meter!.activePowerTotal).toBe(0);
+    });
+  });
+
+  describe('parseBcuData', () => {
+    function makeBcuCache(): Map<number, number> {
+      const m = new Map<number, number>();
+      m.set(64, 3);      // number_of_modules: 3 BMUs
+      m.set(73, 3840);   // battery_voltage: 3840 → toDeci = 384.0V
+      m.set(76, 50);     // battery_current: 50 → toInt16→toDeci = 5.0A
+      m.set(79, 1920);   // battery_power: 1920 → toMilli = 1.92kW
+      m.set(80, (95 << 8) | 90);  // soc_max=95, soc_min=90
+      m.set(81, 98);     // battery_soh: 98%
+      m.set(82, 0);      // charge_energy_total high
+      m.set(83, 5000);   // charge_energy_total low → uint32→toDeci = 500.0 kWh
+      m.set(84, 0);      // discharge_energy_total high
+      m.set(85, 4500);   // discharge_energy_total low → uint32→toDeci = 450.0 kWh
+      m.set(100, 150);   // number_of_cycles: 150 → toDeci = 15.0
+      return m;
+    }
+
+    it('parses module count from IR(64)', () => {
+      const bcu = parseBcuData(makeBcuCache());
+      expect(bcu.numberOfModules).toBe(3);
+    });
+
+    it('parses charge and discharge energy totals as uint32 toDeci', () => {
+      const bcu = parseBcuData(makeBcuCache());
+      expect(bcu.chargeEnergyTotalKwh).toBeCloseTo(500.0, 1);
+      expect(bcu.dischargeEnergyTotalKwh).toBeCloseTo(450.0, 1);
+    });
+
+    it('extracts SOC max from upper byte and SOC min from lower byte of IR(80)', () => {
+      const bcu = parseBcuData(makeBcuCache());
+      expect(bcu.stateOfChargeMax).toBe(95);
+      expect(bcu.stateOfChargeMin).toBe(90);
+    });
+
+    it('parses cycle count via toDeci', () => {
+      const bcu = parseBcuData(makeBcuCache());
+      expect(bcu.cycleCount).toBeCloseTo(15.0, 1);
     });
   });
 });
