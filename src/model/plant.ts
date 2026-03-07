@@ -25,7 +25,7 @@ const INVALID_SERIALS = new Set([
  *
  * For LV: scans slave addresses 0x32-0x37, stops at first invalid serial.
  * EMS/Gateway: always 0 (no directly connected batteries).
- * HV: returns 0 (BCU detection not yet implemented).
+ * HV: reads BCU count from BAMS register cache at slave 0xA0.
  */
 export function detectBatteries(
   registerCache: Map<number, Map<number, number>>,
@@ -36,7 +36,10 @@ export function detectBatteries(
     return 0;
   }
   if (highVoltage) {
-    return 0;
+    // HV: read BCU count from BAMS at slave 0xA0, IR(61)
+    const bamsCache = registerCache.get(0xa0);
+    if (!bamsCache) return 0;
+    return bamsCache.get(61) ?? 0;
   }
 
   let count = 0;

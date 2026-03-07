@@ -146,6 +146,11 @@ describe('PollManager', () => {
     expect(lostEvents).toHaveLength(1);
   });
 
+  it('stores device type after first successful poll for HV detection', () => {
+    const pm = new PollManager({ host: '127.0.0.1' });
+    expect((pm as any)._deviceType).toBeNull();
+  });
+
   it('extends EventEmitter', () => {
     const pm = new PollManager({ host: '127.0.0.1' });
     expect(typeof pm.on).toBe('function');

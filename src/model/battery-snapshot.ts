@@ -49,4 +49,10 @@ export interface BatterySnapshot {
   cycleCount: number;
   /** 16 individual cell voltages in V — from IR(60-75) via toMilli */
   cellVoltages: number[];
+  /**
+   * HV battery stack index — identifies which BCU (Battery Control Unit) this
+   * module belongs to. Present only for HV systems; undefined for LV batteries.
+   * Modules with the same stack value belong to the same physical battery pack.
+   */
+  stack?: number;
 }

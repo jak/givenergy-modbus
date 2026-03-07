@@ -49,6 +49,8 @@ export interface SnapshotBuilderOptions {
   /** slaveAddr → { data: IR cache (fc=4), product: MR cache (fc=22) } for each meter */
   meterRegisterCaches?: Map<number, { data: Map<number, number>; product: Map<number, number> }>;
   isHighVoltage?: boolean;
+  /** BCU topology discovered during HV battery scan */
+  bcuList?: Array<{ bcuIndex: number; moduleCount: number }>;
 }
 
 function getIR(cache: RegisterCache, address: number): number {
@@ -86,7 +88,9 @@ export function buildSnapshot(
     previousSnapshot = null,
     batteryRegisterCaches = new Map(),
     meterRegisterCaches = new Map(),
+    bcuList = [],
   } = options;
+  const isHv = options.isHighVoltage ?? false;
 
   // ── Sanity check ──────────────────────────────────────────────────────────
   // Reject obviously corrupt data — all register quirks manifest simultaneously.
@@ -313,10 +317,38 @@ export function buildSnapshot(
 
   // ── Batteries ─────────────────────────────────────────────────────────────
   const batteries: BatterySnapshot[] = [];
-  for (const [, irCache] of batteryRegisterCaches) {
-    const bat = buildBatterySnapshot(irCache);
-    if (bat !== null) {
-      batteries.push(bat);
+
+  if (isHv && bcuList.length > 0) {
+    // HV: build BMU snapshots from per-module register caches
+    for (const { bcuIndex, moduleCount } of bcuList) {
+      const bcuSlave = 0x70 + bcuIndex;
+      const bcuCache = batteryRegisterCaches.get(bcuSlave);
+      const bcuData = bcuCache ? parseBcuData(bcuCache) : null;
+
+      for (let bmuIndex = 0; bmuIndex < moduleCount; bmuIndex++) {
+        const bmuKey = (bcuIndex << 8) | bmuIndex;
+        const bmuCache = batteryRegisterCaches.get(bmuKey);
+        if (!bmuCache) continue;
+
+        const bmu = buildBmuSnapshot(bmuCache, bcuIndex);
+        if (bmu !== null) {
+          // Populate pack-level data from BCU onto each BMU snapshot
+          if (bcuData) {
+            bmu.stateOfCharge = bcuData.stateOfChargeMax;
+            bmu.voltage = bcuData.voltage;
+            bmu.cycleCount = bcuData.cycleCount;
+          }
+          batteries.push(bmu);
+        }
+      }
+    }
+  } else {
+    // LV: existing logic
+    for (const [, irCache] of batteryRegisterCaches) {
+      const bat = buildBatterySnapshot(irCache);
+      if (bat !== null) {
+        batteries.push(bat);
+      }
     }
   }
 
@@ -330,18 +362,29 @@ export function buildSnapshot(
   }
 
   // Battery charge/discharge totals:
-  //   Primary: battery module registers IR(106)/IR(105) (summed across all batteries)
+  //   HV: sum energy totals from all BCUs
+  //   LV primary: battery module registers IR(106)/IR(105) (summed across all batteries)
   //   Fallback: inverter registers IR(181) charge / HR(180) discharge
   //   Last resort: IR(27,28) e_inverter_in_total / IR(29) e_discharge_year
   let batteryChargeEnergyTotalKwh = 0;
   let batteryDischargeEnergyTotalKwh = 0;
-  if (batteries.length > 0) {
-    // Sum across all battery modules (GivTCP does this per-battery)
+
+  if (isHv && bcuList.length > 0) {
+    // HV: sum energy totals from all BCUs
+    for (const { bcuIndex } of bcuList) {
+      const bcuSlave = 0x70 + bcuIndex;
+      const bcuCache = batteryRegisterCaches.get(bcuSlave);
+      if (bcuCache) {
+        const bcuData = parseBcuData(bcuCache);
+        batteryChargeEnergyTotalKwh += bcuData.chargeEnergyTotalKwh;
+        batteryDischargeEnergyTotalKwh += bcuData.dischargeEnergyTotalKwh;
+      }
+    }
+  } else if (batteries.length > 0) {
     batteryChargeEnergyTotalKwh = batteries.reduce((sum, b) => sum + b.chargeEnergyTotalKwh, 0);
     batteryDischargeEnergyTotalKwh = batteries.reduce((sum, b) => sum + b.dischargeEnergyTotalKwh, 0);
   }
   if (batteryChargeEnergyTotalKwh === 0 && batteryDischargeEnergyTotalKwh === 0) {
-    // No battery data — fall back to inverter registers
     const invCharge = toDeci(getIR(cache, 181));
     const invDischarge = toDeci(getHR(cache, 180));
     if (invCharge !== 0 || invDischarge !== 0) {
@@ -465,6 +508,104 @@ export function buildBatterySnapshot(
     temperatureMin,
     cycleCount,
     cellVoltages,
+  };
+}
+
+/**
+ * Build a BatterySnapshot from a single BMU (Battery Module Unit) register cache.
+ *
+ * BMU modules in HV systems report per-cell data (24 cells) but not pack-level
+ * aggregates (SOC, voltage, energy totals) — those come from the BCU.
+ *
+ * Register layout differences from LV batteries:
+ *  - 24 cell voltages at IR(60-83) instead of 16 at IR(60-75)
+ *  - 24 cell temperatures at IR(90-113) — LV batteries don't have per-cell temps
+ *  - Serial at IR(114-118) instead of IR(110-114)
+ *
+ * Returns null if serial registers are all zero (no module at this address).
+ */
+export function buildBmuSnapshot(
+  irCache: Map<number, number>,
+  bcuIndex: number,
+): BatterySnapshot | null {
+  function get(address: number): number {
+    return irCache.get(address) ?? 0;
+  }
+
+  // serial_number: IR(114-118) — 5 registers, 10-char ASCII
+  const serialRegs = [114, 115, 116, 117, 118].map(a => get(a));
+  const isAllNull = serialRegs.every(r => r === 0);
+  if (isAllNull) {
+    return null;
+  }
+  const serialNumber = registersToString(serialRegs);
+
+  // 24 cell voltages: IR(60-83) via toMilli → V
+  const cellVoltages: number[] = [];
+  for (let i = 0; i < 24; i++) {
+    cellVoltages.push(toMilli(get(60 + i)));
+  }
+
+  // 24 cell temperatures: IR(90-113) via toDeci → °C
+  const cellTemps: number[] = [];
+  for (let i = 0; i < 24; i++) {
+    cellTemps.push(toDeci(get(90 + i)));
+  }
+  const temperatureMax = Math.max(...cellTemps);
+  const temperatureMin = Math.min(...cellTemps);
+
+  return {
+    serialNumber,
+    stateOfCharge: 0,
+    voltage: 0,
+    dischargeEnergyTotalKwh: 0,
+    chargeEnergyTotalKwh: 0,
+    temperatureMax,
+    temperatureMin,
+    cycleCount: 0,
+    cellVoltages,
+    stack: bcuIndex,
+  };
+}
+
+/** Parsed BCU (Battery Control Unit) pack-level data */
+export interface BcuData {
+  numberOfModules: number;
+  voltage: number;
+  current: number;
+  power: number;
+  stateOfChargeMax: number;
+  stateOfChargeMin: number;
+  stateOfHealth: number;
+  chargeEnergyTotalKwh: number;
+  dischargeEnergyTotalKwh: number;
+  cycleCount: number;
+}
+
+/**
+ * Parse BCU (Battery Control Unit) register data into structured form.
+ *
+ * BCU provides pack-level aggregate data for an HV battery stack.
+ * Individual module data comes from BMU reads.
+ */
+export function parseBcuData(irCache: Map<number, number>): BcuData {
+  function get(address: number): number {
+    return irCache.get(address) ?? 0;
+  }
+
+  const socRegister = get(80);
+
+  return {
+    numberOfModules: get(64),
+    voltage: toDeci(get(73)),
+    current: toDeci(toInt16(get(76))),
+    power: toMilli(get(79)),
+    stateOfChargeMax: (socRegister >> 8) & 0xff,
+    stateOfChargeMin: socRegister & 0xff,
+    stateOfHealth: get(81),
+    chargeEnergyTotalKwh: toDeci(toUint32(get(82), get(83))),
+    dischargeEnergyTotalKwh: toDeci(toUint32(get(84), get(85))),
+    cycleCount: toDeci(get(100)),
   };
 }
 

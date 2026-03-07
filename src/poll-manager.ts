@@ -8,6 +8,8 @@ import {
 } from './pdu/encode.js';
 import type { InverterSnapshot } from './model/inverter-snapshot.js';
 import type { InverterGeneration } from './generation.js';
+import { detectModel, isHighVoltage } from './model/device-types.js';
+import type { DeviceType } from './model/device-types.js';
 
 export interface PollManagerOptions {
   host: string;
@@ -24,6 +26,20 @@ const BATTERY_REGISTER_START = 60;
 const BATTERY_REGISTER_COUNT = 60;
 const LV_BATTERY_SLAVES = [0x32, 0x33, 0x34, 0x35, 0x36, 0x37];
 const METER_SLAVES = [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08];
+/** BAMS (Battery Aggregation & Management System) slave address — reports BCU count */
+const BAMS_SLAVE = 0xa0;
+/** BAMS register containing number of BCUs */
+const BAMS_NUMBER_OF_BCUS_REGISTER = 61;
+/** BCU (Battery Control Unit) base slave address — BCU N is at 0x70 + N */
+const BCU_BASE_SLAVE = 0x70;
+/** BCU register containing number of BMUs (modules) in this BCU */
+const BCU_NUMBER_OF_MODULES_REGISTER = 64;
+/** BMU (Battery Module Unit) base slave address — BMU N is at 0x50 + N */
+const BMU_BASE_SLAVE = 0x50;
+/** BMU register read count — 60 registers per module */
+const BMU_REGISTER_COUNT = 60;
+/** BMU base register offset multiplier — each BCU adds 120 to the base */
+const BMU_BCU_OFFSET = 120;
 const METER_DATA_REGISTER_START = 60;
 const METER_DATA_REGISTER_COUNT = 29; // IR 60-88
 const METER_PRODUCT_REGISTER_START = 60;
@@ -68,6 +84,8 @@ export class PollManager extends EventEmitter {
   private _generation: InverterGeneration | null = null;
   private _reconnecting = false;
   private _reconnectAbort = false;
+  private _deviceType: DeviceType | null = null;
+  private _bcuList: Array<{ bcuIndex: number; moduleCount: number }> = [];
 
   // Register caches
   private _inputRegisters = new Map<number, number>();
@@ -166,6 +184,96 @@ export class PollManager extends EventEmitter {
     }
   }
 
+  /**
+   * Read input registers from a battery/BCU/BMU slave.
+   * Returns the register values, or null on failure.
+   */
+  private async _readSlaveRegisters(
+    slaveAddress: number,
+    baseRegister: number,
+    registerCount: number,
+  ): Promise<number[] | null> {
+    const frame = encodeReadInputRegistersRequest({
+      dataAdapterSerial: this.client.dataAdapterSerial,
+      slaveAddress,
+      baseRegister,
+      registerCount,
+    });
+    try {
+      return await this.client.sendRequest(frame);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Scan HV battery hierarchy: BAMS → BCU → BMU.
+   *
+   * 1. Read BAMS at 0xA0 to discover BCU count
+   * 2. Read each BCU at 0x70+N for pack data and module count
+   * 3. Read each BMU at 0x50+N with base register offset per BCU
+   */
+  private async _scanHvBatteries(): Promise<void> {
+    // Step 1: Read BAMS to discover BCU count
+    this.emit('debug', `reading BAMS (slave=0x${BAMS_SLAVE.toString(16)}, base=${BATTERY_REGISTER_START}, count=5)`);
+    const bamsValues = await this._readSlaveRegisters(BAMS_SLAVE, BATTERY_REGISTER_START, 5);
+    if (!bamsValues) {
+      this.emit('debug', 'BAMS did not respond, skipping HV battery scan');
+      return;
+    }
+    const numberOfBcus = bamsValues[BAMS_NUMBER_OF_BCUS_REGISTER - BATTERY_REGISTER_START] ?? 0;
+    this.emit('debug', `BAMS reports ${numberOfBcus} BCU(s)`);
+
+    if (numberOfBcus === 0) return;
+
+    this._bcuList = [];
+
+    // Step 2: Read each BCU
+    for (let bcuIndex = 0; bcuIndex < numberOfBcus; bcuIndex++) {
+      const bcuSlave = BCU_BASE_SLAVE + bcuIndex;
+      this.emit('debug', `reading BCU ${bcuIndex} (slave=0x${bcuSlave.toString(16)}, base=${BATTERY_REGISTER_START}, count=${BATTERY_REGISTER_COUNT})`);
+      const bcuValues = await this._readSlaveRegisters(bcuSlave, BATTERY_REGISTER_START, BATTERY_REGISTER_COUNT);
+      await this._delay(INTER_READ_DELAY_MS);
+
+      if (!bcuValues) {
+        this.emit('debug', `BCU ${bcuIndex} did not respond, stopping BCU scan`);
+        break;
+      }
+
+      // Store BCU registers
+      const bcuCache = new Map<number, number>();
+      bcuValues.forEach((v, i) => bcuCache.set(BATTERY_REGISTER_START + i, v));
+      this._batteryRegisters.set(bcuSlave, bcuCache);
+
+      const moduleCount = bcuValues[BCU_NUMBER_OF_MODULES_REGISTER - BATTERY_REGISTER_START] ?? 0;
+      this.emit('debug', `BCU ${bcuIndex} has ${moduleCount} module(s)`);
+      this._bcuList.push({ bcuIndex, moduleCount });
+
+      // Step 3: Read each BMU for this BCU
+      for (let bmuIndex = 0; bmuIndex < moduleCount; bmuIndex++) {
+        const bmuSlave = BMU_BASE_SLAVE + bmuIndex;
+        const bmuBase = BATTERY_REGISTER_START + (BMU_BCU_OFFSET * bcuIndex);
+        this.emit('debug', `reading BMU ${bmuIndex} (slave=0x${bmuSlave.toString(16)}, base=${bmuBase}, count=${BMU_REGISTER_COUNT})`);
+        const bmuValues = await this._readSlaveRegisters(bmuSlave, bmuBase, BMU_REGISTER_COUNT);
+        await this._delay(INTER_READ_DELAY_MS);
+
+        if (!bmuValues) {
+          this.emit('debug', `BMU ${bmuIndex} did not respond, stopping BMU scan for BCU ${bcuIndex}`);
+          break;
+        }
+
+        // Store BMU registers normalized to base 60 for consistent snapshot building.
+        // The BCU offset only affects the Modbus request addressing, not the register layout.
+        const bmuKey = (bcuIndex << 8) | bmuIndex;
+        const bmuCache = new Map<number, number>();
+        bmuValues.forEach((v, i) => bmuCache.set(BATTERY_REGISTER_START + i, v));
+        this._batteryRegisters.set(bmuKey, bmuCache);
+
+        this.emit('debug', `BMU ${bmuIndex} ok (${bmuValues.length} values)`);
+      }
+    }
+  }
+
   private async _executePoll(fullRefresh = false): Promise<void> {
     if (this._polling) return;
     this._polling = true;
@@ -196,23 +304,41 @@ export class PollManager extends EventEmitter {
       await this._delay(PUSH_DATA_SOAK_MS);
 
       if (doFull) {
-        for (const slave of LV_BATTERY_SLAVES) {
-          try {
-            this.emit('debug', `reading battery registers (slave=0x${slave.toString(16)}, base=${BATTERY_REGISTER_START}, count=${BATTERY_REGISTER_COUNT})`);
-            const batFrame = encodeReadInputRegistersRequest({
-              dataAdapterSerial: this.client.dataAdapterSerial,
-              slaveAddress: slave,
-              baseRegister: BATTERY_REGISTER_START,
-              registerCount: BATTERY_REGISTER_COUNT,
-            });
-            const batValues = await this.client.sendRequest(batFrame);
-            this.emit('debug', `battery 0x${slave.toString(16)} ok (${batValues.length} values)`);
-            const batCache = this._batteryRegisters.get(slave) ?? new Map<number, number>();
-            batValues.forEach((v, i) => batCache.set(BATTERY_REGISTER_START + i, v));
-            this._batteryRegisters.set(slave, batCache);
-          } catch {
-            this.emit('debug', `battery 0x${slave.toString(16)} did not respond, stopping battery scan`);
-            break;
+        // Detect device type for HV vs LV battery scanning
+        if (this._deviceType === null) {
+          const modelCode = this._holdingRegisters.get(0) ?? 0;
+          const armFw = this._holdingRegisters.get(21) ?? 0;
+          if (modelCode !== 0) {
+            this._deviceType = detectModel(modelCode, armFw);
+            this.emit('debug', `detected device type: ${this._deviceType} (HV: ${isHighVoltage(this._deviceType)})`);
+          }
+        }
+
+        // Clear previous battery data for full refresh
+        this._batteryRegisters.clear();
+
+        if (this._deviceType !== null && isHighVoltage(this._deviceType)) {
+          await this._scanHvBatteries();
+        } else {
+          // LV battery scan
+          for (const slave of LV_BATTERY_SLAVES) {
+            try {
+              this.emit('debug', `reading battery registers (slave=0x${slave.toString(16)}, base=${BATTERY_REGISTER_START}, count=${BATTERY_REGISTER_COUNT})`);
+              const batFrame = encodeReadInputRegistersRequest({
+                dataAdapterSerial: this.client.dataAdapterSerial,
+                slaveAddress: slave,
+                baseRegister: BATTERY_REGISTER_START,
+                registerCount: BATTERY_REGISTER_COUNT,
+              });
+              const batValues = await this.client.sendRequest(batFrame);
+              this.emit('debug', `battery 0x${slave.toString(16)} ok (${batValues.length} values)`);
+              const batCache = this._batteryRegisters.get(slave) ?? new Map<number, number>();
+              batValues.forEach((v, i) => batCache.set(BATTERY_REGISTER_START + i, v));
+              this._batteryRegisters.set(slave, batCache);
+            } catch {
+              this.emit('debug', `battery 0x${slave.toString(16)} did not respond, stopping battery scan`);
+              break;
+            }
           }
         }
         // Scan meters on all 8 slaves — meters can be non-contiguous, so use
@@ -270,6 +396,8 @@ export class PollManager extends EventEmitter {
         previousSnapshot: this._previousSnapshot,
         batteryRegisterCaches: this._batteryRegisters,
         meterRegisterCaches,
+        isHighVoltage: this._deviceType !== null && isHighVoltage(this._deviceType),
+        bcuList: this._bcuList,
       });
 
       if (this._generation === null && snapshot !== null) {

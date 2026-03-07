@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { parseSubnet, discover } from '../src/discover.js';
+import { detectBatteries } from '../src/model/plant.js';
 import * as net from 'net';
 
 describe('parseSubnet', () => {
@@ -63,4 +64,21 @@ describe('discover', () => {
     const results = await discover('127.0.0.1/32');
     expect(Array.isArray(results)).toBe(true);
   }, 3000);
+});
+
+describe('detectBatteries', () => {
+  it('returns BCU count for HV devices from BAMS data', () => {
+    // HV systems report battery count via BAMS, not by scanning LV slave addresses.
+    const registerCache = new Map<number, Map<number, number>>();
+    // BAMS slave 0xA0 with 2 BCUs at IR(61)
+    const bamsCache = new Map<number, number>();
+    bamsCache.set(61, 2);
+    registerCache.set(0xa0, bamsCache);
+    expect(detectBatteries(registerCache, true)).toBe(2);
+  });
+
+  it('returns 0 for HV devices when BAMS data is missing', () => {
+    const registerCache = new Map<number, Map<number, number>>();
+    expect(detectBatteries(registerCache, true)).toBe(0);
+  });
 });

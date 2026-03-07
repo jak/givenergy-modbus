@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildSnapshot, buildBatterySnapshot, buildMeterSnapshot, type RegisterCache } from '../src/snapshot-builder.js';
+import { buildSnapshot, buildBatterySnapshot, buildBmuSnapshot, parseBcuData, buildMeterSnapshot, type RegisterCache } from '../src/snapshot-builder.js';
 
 /**
  * Build a minimal but valid register cache for testing.
@@ -358,6 +358,121 @@ describe('SnapshotBuilder', () => {
       expect(snapshot!.systemTime).toBe(prevTime);
     });
 
+    it('builds BMU battery snapshots with stack field for HV systems', () => {
+      const cache = makeValidCache();
+      // Set device type to AIO (HV)
+      cache.holdingRegisters.set(0, 0x8001);
+
+      // BCU 0 data at slave 0x70
+      const bcuCache = new Map<number, number>();
+      bcuCache.set(64, 2);     // 2 modules
+      bcuCache.set(73, 3840);  // battery_voltage → toDeci = 384.0V
+      bcuCache.set(80, (95 << 8) | 90);  // soc_max=95, soc_min=90
+      bcuCache.set(82, 0);     // charge_energy_total high
+      bcuCache.set(83, 5000);  // charge_energy_total low → 500.0 kWh
+      bcuCache.set(84, 0);     // discharge_energy_total high
+      bcuCache.set(85, 4500);  // discharge_energy_total low → 450.0 kWh
+      bcuCache.set(100, 150);  // cycles → toDeci = 15.0
+
+      // BMU 0 (key = (0 << 8) | 0 = 0)
+      const bmu0Cache = new Map<number, number>();
+      const serial0 = 'HV00000001';
+      for (let i = 0; i < 5; i++) {
+        bmu0Cache.set(114 + i, (serial0.charCodeAt(i * 2) << 8) | serial0.charCodeAt(i * 2 + 1));
+      }
+      for (let i = 0; i < 24; i++) {
+        bmu0Cache.set(60 + i, 3300);
+        bmu0Cache.set(90 + i, 250);
+      }
+
+      // BMU 1 (key = (0 << 8) | 1 = 1)
+      const bmu1Cache = new Map<number, number>();
+      const serial1 = 'HV00000002';
+      for (let i = 0; i < 5; i++) {
+        bmu1Cache.set(114 + i, (serial1.charCodeAt(i * 2) << 8) | serial1.charCodeAt(i * 2 + 1));
+      }
+      for (let i = 0; i < 24; i++) {
+        bmu1Cache.set(60 + i, 3300);
+        bmu1Cache.set(90 + i, 250);
+      }
+
+      const batteryCaches = new Map<number, Map<number, number>>([
+        [0x70, bcuCache],
+        [0, bmu0Cache],     // bcuIndex=0, bmuIndex=0
+        [1, bmu1Cache],     // bcuIndex=0, bmuIndex=1
+      ]);
+
+      const snapshot = buildSnapshot(cache, {
+        batteryRegisterCaches: batteryCaches,
+        isHighVoltage: true,
+        bcuList: [{ bcuIndex: 0, moduleCount: 2 }],
+      });
+
+      expect(snapshot!.batteries).toHaveLength(2);
+      expect(snapshot!.batteries[0].serialNumber).toBe('HV00000001');
+      expect(snapshot!.batteries[0].stack).toBe(0);
+      expect(snapshot!.batteries[0].cellVoltages).toHaveLength(24);
+      expect(snapshot!.batteries[0].stateOfCharge).toBe(95);
+      expect(snapshot!.batteries[0].voltage).toBeCloseTo(384.0, 1);
+      expect(snapshot!.batteries[0].cycleCount).toBeCloseTo(15.0, 1);
+      expect(snapshot!.batteries[1].serialNumber).toBe('HV00000002');
+      expect(snapshot!.batteries[1].stack).toBe(0);
+    });
+
+    it('populates inverter battery energy totals from BCU data for HV systems', () => {
+      const cache = makeValidCache();
+      cache.holdingRegisters.set(0, 0x8001);
+
+      const bcuCache = new Map<number, number>();
+      bcuCache.set(64, 1);
+      bcuCache.set(82, 0);
+      bcuCache.set(83, 5000);  // charge_total → 500.0 kWh
+      bcuCache.set(84, 0);
+      bcuCache.set(85, 4500);  // discharge_total → 450.0 kWh
+
+      // Minimal BMU
+      const bmuCache = new Map<number, number>();
+      const serial = 'HV00000001';
+      for (let i = 0; i < 5; i++) {
+        bmuCache.set(114 + i, (serial.charCodeAt(i * 2) << 8) | serial.charCodeAt(i * 2 + 1));
+      }
+
+      const batteryCaches = new Map<number, Map<number, number>>([
+        [0x70, bcuCache],
+        [0, bmuCache],
+      ]);
+
+      const snapshot = buildSnapshot(cache, {
+        batteryRegisterCaches: batteryCaches,
+        isHighVoltage: true,
+        bcuList: [{ bcuIndex: 0, moduleCount: 1 }],
+      });
+
+      expect(snapshot!.batteryChargeEnergyTotalKwh).toBeCloseTo(500.0, 1);
+      expect(snapshot!.batteryDischargeEnergyTotalKwh).toBeCloseTo(450.0, 1);
+    });
+
+    it('LV battery scan is unchanged when not HV', () => {
+      const cache = makeValidCache();
+      const batteryCache = new Map<number, number>();
+      const serial = 'CE1234B001';
+      for (let i = 0; i < 5; i++) {
+        batteryCache.set(110 + i, (serial.charCodeAt(i * 2) << 8) | serial.charCodeAt(i * 2 + 1));
+      }
+      batteryCache.set(100, 80);
+      for (let i = 0; i < 16; i++) batteryCache.set(60 + i, 3250);
+
+      const snapshot = buildSnapshot(cache, {
+        batteryRegisterCaches: new Map([[0x32, batteryCache]]),
+        isHighVoltage: false,
+      });
+
+      expect(snapshot!.batteries).toHaveLength(1);
+      expect(snapshot!.batteries[0].serialNumber).toBe('CE1234B001');
+      expect(snapshot!.batteries[0].stack).toBeUndefined();
+      expect(snapshot!.batteries[0].cellVoltages).toHaveLength(16);
+    });
+
     it('returns batteries as empty array when no battery caches provided', () => {
       const snapshot = buildSnapshot(makeValidCache());
       expect(snapshot!.batteries).toHaveLength(0);
@@ -597,6 +712,11 @@ describe('SnapshotBuilder', () => {
       expect(buildBatterySnapshot(cache)).toBeNull();
     });
 
+    it('LV battery snapshots have no stack field by default', () => {
+      const bat = buildBatterySnapshot(makeBatteryCache());
+      expect(bat!.stack).toBeUndefined();
+    });
+
     it('returns null for whitespace-only serial (ghost battery, #3)', () => {
       // Users with 2 physical batteries see a 3rd ghost battery whose serial
       // registers are 0x2020 (two ASCII spaces per register = 10 spaces total).
@@ -614,6 +734,71 @@ describe('SnapshotBuilder', () => {
       cache.set(80, 52000);
       const bat = buildBatterySnapshot(cache);
       expect(bat!.voltage).toBeCloseTo(52.0, 1);
+    });
+  });
+
+  describe('buildBmuSnapshot', () => {
+    function makeBmuCache(): Map<number, number> {
+      const m = new Map<number, number>();
+      // Serial number: IR(114-118) = 'HV12345678'
+      // Note: BMU serial is at IR(114-118), not IR(110-114) like LV batteries
+      const serial = 'HV12345678';
+      for (let i = 0; i < 5; i++) {
+        m.set(114 + i, (serial.charCodeAt(i * 2) << 8) | serial.charCodeAt(i * 2 + 1));
+      }
+      // 24 cell voltages: IR(60-83) = 3300 → toMilli = 3.3V
+      for (let i = 0; i < 24; i++) {
+        m.set(60 + i, 3300);
+      }
+      // 24 cell temperatures: IR(90-113) = 250 → toDeci = 25.0°C
+      for (let i = 0; i < 24; i++) {
+        m.set(90 + i, 250);
+      }
+      return m;
+    }
+
+    it('decodes BMU serial number from IR(114-118), not IR(110-114)', () => {
+      const bmu = buildBmuSnapshot(makeBmuCache(), 0);
+      expect(bmu).not.toBeNull();
+      expect(bmu!.serialNumber).toBe('HV12345678');
+    });
+
+    it('decodes 24 cell voltages via toMilli (vs 16 for LV)', () => {
+      const bmu = buildBmuSnapshot(makeBmuCache(), 0);
+      expect(bmu!.cellVoltages).toHaveLength(24);
+      expect(bmu!.cellVoltages[0]).toBeCloseTo(3.3, 2);
+      expect(bmu!.cellVoltages[23]).toBeCloseTo(3.3, 2);
+    });
+
+    it('derives temperatureMax and temperatureMin from 24 cell temperatures', () => {
+      const cache = makeBmuCache();
+      cache.set(90, 280);  // cell 1: 28.0°C (hottest)
+      cache.set(91, 220);  // cell 2: 22.0°C (coolest)
+      const bmu = buildBmuSnapshot(cache, 0);
+      expect(bmu!.temperatureMax).toBeCloseTo(28.0, 1);
+      expect(bmu!.temperatureMin).toBeCloseTo(22.0, 1);
+    });
+
+    it('sets stack field to the provided BCU index', () => {
+      const bmu = buildBmuSnapshot(makeBmuCache(), 2);
+      expect(bmu!.stack).toBe(2);
+    });
+
+    it('returns null when all serial registers are zero (no module present)', () => {
+      const cache = new Map<number, number>();
+      for (let i = 0; i < 5; i++) {
+        cache.set(114 + i, 0);
+      }
+      expect(buildBmuSnapshot(cache, 0)).toBeNull();
+    });
+
+    it('sets SOC, voltage, energy totals, and cycle count to 0 (BCU provides these)', () => {
+      const bmu = buildBmuSnapshot(makeBmuCache(), 0);
+      expect(bmu!.stateOfCharge).toBe(0);
+      expect(bmu!.voltage).toBe(0);
+      expect(bmu!.chargeEnergyTotalKwh).toBe(0);
+      expect(bmu!.dischargeEnergyTotalKwh).toBe(0);
+      expect(bmu!.cycleCount).toBe(0);
     });
   });
 
@@ -798,6 +983,46 @@ describe('SnapshotBuilder', () => {
       data.set(71, 0);     // p_active_total = 0
       const meter = buildMeterSnapshot(0x01, data, makeMeterProductCache());
       expect(meter!.activePowerTotal).toBe(0);
+    });
+  });
+
+  describe('parseBcuData', () => {
+    function makeBcuCache(): Map<number, number> {
+      const m = new Map<number, number>();
+      m.set(64, 3);      // number_of_modules: 3 BMUs
+      m.set(73, 3840);   // battery_voltage: 3840 → toDeci = 384.0V
+      m.set(76, 50);     // battery_current: 50 → toInt16→toDeci = 5.0A
+      m.set(79, 1920);   // battery_power: 1920 → toMilli = 1.92kW
+      m.set(80, (95 << 8) | 90);  // soc_max=95, soc_min=90
+      m.set(81, 98);     // battery_soh: 98%
+      m.set(82, 0);      // charge_energy_total high
+      m.set(83, 5000);   // charge_energy_total low → uint32→toDeci = 500.0 kWh
+      m.set(84, 0);      // discharge_energy_total high
+      m.set(85, 4500);   // discharge_energy_total low → uint32→toDeci = 450.0 kWh
+      m.set(100, 150);   // number_of_cycles: 150 → toDeci = 15.0
+      return m;
+    }
+
+    it('parses module count from IR(64)', () => {
+      const bcu = parseBcuData(makeBcuCache());
+      expect(bcu.numberOfModules).toBe(3);
+    });
+
+    it('parses charge and discharge energy totals as uint32 toDeci', () => {
+      const bcu = parseBcuData(makeBcuCache());
+      expect(bcu.chargeEnergyTotalKwh).toBeCloseTo(500.0, 1);
+      expect(bcu.dischargeEnergyTotalKwh).toBeCloseTo(450.0, 1);
+    });
+
+    it('extracts SOC max from upper byte and SOC min from lower byte of IR(80)', () => {
+      const bcu = parseBcuData(makeBcuCache());
+      expect(bcu.stateOfChargeMax).toBe(95);
+      expect(bcu.stateOfChargeMin).toBe(90);
+    });
+
+    it('parses cycle count via toDeci', () => {
+      const bcu = parseBcuData(makeBcuCache());
+      expect(bcu.cycleCount).toBeCloseTo(15.0, 1);
     });
   });
 });
