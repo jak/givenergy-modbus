@@ -71,26 +71,45 @@ export function applyStateOfChargeFallback(
 /**
  * Apply the inverter time fallback.
  *
- * GivEnergy inverters ship with RTC defaulted to year 2000.
- * If the inverter hasn't synced time (NTP failure or no internet),
- * it reports year 2000 timestamps which are meaningless.
+ * Takes raw date components from holding registers HR(35-40) and validates
+ * them before constructing a Date. This prevents JavaScript's Date constructor
+ * from silently overflowing invalid values (e.g. month=13 → January next year).
  *
  * Fallback chain:
- * 1. If year != 2000: use reported time
- * 2. If year == 2000 and previous time cached: use previous
- * 3. If year == 2000 and no cache: use current local time
+ * 1. If components are valid and year != 2000: construct and use reported time
+ * 2. If invalid or year == 2000, and previous time cached: use previous
+ * 3. If invalid or year == 2000, and no cache: use current local time
  *
- * Reference: GivTCP read.py lines 814-823
+ * Fixes #9: at year boundaries the inverter can report month=13 or other
+ * out-of-range components, producing silently wrong dates.
  *
- * @param reportedTime - Time reported by inverter
+ * @param year - Full year (e.g. 2024), already offset from 2000
+ * @param month - Month 1-12 (register value, NOT 0-indexed)
+ * @param day - Day 1-31
+ * @param hour - Hour 0-23
+ * @param minute - Minute 0-59
+ * @param second - Second 0-59
  * @param previousTime - Last valid time, or null if no history
  */
 export function applyTimeFallback(
-  reportedTime: Date,
+  year: number,
+  month: number,
+  day: number,
+  hour: number,
+  minute: number,
+  second: number,
   previousTime: Date | null,
 ): Date {
-  if (reportedTime.getFullYear() !== 2000) {
-    return reportedTime;
+  const isValid =
+    year !== 2000 &&
+    month >= 1 && month <= 12 &&
+    day >= 1 && day <= 31 &&
+    hour >= 0 && hour <= 23 &&
+    minute >= 0 && minute <= 59 &&
+    second >= 0 && second <= 59;
+
+  if (isValid) {
+    return new Date(year, month - 1, day, hour, minute, second);
   }
   if (previousTime !== null) {
     return previousTime;
