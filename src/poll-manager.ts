@@ -12,8 +12,11 @@ import type { InverterGeneration } from './generation.js';
 export interface PollManagerOptions {
   host: string;
   port?: number;
-  pollIntervalMs?: number;      // default 15000 (15s partial)
-  fullRefreshIntervalMs?: number; // default 60000 (60s full)
+  pollIntervalMs?: number;        // default 15000 (15s partial)
+  fullRefreshIntervalMs?: number;  // default 60000 (60s full)
+  autoReconnect?: boolean;         // default true
+  reconnectBackoffMs?: number;     // initial backoff, default 5000
+  reconnectMaxBackoffMs?: number;  // max backoff cap, default 300000 (5min)
 }
 
 const INVERTER_SLAVE = 0x11;
@@ -79,6 +82,9 @@ export class PollManager extends EventEmitter {
       port: options.port ?? 8899,
       pollIntervalMs: options.pollIntervalMs ?? 15_000,
       fullRefreshIntervalMs: options.fullRefreshIntervalMs ?? 60_000,
+      autoReconnect: options.autoReconnect ?? true,
+      reconnectBackoffMs: options.reconnectBackoffMs ?? 5_000,
+      reconnectMaxBackoffMs: options.reconnectMaxBackoffMs ?? 300_000,
     };
     this.client = new Client({
       host: this.options.host,
