@@ -360,16 +360,28 @@ export function buildSnapshot(
     }
   }
 
-  // Battery charge/discharge totals:
-  //   HV: sum energy totals from all BCUs
-  //   LV primary: battery module registers IR(106)/IR(105) (summed across all batteries)
-  //   Fallback: inverter registers IR(181) charge / HR(180) discharge
-  //   Last resort: IR(27,28) e_inverter_in_total / IR(29) e_discharge_year
+  // Battery charge/discharge totals (#8):
+  //
+  // 16-bit registers (IR 105/106, IR 181, HR 180) overflow at 6553.5 kWh
+  // (toDeci(65535)). A 10 kWh battery cycling daily hits this in ~1.8 years.
+  //
+  // Priority (highest to lowest):
+  //   1. HR(4111,4112) / HR(4109,4110) — uint32, no scaling, max ~429M kWh
+  //   2. HV: sum from BCU uint32 registers
+  //   3. LV: battery module IR(106) / IR(105) — 16-bit toDeci, max 6553.5 kWh
+  //   4. IR(181) / HR(180) — 16-bit toDeci, max 6553.5 kWh
+  //   5. IR(27,28) / IR(29) — uint32/16-bit toDeci, last resort
   let batteryChargeEnergyTotalKwh = 0;
   let batteryDischargeEnergyTotalKwh = 0;
 
-  if (isHv && bcuList.length > 0) {
-    // HV: sum energy totals from all BCUs
+  // Priority 1: 32-bit wide registers (newer firmware, not available on all inverters)
+  const wideCharge = toUint32(getHR(cache, 4111), getHR(cache, 4112));
+  const wideDischarge = toUint32(getHR(cache, 4109), getHR(cache, 4110));
+  if (wideCharge !== 0 || wideDischarge !== 0) {
+    batteryChargeEnergyTotalKwh = wideCharge;
+    batteryDischargeEnergyTotalKwh = wideDischarge;
+  } else if (isHv && bcuList.length > 0) {
+    // Priority 2: HV — sum energy totals from all BCUs
     for (const { bcuIndex } of bcuList) {
       const bcuSlave = 0x70 + bcuIndex;
       const bcuCache = batteryRegisterCaches.get(bcuSlave);
@@ -380,16 +392,19 @@ export function buildSnapshot(
       }
     }
   } else if (batteries.length > 0) {
+    // Priority 3: LV battery module registers (16-bit, overflow at 6553.5 kWh)
     batteryChargeEnergyTotalKwh = batteries.reduce((sum, b) => sum + b.chargeEnergyTotalKwh, 0);
     batteryDischargeEnergyTotalKwh = batteries.reduce((sum, b) => sum + b.dischargeEnergyTotalKwh, 0);
   }
   if (batteryChargeEnergyTotalKwh === 0 && batteryDischargeEnergyTotalKwh === 0) {
+    // Priority 4: inverter-level 16-bit registers
     const invCharge = toDeci(getIR(cache, 181));
     const invDischarge = toDeci(getHR(cache, 180));
     if (invCharge !== 0 || invDischarge !== 0) {
       batteryChargeEnergyTotalKwh = invCharge;
       batteryDischargeEnergyTotalKwh = invDischarge;
     } else {
+      // Priority 5: last resort
       batteryChargeEnergyTotalKwh = toDeci(toUint32(getIR(cache, 27), getIR(cache, 28)));
       batteryDischargeEnergyTotalKwh = toDeci(getIR(cache, 29));
     }

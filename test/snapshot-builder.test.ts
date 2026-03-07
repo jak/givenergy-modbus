@@ -494,6 +494,115 @@ describe('SnapshotBuilder', () => {
       expect(snapshot!.batteries[0].serialNumber).toBe('CE1234B001');
     });
 
+    // ── Battery energy total fallback chain (#8) ──────────────────────────
+    // Battery charge/discharge totals have three register sources with different
+    // bit widths. 16-bit registers overflow at 6553.5 kWh (toDeci(65535)),
+    // which a 10 kWh battery hits in ~1.8 years of daily cycling.
+    //
+    // Priority (highest to lowest):
+    //   1. HR(4111,4112) / HR(4109,4110) — uint32, no scaling, max ~429M kWh
+    //   2. Battery module IR(106) / IR(105) — 16-bit toDeci, max 6553.5 kWh
+    //   3. IR(181) / HR(180)              — 16-bit toDeci, max 6553.5 kWh
+    //   4. IR(27,28) / IR(29)             — uint32/16-bit toDeci, last resort
+
+    it('prefers 32-bit HR(4111,4112)/HR(4109,4110) when available (#8)', () => {
+      // Newer firmware exposes 32-bit battery energy totals that don't overflow.
+      // These should be used when non-zero, even if battery module registers also have data.
+      const cache = makeValidCache();
+      // toUint32 masks each word to 16 bits, so use valid 16-bit values.
+      // charge = toUint32(1, 5000) = 1*65536 + 5000 = 70536
+      // discharge = toUint32(1, 3000) = 1*65536 + 3000 = 68536
+      cache.holdingRegisters.set(4111, 1);     // charge high word
+      cache.holdingRegisters.set(4112, 5000);  // charge low word
+      cache.holdingRegisters.set(4109, 1);     // discharge high word
+      cache.holdingRegisters.set(4110, 3000);  // discharge low word
+
+      // Also set battery module registers (would give 50.0 / 30.0 kWh)
+      const batteryCache = new Map<number, number>();
+      const serial = 'CE1234B001';
+      for (let i = 0; i < 5; i++) {
+        batteryCache.set(110 + i, (serial.charCodeAt(i * 2) << 8) | serial.charCodeAt(i * 2 + 1));
+      }
+      batteryCache.set(106, 500);  // charge → toDeci = 50.0 kWh
+      batteryCache.set(105, 300);  // discharge → toDeci = 30.0 kWh
+
+      const snapshot = buildSnapshot(cache, {
+        batteryRegisterCaches: new Map([[0x32, batteryCache]]),
+      });
+      // Should use the 32-bit values, not the 16-bit battery module values
+      expect(snapshot!.batteryChargeEnergyTotalKwh).toBe(70536);
+      expect(snapshot!.batteryDischargeEnergyTotalKwh).toBe(68536);
+    });
+
+    it('falls back to battery module registers when 32-bit registers are zero (#8)', () => {
+      const cache = makeValidCache();
+      // 32-bit registers not populated (zero / not available on this firmware)
+      const batteryCache = new Map<number, number>();
+      const serial = 'CE1234B001';
+      for (let i = 0; i < 5; i++) {
+        batteryCache.set(110 + i, (serial.charCodeAt(i * 2) << 8) | serial.charCodeAt(i * 2 + 1));
+      }
+      batteryCache.set(106, 500);  // charge → toDeci = 50.0 kWh
+      batteryCache.set(105, 300);  // discharge → toDeci = 30.0 kWh
+
+      const snapshot = buildSnapshot(cache, {
+        batteryRegisterCaches: new Map([[0x32, batteryCache]]),
+      });
+      expect(snapshot!.batteryChargeEnergyTotalKwh).toBeCloseTo(50.0, 1);
+      expect(snapshot!.batteryDischargeEnergyTotalKwh).toBeCloseTo(30.0, 1);
+    });
+
+    it('falls back to IR(181)/HR(180) when batteries and 32-bit registers are zero (#8)', () => {
+      const cache = makeValidCache();
+      cache.inputRegisters.set(181, 1200);  // charge → toDeci = 120.0 kWh
+      cache.holdingRegisters.set(180, 900); // discharge → toDeci = 90.0 kWh
+      // No battery caches, no 32-bit registers
+      const snapshot = buildSnapshot(cache);
+      expect(snapshot!.batteryChargeEnergyTotalKwh).toBeCloseTo(120.0, 1);
+      expect(snapshot!.batteryDischargeEnergyTotalKwh).toBeCloseTo(90.0, 1);
+    });
+
+    it('falls to last resort IR(27,28)/IR(29) when all other sources are zero (#8)', () => {
+      const cache = makeValidCache();
+      // e_inverter_in_total: IR(27,28) = uint32, toDeci
+      cache.inputRegisters.set(27, 0);
+      cache.inputRegisters.set(28, 7500);  // → toDeci(7500) = 750.0 kWh
+      // e_discharge_year: IR(29), toDeci
+      cache.inputRegisters.set(29, 4200);  // → toDeci = 420.0 kWh
+      const snapshot = buildSnapshot(cache);
+      expect(snapshot!.batteryChargeEnergyTotalKwh).toBeCloseTo(750.0, 1);
+      expect(snapshot!.batteryDischargeEnergyTotalKwh).toBeCloseTo(420.0, 1);
+    });
+
+    it('16-bit battery module registers reflect rollover to 0, not frozen at max (#8)', () => {
+      // When IR(105)/IR(106) overflow past 65535 and wrap to 0, the snapshot
+      // should show 0, not stay frozen at 6553.5 kWh. The 32-bit registers
+      // (if available) would have the correct cumulative value.
+      const cache = makeValidCache();
+      const batteryCache = new Map<number, number>();
+      const serial = 'CE1234B001';
+      for (let i = 0; i < 5; i++) {
+        batteryCache.set(110 + i, (serial.charCodeAt(i * 2) << 8) | serial.charCodeAt(i * 2 + 1));
+      }
+      // Registers have rolled over to small values after overflow
+      batteryCache.set(106, 10);  // charge → toDeci = 1.0 kWh (rolled over)
+      batteryCache.set(105, 5);   // discharge → toDeci = 0.5 kWh (rolled over)
+
+      // 32-bit registers have the true cumulative value
+      // toUint32(1, 5000) = 70536, toUint32(1, 0) = 65536
+      cache.holdingRegisters.set(4111, 1);
+      cache.holdingRegisters.set(4112, 5000);  // charge = 70536 kWh
+      cache.holdingRegisters.set(4109, 1);
+      cache.holdingRegisters.set(4110, 0);     // discharge = 65536 kWh
+
+      const snapshot = buildSnapshot(cache, {
+        batteryRegisterCaches: new Map([[0x32, batteryCache]]),
+      });
+      // 32-bit registers preferred — shows true total, not rolled-over value
+      expect(snapshot!.batteryChargeEnergyTotalKwh).toBe(70536);
+      expect(snapshot!.batteryDischargeEnergyTotalKwh).toBe(65536);
+    });
+
     it('extracts daily energy values from IR registers via toDeci', () => {
       const cache = makeValidCache();
       cache.inputRegisters.set(17, 15);  // e_pv1_day: 15 → toDeci = 1.5 kWh
