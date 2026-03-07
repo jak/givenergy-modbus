@@ -1,5 +1,12 @@
 # givenergy-modbus
 
+[![CI](https://github.com/jak/givenergy-modbus/actions/workflows/ci.yml/badge.svg)](https://github.com/jak/givenergy-modbus/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/givenergy-modbus)](https://www.npmjs.com/package/givenergy-modbus)
+[![node](https://img.shields.io/node/v/givenergy-modbus)](https://www.npmjs.com/package/givenergy-modbus)
+[![license](https://img.shields.io/npm/l/givenergy-modbus)](https://github.com/jak/givenergy-modbus/blob/main/LICENSE)
+[![GitHub Sponsors](https://img.shields.io/github/sponsors/jak?label=sponsor)](https://github.com/sponsors/jak)
+[![Buy Me a Coffee](https://img.shields.io/badge/buy%20me%20a%20coffee-donate-yellow)](https://buymeacoffee.com/jakio)
+
 Native Node.js client for GivEnergy inverters over their proprietary Modbus TCP protocol.
 
 ## Attribution
@@ -18,7 +25,7 @@ This library communicates **directly with the inverter over your local network**
 npm install givenergy-modbus
 ```
 
-Requires **Node.js 18+**. TypeScript is optional — full type definitions are included.
+Requires **Node.js 20+**. TypeScript is optional — full type definitions are included.
 
 ## Quick start
 
