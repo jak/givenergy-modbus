@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.1](https://github.com/jak/givenergy-modbus/compare/givenergy-modbus-v1.1.0...givenergy-modbus-v1.1.1) (2026-03-07)
+
+
+### Bug Fixes
+
+* prefer 32-bit battery energy total registers ([#8](https://github.com/jak/givenergy-modbus/issues/8)) ([#19](https://github.com/jak/givenergy-modbus/issues/19)) ([e1260ca](https://github.com/jak/givenergy-modbus/commit/e1260ca079f7ec22432901bf1cf72a97dc26a3a1))
+* validate system time components before Date construction ([#9](https://github.com/jak/givenergy-modbus/issues/9)) ([#22](https://github.com/jak/givenergy-modbus/issues/22)) ([4c650c3](https://github.com/jak/givenergy-modbus/commit/4c650c38c5ec54ed1a1d9763187e99aba83dbb29))
+
 ## [1.1.0](https://github.com/jak/givenergy-modbus/compare/givenergy-modbus-v1.0.0...givenergy-modbus-v1.1.0) (2026-03-07)
 
 
