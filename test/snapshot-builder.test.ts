@@ -49,8 +49,10 @@ function makeValidCache(): RegisterCache {
     hr.set(13 + i, (serial.charCodeAt(i * 2) << 8) | serial.charCodeAt(i * 2 + 1));
   }
 
-  // Device type code: HR(0)
-  hr.set(0, 0x2003);
+  // Device type code: HR(0) and arm_firmware_version: HR(21)
+  // 0x2001 = hybrid, arm_fw 300 → gen3 (Math.floor(300/100) === 3)
+  hr.set(0, 0x2001);
+  hr.set(21, 300);
 
   // SOC: IR(59) = 75%
   ir.set(59, 75);
@@ -108,23 +110,26 @@ function makeValidCache(): RegisterCache {
   return { inputRegisters: ir, holdingRegisters: hr };
 }
 
-/** Gen2 cache: CE prefix serial → gen2 generation */
+/** Gen2 cache: hybrid with arm_fw 800 → gen2 (Math.floor(800/100) === 8) */
 function makeGen2Cache(): RegisterCache {
   const cache = makeValidCache();
   const serial = 'CE1234B567';
   for (let i = 0; i < 5; i++) {
     cache.holdingRegisters.set(13 + i, (serial.charCodeAt(i * 2) << 8) | serial.charCodeAt(i * 2 + 1));
   }
+  cache.holdingRegisters.set(0, 0x2001);
+  cache.holdingRegisters.set(21, 800);
   return cache;
 }
 
-/** Three-phase cache: SA prefix serial → three_phase generation */
+/** Three-phase cache: device_type_code 0x4001 → three_phase */
 function makeThreePhaseCache(): RegisterCache {
   const cache = makeValidCache();
   const serial = 'SA1234B567';
   for (let i = 0; i < 5; i++) {
     cache.holdingRegisters.set(13 + i, (serial.charCodeAt(i * 2) << 8) | serial.charCodeAt(i * 2 + 1));
   }
+  cache.holdingRegisters.set(0, 0x4001);
   return cache;
 }
 
@@ -203,7 +208,7 @@ describe('SnapshotBuilder', () => {
 
     it('reads device type code as model code', () => {
       const snapshot = buildSnapshot(makeValidCache());
-      expect(snapshot!.modelCode).toBe(0x2003);
+      expect(snapshot!.modelCode).toBe(0x2001);
     });
 
     it('reads charge slot 1 correctly', () => {
@@ -218,20 +223,35 @@ describe('SnapshotBuilder', () => {
       expect(snapshot!.dischargeSlots[0].end).toBe('00:00');
     });
 
-    it('sets generation field from serial prefix', () => {
-      // EE prefix → gen3
+    it('sets generation field from device_type_code and arm_firmware_version', () => {
+      // hybrid + arm_fw 300 → gen3
       const gen3Snapshot = buildSnapshot(makeValidCache());
       expect(gen3Snapshot!.generation).toBe('gen3');
 
-      // SA prefix → three_phase
+      // device_type_code 0x4001 → three_phase
       const threePhaseCache = makeThreePhaseCache();
       const threePhaseSnapshot = buildSnapshot(threePhaseCache);
       expect(threePhaseSnapshot!.generation).toBe('three_phase');
 
-      // CE prefix → gen2
+      // hybrid + arm_fw 800 → gen2
       const gen2Cache = makeGen2Cache();
       const gen2Snapshot = buildSnapshot(gen2Cache);
       expect(gen2Snapshot!.generation).toBe('gen2');
+    });
+
+    it('detects gen3 from registers even with unknown serial prefix', () => {
+      // FD prefix is not in the serial prefix map, but HR(0)/HR(21) correctly identify gen3.
+      // This was a real bug: FD2308F729 was misdetected as gen2.
+      const cache = makeValidCache();
+      const serial = 'FD2308F729';
+      for (let i = 0; i < 5; i++) {
+        cache.holdingRegisters.set(13 + i, (serial.charCodeAt(i * 2) << 8) | serial.charCodeAt(i * 2 + 1));
+      }
+      cache.holdingRegisters.set(0, 0x2001);
+      cache.holdingRegisters.set(21, 300);
+      const snapshot = buildSnapshot(cache);
+      expect(snapshot!.serialNumber).toBe('FD2308F729');
+      expect(snapshot!.generation).toBe('gen3');
     });
 
     it('reads all 10 charge and discharge slots for Gen3', () => {

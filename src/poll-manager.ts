@@ -7,7 +7,7 @@ import {
   encodeReadMeterProductRegistersRequest,
 } from './pdu/encode.js';
 import type { InverterSnapshot } from './model/inverter-snapshot.js';
-import { detectGeneration, type InverterGeneration } from './generation.js';
+import type { InverterGeneration } from './generation.js';
 
 export interface PollManagerOptions {
   host: string;
@@ -263,7 +263,7 @@ export class PollManager extends EventEmitter {
       });
 
       if (this._generation === null && snapshot !== null) {
-        this._generation = detectGeneration(snapshot.serialNumber);
+        this._generation = snapshot.generation;
         this.emit('debug', `detected inverter generation: ${this._generation}`);
       }
 

@@ -1,7 +1,7 @@
 import { EventEmitter } from 'events';
 import { PollManager, type PollManagerOptions } from './poll-manager.js';
 import { encodeWriteHoldingRegisterRequest } from './pdu/encode.js';
-import { detectGeneration } from './generation.js';
+
 import type { InverterSnapshot } from './model/inverter-snapshot.js';
 
 export interface GivEnergyInverterOptions {
@@ -37,7 +37,7 @@ export abstract class GivEnergyInverter extends EventEmitter {
     });
     await pollManager.start();
     const snapshot = pollManager.getData();
-    const generation = detectGeneration(snapshot.serialNumber);
+    const generation = snapshot.generation;
 
     switch (generation) {
       case 'gen3': {

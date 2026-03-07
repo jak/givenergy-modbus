@@ -34,7 +34,8 @@ import {
   THREE_PHASE_CHARGE_SLOT_REGISTERS,
   THREE_PHASE_DISCHARGE_SLOT_REGISTERS,
 } from './timeslot-registers.js';
-import { detectGeneration } from './generation.js';
+import { detectGeneration, type InverterGeneration } from './generation.js';
+import { detectModel, DeviceType } from './model/device-types.js';
 
 export interface RegisterCache {
   inputRegisters: Map<number, number>;
@@ -56,6 +57,20 @@ function getIR(cache: RegisterCache, address: number): number {
 
 function getHR(cache: RegisterCache, address: number): number {
   return cache.holdingRegisters.get(address) ?? 0;
+}
+
+/** Map DeviceType to InverterGeneration for snapshot discriminant. */
+function modelToGeneration(model: DeviceType): InverterGeneration {
+  switch (model) {
+    case DeviceType.HYBRID_GEN3:
+    case DeviceType.HYBRID_HV_GEN3:
+      return 'gen3';
+    case DeviceType.HYBRID_3PH:
+    case DeviceType.AC_3PH:
+      return 'three_phase';
+    default:
+      return 'gen2';
+  }
 }
 
 /**
@@ -92,10 +107,18 @@ export function buildSnapshot(
   // serial_number: HR(13-17), 5 registers, 10-char ASCII string
   const serialRegs = [13, 14, 15, 16, 17].map(a => getHR(cache, a));
   const serialNumber = registersToString(serialRegs);
-  const generation = detectGeneration(serialNumber);
 
   // device_type_code: HR(0)
   const modelCode = getHR(cache, 0);
+
+  // Detect generation from device_type_code (HR0) + arm_firmware_version (HR21),
+  // falling back to serial prefix detection if registers are missing.
+  // GivTCP uses HR(0) and HR(21) — serial prefix alone is unreliable
+  // (e.g. "FD" prefix is Gen3 but not in the serial prefix map).
+  const armFirmwareVersion = getHR(cache, 21);
+  const generation = modelCode !== 0
+    ? modelToGeneration(detectModel(modelCode, armFirmwareVersion))
+    : detectGeneration(serialNumber);
 
   // ── Real-time power ───────────────────────────────────────────────────────
   // p_pv1: IR(18), p_pv2: IR(20) — both unsigned watts
