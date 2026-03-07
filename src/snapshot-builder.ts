@@ -99,7 +99,9 @@ export function buildSnapshot(
 
   // ── Real-time power ───────────────────────────────────────────────────────
   // p_pv1: IR(18), p_pv2: IR(20) — both unsigned watts
-  const solarPower = getIR(cache, 18) + getIR(cache, 20);
+  const pvString1Power = getIR(cache, 18);
+  const pvString2Power = getIR(cache, 20);
+  const solarPower = pvString1Power + pvString2Power;
 
   // p_battery: IR(52) — signed int16; positive = discharging, negative = charging
   const batteryPower = toInt16(getIR(cache, 52));
@@ -109,6 +111,23 @@ export function buildSnapshot(
 
   // p_load_demand: IR(42)
   const loadPower = getIR(cache, 42);
+
+  // p_inverter_out: IR(24) — signed int16, inverter AC output power
+  const inverterOutputPower = toInt16(getIR(cache, 24));
+
+  // p_grid_apparent: IR(43) — unsigned, grid apparent power in VA
+  const gridApparentPower = getIR(cache, 43);
+
+  // p_eps_backup: IR(31) — unsigned, EPS backup output power
+  const epsBackupPower = getIR(cache, 31);
+
+  // ── PV string measurements ─────────────────────────────────────────────────
+  // v_pv1: IR(1), v_pv2: IR(2) — toDeci → V
+  const pvString1Voltage = toDeci(getIR(cache, 1));
+  const pvString2Voltage = toDeci(getIR(cache, 2));
+  // i_pv1: IR(8), i_pv2: IR(9) — toDeci → A
+  const pvString1Current = toDeci(getIR(cache, 8));
+  const pvString2Current = toDeci(getIR(cache, 9));
 
   // ── Battery state ─────────────────────────────────────────────────────────
   // battery_percent: IR(59) — SOC with fallback chain
@@ -132,6 +151,21 @@ export function buildSnapshot(
   const rawFrequency = getIR(cache, 13);
   const gridFrequency = toDeci(applyFrequencyScaling(rawFrequency));
 
+  // i_ac1: IR(10) — AC current, toDeci → A
+  const inverterCurrent = toDeci(getIR(cache, 10));
+
+  // ── EPS backup ──────────────────────────────────────────────────────────────
+  // v_eps_backup: IR(53) — toDeci → V
+  const epsBackupVoltage = toDeci(getIR(cache, 53));
+  // f_eps_backup: IR(54) — toCenti → Hz
+  const epsBackupFrequency = toCenti(getIR(cache, 54));
+
+  // ── Temperatures ────────────────────────────────────────────────────────────
+  // temp_charger: IR(55) — toDeci → °C (labeled "BMS Temperature" in cloud CSV)
+  const chargerTemperature = toDeci(getIR(cache, 55));
+  // temp_battery: IR(56) — toDeci → °C
+  const batteryTemperature = toDeci(getIR(cache, 56));
+
   // ── Energy totals ─────────────────────────────────────────────────────────
   // e_pv_total: IR(11, 12) — uint32, toDeci → kWh
   const pvEnergyTotalKwh = toDeci(toUint32(getIR(cache, 11), getIR(cache, 12)));
@@ -145,6 +179,12 @@ export function buildSnapshot(
 
   // e_grid_out_total: IR(21, 22) — uint32, toDeci → kWh (export)
   const gridExportEnergyTotalKwh = toDeci(toUint32(getIR(cache, 21), getIR(cache, 22)));
+
+  // e_battery_throughput_total: IR(6, 7) — uint32, toDeci → kWh
+  const batteryThroughputTotalKwh = toDeci(toUint32(getIR(cache, 6), getIR(cache, 7)));
+
+  // work_time_total: IR(47, 48) — uint32 → hours
+  const hoursOfOperation = toUint32(getIR(cache, 47), getIR(cache, 48));
 
   // ── Daily energy ────────────────────────────────────────────────────────
   // All single 16-bit IR registers, toDeci → kWh
@@ -293,21 +333,37 @@ export function buildSnapshot(
     serialNumber,
     modelCode,
     solarPower,
+    pvString1Power,
+    pvString2Power,
     batteryPower,
     gridPower,
     loadPower,
+    inverterOutputPower,
+    gridApparentPower,
+    epsBackupPower,
+    pvString1Voltage,
+    pvString2Voltage,
+    pvString1Current,
+    pvString2Current,
     stateOfCharge,
     batteryVoltage,
     batteryCurrent,
     gridVoltage,
     gridFrequency,
+    inverterCurrent,
+    epsBackupVoltage,
+    epsBackupFrequency,
     inverterHeatsinkTemp: heatsinkTemp,
+    chargerTemperature,
+    batteryTemperature,
     pvEnergyTotalKwh,
     batteryChargeEnergyTotalKwh,
     batteryDischargeEnergyTotalKwh,
     gridImportEnergyTotalKwh,
     gridExportEnergyTotalKwh,
     consumptionEnergyTotalKwh,
+    batteryThroughputTotalKwh,
+    hoursOfOperation,
     pvEnergyTodayKwh,
     batteryChargeEnergyTodayKwh,
     batteryDischargeEnergyTodayKwh,
@@ -442,7 +498,7 @@ export function buildMeterSnapshot(
     toInt16(getData(69)),
     toInt16(getData(70)),
   ];
-  const activePowerTotal = toInt16(getData(71));
+  let activePowerTotal = toInt16(getData(71));
 
   // Reactive power — int16 → VAR
   const reactivePower: [number, number, number] = [
@@ -450,7 +506,7 @@ export function buildMeterSnapshot(
     toInt16(getData(73)),
     toInt16(getData(74)),
   ];
-  const reactivePowerTotal = toInt16(getData(75));
+  let reactivePowerTotal = toInt16(getData(75));
 
   // Apparent power — int16 → VA
   const apparentPower: [number, number, number] = [
@@ -458,7 +514,7 @@ export function buildMeterSnapshot(
     toInt16(getData(77)),
     toInt16(getData(78)),
   ];
-  const apparentPowerTotal = toInt16(getData(79));
+  let apparentPowerTotal = toInt16(getData(79));
 
   // Power factor — int16 ÷ 10000 → -1.0..1.0
   // Note: GivTCP uses toMilli (÷1000), but ÷10000 matches the GivEnergy cloud CSV export
@@ -467,10 +523,20 @@ export function buildMeterSnapshot(
     toPowerFactor(getData(81)),
     toPowerFactor(getData(82)),
   ];
-  const powerFactorTotal = toPowerFactor(getData(83));
+  let powerFactorTotal = toPowerFactor(getData(83));
 
   // Frequency — toCenti → Hz
   const frequency = toCenti(getData(84));
+
+  // Single-phase meter fallback: "total" registers are 0 for single-phase meters,
+  // so use phase 1 values when totals are empty but phase 1 has data.
+  const isSinglePhase = voltage[1] === 0 && voltage[2] === 0;
+  if (isSinglePhase) {
+    if (activePowerTotal === 0 && activePower[0] !== 0) activePowerTotal = activePower[0];
+    if (reactivePowerTotal === 0 && reactivePower[0] !== 0) reactivePowerTotal = reactivePower[0];
+    if (apparentPowerTotal === 0 && apparentPower[0] !== 0) apparentPowerTotal = apparentPower[0];
+    if (powerFactorTotal === 0 && powerFactor[0] !== 0) powerFactorTotal = powerFactor[0];
+  }
 
   // Energy — toDeci → kWh (single 16-bit registers, overflow at 6553.5 kWh)
   const importActiveEnergyKwh = toDeci(getData(85));

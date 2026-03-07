@@ -50,10 +50,17 @@ console.log(`Model code:  ${s.modelCode}`);
 console.log(`System time: ${s.systemTime.toISOString()}`);
 
 console.log('\n--- Real-time Power ---');
-console.log(`Solar:    ${s.solarPower} W`);
+console.log(`Solar:    ${s.solarPower} W (PV1: ${s.pvString1Power} W, PV2: ${s.pvString2Power} W)`);
 console.log(`Battery:  ${s.batteryPower >= 0 ? '+' : ''}${s.batteryPower} W (${s.batteryPower > 0 ? 'discharging' : s.batteryPower < 0 ? 'charging' : 'idle'})`);
 console.log(`Grid:     ${s.gridPower >= 0 ? '+' : ''}${s.gridPower} W (${s.gridPower > 0 ? 'exporting' : s.gridPower < 0 ? 'importing' : 'idle'})`);
 console.log(`Load:     ${s.loadPower} W`);
+console.log(`Inverter: ${s.inverterOutputPower} W`);
+console.log(`Grid apparent: ${s.gridApparentPower} VA`);
+if (s.epsBackupPower > 0) console.log(`EPS:      ${s.epsBackupPower} W`);
+
+console.log('\n--- PV Strings ---');
+console.log(`String 1: ${s.pvString1Voltage} V / ${s.pvString1Current} A / ${s.pvString1Power} W`);
+console.log(`String 2: ${s.pvString2Voltage} V / ${s.pvString2Current} A / ${s.pvString2Power} W`);
 
 console.log('\n--- Battery ---');
 console.log(`SoC:      ${s.stateOfCharge}%`);
@@ -63,7 +70,16 @@ console.log(`Current:  ${s.batteryCurrent} A`);
 console.log('\n--- Grid ---');
 console.log(`Voltage:   ${s.gridVoltage} V`);
 console.log(`Frequency: ${s.gridFrequency} Hz`);
-console.log(`Temp:      ${s.inverterHeatsinkTemp} °C`);
+console.log(`Current:   ${s.inverterCurrent} A`);
+
+console.log('\n--- EPS Backup ---');
+console.log(`Voltage:   ${s.epsBackupVoltage} V`);
+console.log(`Frequency: ${s.epsBackupFrequency} Hz`);
+
+console.log('\n--- Temperatures ---');
+console.log(`Heatsink:  ${s.inverterHeatsinkTemp} °C`);
+console.log(`Charger:   ${s.chargerTemperature} °C`);
+console.log(`Battery:   ${s.batteryTemperature} °C`);
 
 console.log('\n--- Energy Today ---');
 console.log(`PV generated:       ${s.pvEnergyTodayKwh} kWh`);
@@ -80,6 +96,8 @@ console.log(`Battery discharged: ${s.batteryDischargeEnergyTotalKwh} kWh`);
 console.log(`Grid import:        ${s.gridImportEnergyTotalKwh} kWh`);
 console.log(`Grid export:        ${s.gridExportEnergyTotalKwh} kWh`);
 console.log(`Consumption:        ${s.consumptionEnergyTotalKwh} kWh`);
+console.log(`Battery throughput: ${s.batteryThroughputTotalKwh} kWh`);
+console.log(`Hours of operation: ${s.hoursOfOperation}`);
 
 console.log('\n--- Config ---');
 console.log(`Enable charge:    ${s.enableCharge}`);

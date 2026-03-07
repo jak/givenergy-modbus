@@ -24,12 +24,32 @@ interface BaseSnapshot {
   // Real-time power (watts)
   /** Total solar generation: p_pv1 (IR 18) + p_pv2 (IR 20) */
   solarPower: number;
+  /** PV string 1 power in watts (IR 18) */
+  pvString1Power: number;
+  /** PV string 2 power in watts (IR 20) */
+  pvString2Power: number;
   /** Battery power: positive = discharging, negative = charging (IR 52, signed int16) */
   batteryPower: number;
   /** Grid power: positive = export, negative = import (IR 30, signed int16) */
   gridPower: number;
   /** Load demand in watts (IR 42) */
   loadPower: number;
+  /** Inverter AC output power in watts (IR 24, signed int16) */
+  inverterOutputPower: number;
+  /** Grid apparent power in VA (IR 43) */
+  gridApparentPower: number;
+  /** EPS backup output power in watts (IR 31) */
+  epsBackupPower: number;
+
+  // PV string measurements
+  /** PV string 1 voltage in V (IR 1, toDeci) */
+  pvString1Voltage: number;
+  /** PV string 2 voltage in V (IR 2, toDeci) */
+  pvString2Voltage: number;
+  /** PV string 1 current in A (IR 8, toDeci) */
+  pvString1Current: number;
+  /** PV string 2 current in A (IR 9, toDeci) */
+  pvString2Current: number;
 
   // Battery state
   /** State of charge 0-100% from IR(59), with fallback applied */
@@ -44,10 +64,22 @@ interface BaseSnapshot {
   gridVoltage: number;
   /** AC grid frequency in Hz from IR(13), with firmware scaling applied */
   gridFrequency: number;
+  /** Inverter AC current in A from IR(10) via toDeci */
+  inverterCurrent: number;
+
+  // EPS backup
+  /** EPS backup voltage in V from IR(53) via toDeci */
+  epsBackupVoltage: number;
+  /** EPS backup frequency in Hz from IR(54) via toCenti */
+  epsBackupFrequency: number;
 
   // Temperature
   /** Inverter heatsink temperature in °C from IR(41) via toDeci */
   inverterHeatsinkTemp: number;
+  /** Charger temperature in °C from IR(55) via toDeci — labeled "BMS Temperature" in cloud CSV */
+  chargerTemperature: number;
+  /** Battery temperature in °C from IR(56) via toDeci */
+  batteryTemperature: number;
 
   // Energy totals (kWh)
   /** Total PV energy generated in kWh — uint32 IR(11,12) via toDeci */
@@ -62,6 +94,12 @@ interface BaseSnapshot {
   gridExportEnergyTotalKwh: number;
   /** Total consumption energy in kWh — derived: (inverter_out - ac_charge) - (export - import) */
   consumptionEnergyTotalKwh: number;
+  /** Total battery throughput in kWh — uint32 IR(6,7) via toDeci */
+  batteryThroughputTotalKwh: number;
+
+  // Inverter lifetime
+  /** Total hours of operation — uint32 IR(47,48) */
+  hoursOfOperation: number;
 
   // Energy today (kWh)
   /** PV energy generated today in kWh — e_pv1_day IR(17) + e_pv2_day IR(19) via toDeci */

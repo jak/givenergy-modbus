@@ -437,6 +437,78 @@ describe('SnapshotBuilder', () => {
       const snapshot = buildSnapshot(cache);
       expect(snapshot!.solarPower).toBe(2300);
     });
+
+    it('exposes individual PV string power, voltage, and current', () => {
+      const cache = makeValidCache();
+      cache.inputRegisters.set(18, 1500); // p_pv1: 1500W
+      cache.inputRegisters.set(20, 800);  // p_pv2: 800W
+      cache.inputRegisters.set(1, 3205);  // v_pv1: toDeci = 320.5V
+      cache.inputRegisters.set(2, 3102);  // v_pv2: toDeci = 310.2V
+      cache.inputRegisters.set(8, 47);    // i_pv1: toDeci = 4.7A
+      cache.inputRegisters.set(9, 26);    // i_pv2: toDeci = 2.6A
+      const snapshot = buildSnapshot(cache);
+      expect(snapshot!.pvString1Power).toBe(1500);
+      expect(snapshot!.pvString2Power).toBe(800);
+      expect(snapshot!.pvString1Voltage).toBeCloseTo(320.5, 1);
+      expect(snapshot!.pvString2Voltage).toBeCloseTo(310.2, 1);
+      expect(snapshot!.pvString1Current).toBeCloseTo(4.7, 1);
+      expect(snapshot!.pvString2Current).toBeCloseTo(2.6, 1);
+    });
+
+    it('reads inverter output power, grid apparent power, and EPS backup power', () => {
+      const cache = makeValidCache();
+      // p_inverter_out: IR(24) = 65036 → toInt16 = -500 (negative = consuming from grid)
+      cache.inputRegisters.set(24, 65036);
+      // p_grid_apparent: IR(43) = 700VA
+      cache.inputRegisters.set(43, 700);
+      // p_eps_backup: IR(31) = 0W
+      cache.inputRegisters.set(31, 0);
+      const snapshot = buildSnapshot(cache);
+      expect(snapshot!.inverterOutputPower).toBe(-500);
+      expect(snapshot!.gridApparentPower).toBe(700);
+      expect(snapshot!.epsBackupPower).toBe(0);
+    });
+
+    it('reads inverter current via toDeci', () => {
+      const cache = makeValidCache();
+      cache.inputRegisters.set(10, 22); // i_ac1: toDeci = 2.2A
+      const snapshot = buildSnapshot(cache);
+      expect(snapshot!.inverterCurrent).toBeCloseTo(2.2, 1);
+    });
+
+    it('reads EPS backup voltage and frequency', () => {
+      const cache = makeValidCache();
+      cache.inputRegisters.set(53, 2423); // v_eps_backup: toDeci = 242.3V
+      cache.inputRegisters.set(54, 4993); // f_eps_backup: toCenti = 49.93Hz
+      const snapshot = buildSnapshot(cache);
+      expect(snapshot!.epsBackupVoltage).toBeCloseTo(242.3, 1);
+      expect(snapshot!.epsBackupFrequency).toBeCloseTo(49.93, 2);
+    });
+
+    it('reads charger and battery temperatures via toDeci', () => {
+      const cache = makeValidCache();
+      cache.inputRegisters.set(55, 285); // temp_charger: toDeci = 28.5°C
+      cache.inputRegisters.set(56, 190); // temp_battery: toDeci = 19.0°C
+      const snapshot = buildSnapshot(cache);
+      expect(snapshot!.chargerTemperature).toBeCloseTo(28.5, 1);
+      expect(snapshot!.batteryTemperature).toBeCloseTo(19.0, 1);
+    });
+
+    it('reads battery throughput total as uint32 toDeci', () => {
+      const cache = makeValidCache();
+      cache.inputRegisters.set(6, 0);     // e_battery_throughput_total high
+      cache.inputRegisters.set(7, 54534); // e_battery_throughput_total low → toDeci = 5453.4 kWh
+      const snapshot = buildSnapshot(cache);
+      expect(snapshot!.batteryThroughputTotalKwh).toBeCloseTo(5453.4, 1);
+    });
+
+    it('reads hours of operation as uint32', () => {
+      const cache = makeValidCache();
+      cache.inputRegisters.set(47, 0);     // work_time_total high
+      cache.inputRegisters.set(48, 10167); // work_time_total low
+      const snapshot = buildSnapshot(cache);
+      expect(snapshot!.hoursOfOperation).toBe(10167);
+    });
   });
 
   describe('buildBatterySnapshot', () => {
@@ -655,6 +727,42 @@ describe('SnapshotBuilder', () => {
     it('returns empty meters array when no meter caches provided', () => {
       const snapshot = buildSnapshot(makeValidCache());
       expect(snapshot!.meters).toHaveLength(0);
+    });
+
+    it('falls back to phase 1 values for totals on single-phase meters', () => {
+      // Single-phase meters (phases 2 & 3 voltage = 0) report 0 in "total" registers.
+      // The builder should use phase 1 values as the totals.
+      const data = makeMeterDataCache();
+      // Set phase 1 values but totals to 0 (mimicking real single-phase meter behavior)
+      data.set(71, 0);     // p_active_total = 0 (despite phase 1 having data)
+      data.set(75, 0);     // p_reactive_total = 0
+      data.set(79, 0);     // p_apparent_total = 0
+      data.set(83, 0);     // pf_total = 0
+      const meter = buildMeterSnapshot(0x01, data, makeMeterProductCache());
+      // Should fall back to phase 1 values
+      expect(meter!.activePowerTotal).toBe(-300);   // same as activePower[0]
+      expect(meter!.reactivePowerTotal).toBe(100);   // same as reactivePower[0]
+      expect(meter!.apparentPowerTotal).toBe(320);   // same as apparentPower[0]
+      expect(meter!.powerFactorTotal).toBeCloseTo(0.9979, 4); // same as powerFactor[0]
+    });
+
+    it('does not apply single-phase fallback on three-phase meters', () => {
+      // Three-phase meters have non-zero phases 2 & 3, so total 0 is genuine
+      const data = makeMeterDataCache();
+      data.set(61, 2400);  // v_phase_2 non-zero → three-phase
+      data.set(62, 2400);  // v_phase_3 non-zero
+      data.set(71, 0);     // p_active_total genuinely 0
+      const meter = buildMeterSnapshot(0x01, data, makeMeterProductCache());
+      expect(meter!.activePowerTotal).toBe(0);  // should NOT fall back to phase 1
+    });
+
+    it('does not apply fallback when phase 1 and total are both 0', () => {
+      // When the meter is idle (e.g., no load), both phase 1 and total are 0 — no fallback needed
+      const data = makeMeterDataCache();
+      data.set(68, 0);     // p_active_phase_1 = 0
+      data.set(71, 0);     // p_active_total = 0
+      const meter = buildMeterSnapshot(0x01, data, makeMeterProductCache());
+      expect(meter!.activePowerTotal).toBe(0);
     });
   });
 });
