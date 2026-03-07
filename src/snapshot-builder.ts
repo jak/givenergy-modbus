@@ -469,10 +469,10 @@ export function buildBatterySnapshot(
   // If all registers are zero, no battery is present at this address.
   const serialRegs = [110, 111, 112, 113, 114].map(a => get(a));
   const isAllNull = serialRegs.every(r => r === 0);
-  if (isAllNull) {
+  const serialNumber = registersToString(serialRegs);
+  if (isAllNull || serialNumber.trim() === '') {
     return null;
   }
-  const serialNumber = registersToString(serialRegs);
 
   // soc: IR(100)
   const stateOfCharge = get(100);

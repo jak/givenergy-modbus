@@ -151,6 +151,20 @@ describe('Register Converters', () => {
       expect(slot.start).toBe('01:00');
       expect(slot.end).toBe('01:05');
     });
+
+    it('normalises 2400 to 00:00 — some firmware stores midnight as 2400 instead of 0', () => {
+      // See #4 — some firmware stores midnight as 2400, which produces "24:00".
+      // We normalise silently since the intent is unambiguous.
+      const slot = toTimeslot(2400, 2400);
+      expect(slot.start).toBe('00:00');
+      expect(slot.end).toBe('00:00');
+    });
+
+    it('normalises 2400 in either start or end position', () => {
+      const slot = toTimeslot(0, 2400);
+      expect(slot.start).toBe('00:00');
+      expect(slot.end).toBe('00:00');
+    });
   });
 
   describe('frequencyScale', () => {
