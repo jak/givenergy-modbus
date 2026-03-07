@@ -597,6 +597,17 @@ describe('SnapshotBuilder', () => {
       expect(buildBatterySnapshot(cache)).toBeNull();
     });
 
+    it('returns null for whitespace-only serial (ghost battery, #3)', () => {
+      // Users with 2 physical batteries see a 3rd ghost battery whose serial
+      // registers are 0x2020 (two ASCII spaces per register = 10 spaces total).
+      // These pass the all-zero check but should still be filtered out.
+      const cache = makeBatteryCache();
+      for (let i = 0; i < 5; i++) {
+        cache.set(110 + i, 0x2020); // '  ' per register → serial = '          '
+      }
+      expect(buildBatterySnapshot(cache)).toBeNull();
+    });
+
     it('computes voltage from v_cells_sum via toMilli', () => {
       const cache = makeBatteryCache();
       // v_cells_sum: IR(80) = 52000 → toMilli = 52.0V
