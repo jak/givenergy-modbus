@@ -293,9 +293,8 @@ export function buildSnapshot(
   const hour = getHR(cache, 38);
   const minute = getHR(cache, 39);
   const second = getHR(cache, 40);
-  const reportedTime = new Date(year, month - 1, day, hour, minute, second);
   const previousTime = previousSnapshot?.systemTime ?? null;
-  const systemTime = applyTimeFallback(reportedTime, previousTime);
+  const systemTime = applyTimeFallback(year, month, day, hour, minute, second, previousTime);
 
   // ── Power flows ───────────────────────────────────────────────────────────
   // p_battery sign convention: positive = discharging, negative = charging

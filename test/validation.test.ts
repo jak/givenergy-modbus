@@ -86,29 +86,67 @@ describe('applyTimeFallback', () => {
     vi.useRealTimers();
   });
 
-  it('uses reported time when year is not 2000', () => {
-    const reported = new Date(2024, 5, 15, 14, 30, 0);
-    const result = applyTimeFallback(reported, null);
-    expect(result).toBe(reported);
+  it('uses reported time when valid', () => {
+    const result = applyTimeFallback(2024, 6, 15, 14, 30, 0, null);
+    expect(result).toEqual(new Date(2024, 5, 15, 14, 30, 0));
   });
 
   it('uses cached time when year is 2000 and cache exists', () => {
     // GivEnergy inverters ship with RTC defaulted to year 2000.
     // Year 2000 = inverter hasn't synced time.
-    // Python: if GEInv.system_time.year == 2000
-    const reported = new Date(2000, 0, 1, 0, 0, 0);
     const cached = new Date(2024, 5, 15, 14, 30, 0);
-    const result = applyTimeFallback(reported, cached);
+    const result = applyTimeFallback(2000, 1, 1, 0, 0, 0, cached);
     expect(result).toBe(cached);
   });
 
   it('uses current local time when year is 2000 and no cache', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2025, 2, 5, 10, 0, 0));
-    const reported = new Date(2000, 0, 1, 0, 0, 0);
-    const result = applyTimeFallback(reported, null);
+    const result = applyTimeFallback(2000, 1, 1, 0, 0, 0, null);
     expect(result.getFullYear()).toBe(2025);
     expect(result.getMonth()).toBe(2);
+  });
+
+  it('rejects month=13 at year boundary and uses cached time (#9)', () => {
+    // At midnight on 31/12, the inverter can report month=13.
+    // JavaScript Date silently overflows: new Date(2024, 12, 31) → Jan 31 2025.
+    // Must validate raw components before constructing Date.
+    const cached = new Date(2024, 11, 31, 23, 59, 0);
+    const result = applyTimeFallback(2024, 13, 31, 0, 0, 0, cached);
+    expect(result).toBe(cached);
+  });
+
+  it('rejects month=0 and uses cached time (#9)', () => {
+    // Firmware could report month=0, which Date interprets as December of previous year.
+    const cached = new Date(2024, 0, 15, 12, 0, 0);
+    const result = applyTimeFallback(2024, 0, 15, 12, 0, 0, cached);
+    expect(result).toBe(cached);
+  });
+
+  it('rejects invalid day=32 and uses current time when no cache (#9)', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2025, 2, 5, 10, 0, 0));
+    const result = applyTimeFallback(2024, 6, 32, 14, 0, 0, null);
+    expect(result.getFullYear()).toBe(2025);
+    expect(result.getMonth()).toBe(2);
+  });
+
+  it('rejects invalid hour=25 (#9)', () => {
+    const cached = new Date(2024, 5, 15, 14, 30, 0);
+    const result = applyTimeFallback(2024, 6, 15, 25, 0, 0, cached);
+    expect(result).toBe(cached);
+  });
+
+  it('rejects invalid minute=60 (#9)', () => {
+    const cached = new Date(2024, 5, 15, 14, 30, 0);
+    const result = applyTimeFallback(2024, 6, 15, 14, 60, 0, cached);
+    expect(result).toBe(cached);
+  });
+
+  it('rejects invalid second=60 (#9)', () => {
+    const cached = new Date(2024, 5, 15, 14, 30, 0);
+    const result = applyTimeFallback(2024, 6, 15, 14, 30, 60, cached);
+    expect(result).toBe(cached);
   });
 });
 
