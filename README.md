@@ -70,9 +70,10 @@ await inverter.syncDateTime();
 
 Full API reference is available at **[jak.github.io/givenergy-modbus](https://jak.github.io/givenergy-modbus/)** — auto-generated from source with TypeDoc.
 
-## MQTT / Home Assistant
+## Built with this library
 
-If you want to bridge your inverter data to MQTT (with Home Assistant auto-discovery), see **[givenergy-mqtt](https://github.com/jak/givenergy-mqtt)** — built on top of this library.
+- **[givenergy-mqtt](https://github.com/jak/givenergy-mqtt)** — Bridge your inverter data to MQTT with Home Assistant auto-discovery.
+- **[GivEnergy for Homey](https://github.com/jak/io.jak.givenergy)** — Homey app for monitoring solar, battery, and grid power, tracking energy in the Homey Energy dashboard, and automating inverter modes and charging schedules.
 
 ## Protocol note
 
