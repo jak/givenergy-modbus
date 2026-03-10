@@ -133,7 +133,38 @@ describe('Client', () => {
       client.sendRequest(fakeReadRequest(0x31, 0, 60))
     ).rejects.toThrow();
     const elapsed = Date.now() - start;
-    expect(elapsed).toBeGreaterThanOrEqual(100);
+    // Timer resolution means elapsed can be slightly under the nominal timeout
+    expect(elapsed).toBeGreaterThanOrEqual(90);
+
+    await client.close();
+  });
+
+  it('does not crash when server sends a short frame that decodePdu cannot parse', async () => {
+    // A malicious or buggy device could send a frame with valid MBAP header but
+    // a body too short for decodePdu (which reads fixed offsets up to byte 41).
+    // The client must catch the decode error instead of crashing the process.
+    const client = new Client({
+      host: '127.0.0.1', port: serverPort,
+      retries: 0, timeout: 500,
+    });
+    await client.connect();
+
+    const serverSocket = await waitForServerSocket(serverSockets, 1000);
+
+    // Construct a frame with valid MBAP header but only 14 bytes of body
+    // (fid=0x02 transparent, but body far too short for decodePdu offsets 38-41)
+    const shortFrame = Buffer.from([
+      0x59, 0x59, 0x00, 0x01, // tid + pid
+      0x00, 0x0e,             // length=14 (total frame = 20 bytes)
+      0x01, 0x02,             // uid=1, fid=2 (transparent)
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    ]);
+    serverSocket.write(shortFrame);
+
+    // Client should not crash — sendRequest should simply time out
+    await expect(
+      client.sendRequest(fakeReadRequest(0x31, 0, 60))
+    ).rejects.toThrow('timeout');
 
     await client.close();
   });
