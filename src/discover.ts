@@ -1,9 +1,12 @@
 import * as net from 'net';
 import * as os from 'os';
+import { Client } from './client.js';
+import { encodeReadHoldingRegistersRequest } from './pdu/encode.js';
 
 /** GivEnergy inverters always listen on this port */
 const INVERTER_PORT = 8899;
 const SCAN_TIMEOUT_MS = 1000;
+const VERIFY_TIMEOUT_MS = 3000;
 const CONCURRENCY = 20;
 
 export interface DiscoveredDevice {
@@ -86,6 +89,30 @@ function tryConnect(host: string, port: number, timeoutMs: number): Promise<bool
   });
 }
 
+/**
+ * Verify a candidate host is a real GivEnergy inverter by sending a modbus
+ * read request and checking for a valid response. Matches GivTCP's active
+ * probe approach during discovery.
+ */
+async function verifyInverter(host: string): Promise<boolean> {
+  const client = new Client({ host, timeout: VERIFY_TIMEOUT_MS, retries: 0 });
+  try {
+    await client.connect();
+    const frame = encodeReadHoldingRegistersRequest({
+      dataAdapterSerial: '**********',
+      slaveAddress: 0x11,
+      baseRegister: 0,
+      registerCount: 1,
+    });
+    await client.sendRequest(frame);
+    return true;
+  } catch {
+    return false;
+  } finally {
+    await client.close();
+  }
+}
+
 export interface DiscoverOptions {
   subnet?: string;
   /** Called for each host after probing it */
@@ -93,10 +120,12 @@ export interface DiscoverOptions {
 }
 
 /**
- * Scan a subnet for GivEnergy inverters by probing port 8899.
+ * Scan a subnet for GivEnergy inverters using a two-phase approach:
  *
- * Uses up to 20 concurrent connection attempts with 1s timeout each.
- * Mirrors GivTCP's findInvertor.py Threader(20) approach.
+ * 1. Fast TCP port scan on port 8899 (1s timeout, 20 concurrent)
+ * 2. Active modbus probe on each candidate to verify it's a real GivEnergy inverter
+ *
+ * Mirrors GivTCP's findInvertor.py discovery strategy.
  *
  * @param subnetOrOptions - Optional CIDR string or options object. Subnet auto-detected if not provided.
  * @returns Array of discovered devices (host IP strings)
@@ -108,9 +137,9 @@ export async function discover(subnetOrOptions?: string | DiscoverOptions): Prom
 
   const cidr = options.subnet ?? getLocalSubnet();
   const hosts = parseSubnet(cidr);
-  const results: DiscoveredDevice[] = [];
+  const candidates: string[] = [];
 
-  // Process in batches of CONCURRENCY
+  // Phase 1: Fast TCP port scan
   for (let i = 0; i < hosts.length; i += CONCURRENCY) {
     const batch = hosts.slice(i, i + CONCURRENCY);
     const checks = await Promise.all(
@@ -121,6 +150,21 @@ export async function discover(subnetOrOptions?: string | DiscoverOptions): Prom
       })
     );
     for (const host of checks) {
+      if (host !== null) candidates.push(host);
+    }
+  }
+
+  // Phase 2: Verify each candidate with an active modbus probe
+  const results: DiscoveredDevice[] = [];
+  for (let i = 0; i < candidates.length; i += CONCURRENCY) {
+    const batch = candidates.slice(i, i + CONCURRENCY);
+    const verified = await Promise.all(
+      batch.map(async host => {
+        const isInverter = await verifyInverter(host);
+        return isInverter ? host : null;
+      })
+    );
+    for (const host of verified) {
       if (host !== null) results.push({ host });
     }
   }

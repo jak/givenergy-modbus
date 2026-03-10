@@ -2,6 +2,70 @@ import { describe, it, expect } from 'vitest';
 import { parseSubnet, discover } from '../src/discover.js';
 import { detectBatteries } from '../src/model/plant.js';
 import * as net from 'net';
+import { PayloadEncoder } from '../src/codec.js';
+
+/**
+ * Build a minimal valid GivEnergy transparent response frame.
+ *
+ * This constructs a frame that the Framer and decodePdu will accept,
+ * matching the shape hash of a read holding registers request
+ * (slave=0x11, fc=3, base=0, count=1).
+ */
+function buildMockResponse(): Buffer {
+  const serial = '**********';
+  const inverterSerial = '**********';
+  const slaveAddress = 0x11;
+  const fc = 0x03;
+  const baseRegister = 0;
+  const registerCount = 1;
+
+  // Build the inner CRC payload: slave + fc + inverterSerial + base + count + values + CRC
+  const crcEnc = new PayloadEncoder();
+  crcEnc.addUint8(slaveAddress);
+  crcEnc.addUint8(fc);
+  crcEnc.addString(inverterSerial, 10);
+  crcEnc.addUint16(baseRegister);
+  crcEnc.addUint16(registerCount);
+  crcEnc.addUint16(0x0001); // one register value
+  const crc = crcEnc.crc;
+  const swappedCrc = ((crc & 0xFF) << 8) | ((crc >> 8) & 0xFF);
+
+  // Build body (everything after 6-byte MBAP header)
+  const bodyEnc = new PayloadEncoder();
+  bodyEnc.addUint8(0x01); // uid
+  bodyEnc.addUint8(0x02); // fid: transparent
+  bodyEnc.addString(serial, 10);
+  // 8-byte padding
+  bodyEnc.addUint8(0x00);
+  bodyEnc.addUint8(0x00);
+  bodyEnc.addUint8(0x00);
+  bodyEnc.addUint8(0x00);
+  bodyEnc.addUint8(0x00);
+  bodyEnc.addUint8(0x00);
+  bodyEnc.addUint8(0x00);
+  bodyEnc.addUint8(0x08);
+  bodyEnc.addUint8(slaveAddress);
+  bodyEnc.addUint8(fc);
+  bodyEnc.addString(inverterSerial, 10);
+  bodyEnc.addUint16(baseRegister);
+  bodyEnc.addUint16(registerCount);
+  bodyEnc.addUint16(0x0001); // register value
+  bodyEnc.addUint16(swappedCrc);
+
+  const body = bodyEnc.payload;
+
+  // Build full frame with MBAP header
+  const frameEnc = new PayloadEncoder();
+  frameEnc.addUint16(0x5959); // TID
+  frameEnc.addUint16(0x0001); // protocol ID
+  frameEnc.addUint16(body.length); // length
+  for (const byte of body) {
+    frameEnc.addUint8(byte);
+  }
+
+  return frameEnc.payload;
+}
+
 
 describe('parseSubnet', () => {
   it('expands /24 to 254 host addresses', () => {
@@ -40,30 +104,100 @@ describe('parseSubnet', () => {
 });
 
 describe('discover', () => {
-  it('finds a GivEnergy inverter when port 8899 is open', async () => {
-    // Start a local TCP server to simulate an inverter on port 8899
-    const server = net.createServer();
-    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
-    const port = (server.address() as net.AddressInfo).port;
-
-    // We can't easily test on port 8899, so test the tryConnect mechanism
-    // by passing a single-host /32 subnet — just verify the API shape
-    server.close();
-
-    // Just verify the function exists and returns the right shape
-    const results = await discover('127.0.0.1/32');
-    // Port 8899 almost certainly closed on localhost, so 0 results is fine
-    expect(Array.isArray(results)).toBe(true);
-    for (const r of results) {
-      expect(typeof r.host).toBe('string');
-    }
-  }, 5000);
-
   it('returns empty array when no inverters found', async () => {
     // Scan a /32 of an address that won't have port 8899 open
     const results = await discover('127.0.0.1/32');
     expect(Array.isArray(results)).toBe(true);
   }, 3000);
+});
+
+describe('discover verification', () => {
+  // These tests use mock TCP servers on random ports, so we need to
+  // override the port. Since discover() hardcodes port 8899, we test
+  // the verification behavior indirectly through the full discover flow
+  // by patching. Instead, we test with the actual port by binding to 8899
+  // if available, or skip gracefully.
+
+  // For unit-testability, we test the verification logic by creating
+  // servers on port 8899 and using /32 subnets pointing at localhost.
+  // If port 8899 is unavailable (e.g. CI), these tests skip.
+
+  it('discovers a host that responds with a valid GivEnergy frame', async () => {
+    const response = buildMockResponse();
+    let server: net.Server | undefined;
+    try {
+      // Try to bind to port 8899 on localhost
+      server = net.createServer(socket => {
+        // Wait for request data, then respond with a valid frame
+        socket.once('data', () => {
+          socket.write(response);
+        });
+      });
+      await new Promise<void>((resolve, reject) => {
+        server!.once('error', reject);
+        server!.listen(8899, '127.0.0.1', resolve);
+      });
+    } catch {
+      // Port 8899 unavailable — skip
+      return;
+    }
+
+    try {
+      const results = await discover('127.0.0.1/32');
+      expect(results).toEqual([{ host: '127.0.0.1' }]);
+    } finally {
+      server.close();
+    }
+  }, 10000);
+
+  it('rejects a host that accepts TCP but sends no modbus response', async () => {
+    let server: net.Server | undefined;
+    try {
+      // Server accepts connections but never sends data — simulates
+      // a non-GivEnergy service that happens to listen on port 8899
+      server = net.createServer(() => {
+        // Do nothing — let the client timeout
+      });
+      await new Promise<void>((resolve, reject) => {
+        server!.once('error', reject);
+        server!.listen(8899, '127.0.0.1', resolve);
+      });
+    } catch {
+      return;
+    }
+
+    try {
+      const results = await discover('127.0.0.1/32');
+      expect(results).toEqual([]);
+    } finally {
+      server.close();
+    }
+  }, 10000);
+
+  it('rejects a host that sends garbage data instead of a valid frame', async () => {
+    let server: net.Server | undefined;
+    try {
+      server = net.createServer(socket => {
+        socket.once('data', () => {
+          // Send random garbage that isn't a valid GivEnergy frame
+          socket.write(Buffer.from('HTTP/1.1 200 OK\r\n\r\nHello'));
+        });
+      });
+      await new Promise<void>((resolve, reject) => {
+        server!.once('error', reject);
+        server!.listen(8899, '127.0.0.1', resolve);
+      });
+    } catch {
+      return;
+    }
+
+    try {
+      const results = await discover('127.0.0.1/32');
+      expect(results).toEqual([]);
+    } finally {
+      server.close();
+    }
+  }, 10000);
 });
 
 describe('detectBatteries', () => {
