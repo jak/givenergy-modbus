@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.2](https://github.com/jak/givenergy-modbus/compare/givenergy-modbus-v1.1.1...givenergy-modbus-v1.1.2) (2026-03-10)
+
+
+### Bug Fixes
+
+* reject connect() when inverter returns empty serial number ([#24](https://github.com/jak/givenergy-modbus/issues/24)) ([81f1ad4](https://github.com/jak/givenergy-modbus/commit/81f1ad4f9a7f61470f2fe32c732e80c4d1152a76))
+* verify discovered devices with active modbus probe ([#25](https://github.com/jak/givenergy-modbus/issues/25)) ([e1edd49](https://github.com/jak/givenergy-modbus/commit/e1edd49ea2a02bc61e7a6fd31dae50fb418f8fd3))
+
 ## [1.1.1](https://github.com/jak/givenergy-modbus/compare/givenergy-modbus-v1.1.0...givenergy-modbus-v1.1.1) (2026-03-07)
 
 
