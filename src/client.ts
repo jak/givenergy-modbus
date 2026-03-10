@@ -138,7 +138,13 @@ export class Client {
     const results = this.framer.decode(data);
     for (const result of results) {
       if (result.type !== 'frame') continue;
-      const pdu = decodePdu(result.data);
+      let pdu;
+      try {
+        pdu = decodePdu(result.data);
+      } catch (err) {
+        this.onDebug(`failed to decode frame (${(err as Error).message}), skipping`);
+        continue;
+      }
       if (pdu.type === 'heartbeat') {
         this.onDebug(`heartbeat received (serial=${pdu.dataAdapterSerial}), sending response`);
         this._dataAdapterSerial = pdu.dataAdapterSerial;
