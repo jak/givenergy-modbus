@@ -133,7 +133,8 @@ describe('Client', () => {
       client.sendRequest(fakeReadRequest(0x31, 0, 60))
     ).rejects.toThrow();
     const elapsed = Date.now() - start;
-    expect(elapsed).toBeGreaterThanOrEqual(100);
+    // Timer resolution means elapsed can be slightly under the nominal timeout
+    expect(elapsed).toBeGreaterThanOrEqual(90);
 
     await client.close();
   });
