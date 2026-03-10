@@ -47,6 +47,12 @@ export abstract class GivEnergyInverter extends EventEmitter {
     });
     await pollManager.start();
     const snapshot = pollManager.getData();
+
+    if (!snapshot.serialNumber || snapshot.serialNumber.replace(/[\x00\s]/g, '') === '') {
+      await pollManager.stop();
+      throw new Error(`No valid inverter found at ${options.host} (empty serial number)`);
+    }
+
     const generation = snapshot.generation;
 
     switch (generation) {
