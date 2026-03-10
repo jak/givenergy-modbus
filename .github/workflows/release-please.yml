@@ -3,20 +3,25 @@ on:
     branches:
       - main
 
-permissions:
-  contents: write
-  pull-requests: write
-
 name: release-please
 
 jobs:
   release-please:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+      version: ${{ steps.release.outputs.version }}
     steps:
       - uses: googleapis/release-please-action@v4
         id: release
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/checkout@v4
+        if: ${{ steps.release.outputs.release_created }}
       - name: Add npm and docs links to release notes
         if: ${{ steps.release.outputs.release_created }}
         env:
@@ -27,3 +32,21 @@ jobs:
           BODY=$(gh release view "$TAG" --json body -q .body)
           printf -v FOOTER '\n\n---\n\n**npm:** [`givenergy-modbus@%s`](https://www.npmjs.com/package/givenergy-modbus/v/%s)\n**Docs:** [jak.github.io/givenergy-modbus](https://jak.github.io/givenergy-modbus/)' "$VERSION" "$VERSION"
           gh release edit "$TAG" --notes "${BODY}${FOOTER}"
+
+  publish:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: 'https://registry.npmjs.org'
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - run: npm publish --provenance --access public
