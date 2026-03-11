@@ -19,7 +19,8 @@
     "script:monitor": "node scripts/monitor.mjs",
     "script:write-test": "node scripts/write-test.mjs",
     "script:dump-registers": "node scripts/dump-registers.mjs",
-    "docs": "typedoc"
+    "docs": "typedoc && vitepress build website",
+    "docs:dev": "typedoc && vitepress dev website"
   },
   "keywords": [
     "givenergy",
@@ -36,7 +37,10 @@
   "devDependencies": {
     "@types/node": "^25.3.3",
     "typedoc": "^0.28.17",
+    "typedoc-plugin-markdown": "^4.10.0",
+    "typedoc-vitepress-theme": "^1.1.2",
     "typescript": "^5.7.0",
+    "vitepress": "^1.6.4",
     "vitest": "^3.0.0"
   }
 }
