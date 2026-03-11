@@ -1,5 +1,7 @@
 node_modules/
 dist/
-docs/
 dumps/
 .worktrees/
+website/api/
+website/.vitepress/cache/
+website/.vitepress/dist/
