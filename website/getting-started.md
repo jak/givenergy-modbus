@@ -1,0 +1,111 @@
+# Getting Started
+
+## Prerequisites
+
+- **Node.js 20+**
+- GivEnergy inverter on your local network (port 8899)
+- No other clients connected to port 8899 (e.g. GivTCP) — the data adapter doesn't reliably handle multiple concurrent connections
+
+## Install
+
+```bash
+npm install givenergy-modbus
+```
+
+TypeScript types are included. No `@types/` package needed.
+
+## Discover Inverters
+
+If you don't know your inverter's IP address, use auto-discovery:
+
+```ts
+import { discover } from 'givenergy-modbus';
+
+const devices = await discover();
+// [{ host: '192.168.1.100', serialNumber: 'EE1234B567' }]
+```
+
+Discovery sends a UDP broadcast and listens for responses. You can also specify a subnet:
+
+```ts
+const devices = await discover('10.29.0.0/24');
+```
+
+## Connect
+
+```ts
+import { GivEnergyInverter } from 'givenergy-modbus';
+
+const inverter = await GivEnergyInverter.connect({
+  host: '192.168.1.100',
+});
+```
+
+`connect()` returns a promise that resolves after the first complete register poll. The returned object is a `Gen2Inverter`, `Gen3Inverter`, or `ThreePhaseInverter` depending on what the inverter reports.
+
+## Read Data
+
+Call `getData()` for the latest snapshot:
+
+```ts
+const snapshot = inverter.getData();
+
+console.log(snapshot.solarPower);       // watts
+console.log(snapshot.stateOfCharge);    // 0-100%
+console.log(snapshot.gridPower);        // watts (positive = export)
+console.log(snapshot.batteryPower);     // watts (positive = discharge)
+console.log(snapshot.mode);             // 'eco' | 'timed_demand' | 'timed_export'
+```
+
+The snapshot is a plain object — see [Concepts](./concepts) for what's in it.
+
+## Listen for Updates
+
+The inverter is polled every ~15 seconds. Subscribe to updates:
+
+```ts
+inverter.on('data', (snapshot) => {
+  console.log(`Solar: ${snapshot.solarPower}W, Battery: ${snapshot.stateOfCharge}%`);
+});
+
+// Connection loss
+inverter.on('lost', (err) => {
+  console.error('Connection lost:', err.message);
+});
+```
+
+## Control the Inverter
+
+```ts
+// Set operating mode
+await inverter.setMode('eco');
+await inverter.setMode('timed_demand');
+await inverter.setMode('timed_export');
+
+// Configure charge schedule
+await inverter.setChargeSlot(1, {
+  start: '00:30',
+  end: '04:30',
+  targetStateOfCharge: 100,  // Gen3 only
+});
+
+// Set rates and reserves
+await inverter.setChargeRatePercent(100);
+await inverter.setDischargeRatePercent(100);
+await inverter.setBatteryReserve(4);
+
+// Sync inverter clock to system time
+await inverter.syncDateTime();
+```
+
+Available methods depend on inverter generation. See the [API Reference](/api/) for the full list per class.
+
+## Stop
+
+Always stop the inverter when you're done:
+
+```ts
+await inverter.stop();
+```
+
+This closes the TCP connection and stops polling.
