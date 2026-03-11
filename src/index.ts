@@ -12,6 +12,7 @@ export type {
   Gen2Snapshot,
   Gen3Snapshot,
   ThreePhaseSnapshot,
+  BatteryPauseMode,
 } from './model/inverter-snapshot.js';
 export type { BatterySnapshot } from './model/battery-snapshot.js';
 export type { MeterSnapshot, ThreePhase } from './model/meter-snapshot.js';

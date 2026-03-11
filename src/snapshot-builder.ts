@@ -7,7 +7,8 @@
  * Reference: GivTCP/read.py — processInverterInfo()
  */
 
-import type { InverterSnapshot } from './model/inverter-snapshot.js';
+import type { InverterSnapshot, BatteryPauseMode } from './model/inverter-snapshot.js';
+import type { InverterMode } from './inverter.js';
 import type { BatterySnapshot } from './model/battery-snapshot.js';
 import type { MeterSnapshot } from './model/meter-snapshot.js';
 import type { TimeSlot, TimeSlotConfig } from './model/register-types.js';
@@ -284,6 +285,35 @@ export function buildSnapshot(
   // charge_target_soc: HR(116) — legacy single target, applies to slot 1 on Gen2
   const chargeTargetStateOfCharge = getHR(cache, 116);
 
+  // ── Mode & settings ─────────────────────────────────────────────────────
+  // Mode derivation from HR(27) and HR(59) — matches setMode() in inverter.ts.
+  // HR(59) is also enableDischarge; the overlap is intentional (eco = discharge disabled).
+  const shallowCharge = getHR(cache, 27);
+  const enableTimedDischarge = getHR(cache, 59);
+  let mode: InverterMode;
+  if (shallowCharge !== 0 && enableTimedDischarge === 0) {
+    mode = 'eco';
+  } else if (shallowCharge !== 0 && enableTimedDischarge !== 0) {
+    mode = 'timed_demand';
+  } else {
+    mode = 'timed_export';
+  }
+
+  // Three-phase uses different holding registers for these settings
+  const batteryReservePercent = generation === 'three_phase'
+    ? getHR(cache, 1109) : getHR(cache, 110);
+  const chargeRatePercent = generation === 'three_phase'
+    ? getHR(cache, 1110) : getHR(cache, 313);
+  const dischargeRatePercent = generation === 'three_phase'
+    ? getHR(cache, 1108) : getHR(cache, 314);
+
+  // battery_pause_mode: HR(318) — Gen3-only
+  // 0=disabled, 1=pause_charge, 2=pause_discharge, 3=pause_both
+  const PAUSE_MODE_MAP: BatteryPauseMode[] = [
+    'disabled', 'pause_charge', 'pause_discharge', 'pause_both',
+  ];
+  const batteryPauseMode: BatteryPauseMode = PAUSE_MODE_MAP[getHR(cache, 318)] ?? 'disabled';
+
   // ── System time ───────────────────────────────────────────────────────────
   // system_time: HR(35-40) — year, month, day, hour, minute, second
   // GivEnergy stores the year as a 2-digit offset from 2000 (e.g. 26 = 2026)
@@ -458,6 +488,11 @@ export function buildSnapshot(
     enableCharge,
     enableDischarge,
     chargeTargetStateOfCharge,
+    mode,
+    batteryReservePercent,
+    chargeRatePercent,
+    dischargeRatePercent,
+    ...(generation === 'gen3' ? { batteryPauseMode } : {}),
     systemTime,
     powerFlows,
     batteries,

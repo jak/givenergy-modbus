@@ -100,9 +100,16 @@ console.log(`Battery throughput: ${s.batteryThroughputTotalKwh} kWh`);
 console.log(`Hours of operation: ${s.hoursOfOperation}`);
 
 console.log('\n--- Config ---');
+console.log(`Mode:             ${s.mode}`);
 console.log(`Enable charge:    ${s.enableCharge}`);
 console.log(`Enable discharge: ${s.enableDischarge}`);
 console.log(`Charge target:    ${s.chargeTargetStateOfCharge}%`);
+console.log(`Battery reserve:  ${s.batteryReservePercent}%`);
+console.log(`Charge rate:      ${s.chargeRatePercent}%`);
+console.log(`Discharge rate:   ${s.dischargeRatePercent}%`);
+if (s.generation === 'gen3') {
+  console.log(`Battery pause:    ${s.batteryPauseMode}`);
+}
 
 console.log('\n--- Charge Slots ---');
 for (const [i, slot] of s.chargeSlots.entries()) {

@@ -66,6 +66,60 @@ await inverter.setChargeRate(2600);
 await inverter.syncDateTime();
 ```
 
+## Library scope
+
+This library is **stateless** — it reads the current inverter state and sends individual register writes, but does not track what it has changed or automatically revert anything. Each method call is a single Modbus transaction: read registers, write a register, or poll for updates.
+
+This means higher-level workflows like "force charge for 2 hours then revert to normal" need to be orchestrated by **your application**, not by this library. The library gives you the building blocks; you decide when and how to use them.
+
+### Orchestrating force charge / force discharge
+
+A common use case is forcing the battery to charge from the grid (e.g. during cheap overnight rates) or discharge to the grid (e.g. during peak export rates). Here's how to build this on top of the library:
+
+#### Force charge
+
+```ts
+import { GivEnergyInverter } from 'givenergy-modbus';
+
+const inverter = await GivEnergyInverter.connect({ host: '192.168.1.100' });
+
+// 1. Save the current state so you can restore it later
+const before = inverter.getData();
+const previousMode = before.mode;
+const previousChargeRate = before.chargeRatePercent;
+
+// 2. Enable timed demand mode and set a charge slot covering "now"
+await inverter.setMode('timed_demand');
+await inverter.setChargeSlot(1, { start: '00:00', end: '23:59', targetStateOfCharge: 100 });
+
+// 3. Your app is responsible for reverting when done — use a timer, cron, etc.
+setTimeout(async () => {
+  await inverter.setMode(previousMode);
+  // Restore original charge slot, rate, etc.
+  await inverter.stop();
+}, 2 * 60 * 60 * 1000); // 2 hours
+```
+
+#### Force discharge
+
+```ts
+// 1. Save current state
+const before = inverter.getData();
+
+// 2. Set timed export mode with a discharge slot covering "now"
+await inverter.setMode('timed_export');
+await inverter.setDischargeSlot(1, { start: '00:00', end: '23:59' });
+
+// 3. Revert when done (your app's responsibility)
+```
+
+#### Key points
+
+- **Always save state before changing it.** The library doesn't track previous values — snapshot fields like `mode`, `chargeRatePercent`, `batteryReservePercent`, and `chargeSlots` tell you the current config so you can restore it.
+- **Your app owns the timer/revert logic.** Whether that's `setTimeout`, a cron job, or a home automation trigger is up to you.
+- **Gen3 has `batteryPauseMode`** — an alternative to mode switching. Set it to `'pause_discharge'` to hold charge, or `'pause_charge'` to prevent charging, without changing timeslots.
+- **The inverter may take a few seconds to act on register writes.** Poll with `getData()` or listen for `'data'` events to confirm changes took effect.
+
 ## API documentation
 
 Full API reference is available at **[jak.github.io/givenergy-modbus](https://jak.github.io/givenergy-modbus/)** — auto-generated from source with TypeDoc.

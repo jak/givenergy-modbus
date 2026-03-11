@@ -12,6 +12,16 @@ import type { TimeSlot, TimeSlotConfig } from './register-types.js';
 import type { BatterySnapshot } from './battery-snapshot.js';
 import type { MeterSnapshot } from './meter-snapshot.js';
 import type { PowerFlows } from '../power-flow.js';
+import type { InverterMode } from '../inverter.js';
+
+/**
+ * Battery pause mode — Gen3-only feature from HR(318).
+ *
+ * Controls whether the battery is paused from charging, discharging, or both.
+ * 'disabled' means normal operation. This is independent of the charge/discharge
+ * enable flags (HR 96/59) and timeslot configuration.
+ */
+export type BatteryPauseMode = 'disabled' | 'pause_charge' | 'pause_discharge' | 'pause_both';
 
 /** Fields shared by all inverter generations */
 interface BaseSnapshot {
@@ -144,6 +154,20 @@ interface BaseSnapshot {
   /** Legacy charge target SOC % from HR(116) — applies to slot 1 on Gen2 */
   chargeTargetStateOfCharge: number;
 
+  /**
+   * Operating mode derived from HR(27) and HR(59):
+   *  - 'eco': HR(27)=1, HR(59)=0 — battery charges from solar only, discharges to meet load
+   *  - 'timed_demand': HR(27)=1, HR(59)=1 — battery charges/discharges on schedule
+   *  - 'timed_export': HR(27)=0, HR(59)=1 — battery discharges to grid on schedule
+   */
+  mode: InverterMode;
+  /** Minimum SOC the inverter will discharge to (4-100%), from HR(110) or HR(1109) for three-phase */
+  batteryReservePercent: number;
+  /** Battery charge rate AC limit (0-100%), from HR(313) or HR(1110) for three-phase */
+  chargeRatePercent: number;
+  /** Battery discharge rate AC limit (0-100%), from HR(314) or HR(1108) for three-phase */
+  dischargeRatePercent: number;
+
   // Inverter time (with year-2000 fallback applied)
   systemTime: Date;
 
@@ -171,6 +195,11 @@ export interface Gen3Snapshot extends BaseSnapshot {
   chargeSlots: TimeSlotConfig[];
   /** Discharge timeslots with per-slot target state of charge */
   dischargeSlots: TimeSlotConfig[];
+  /**
+   * Battery pause mode from HR(318) — Gen3-only feature.
+   * Controls whether the battery is paused from charging, discharging, or both.
+   */
+  batteryPauseMode: BatteryPauseMode;
 }
 
 export interface ThreePhaseSnapshot extends BaseSnapshot {

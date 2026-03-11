@@ -1130,4 +1130,173 @@ describe('SnapshotBuilder', () => {
       expect(bcu.cycleCount).toBeCloseTo(15.0, 1);
     });
   });
+
+  // ── Mode derivation ────────────────────────────────────────────────────
+  // HR(27) = shallow_charge (eco bit), HR(59) = enable_timed_discharge.
+  // These two registers together determine the operating mode, matching
+  // the setMode() logic in inverter.ts.
+  describe('mode derivation from HR(27) and HR(59)', () => {
+    it('HR(27)=1, HR(59)=0 → eco', () => {
+      const cache = makeValidCache();
+      cache.holdingRegisters.set(27, 1);
+      cache.holdingRegisters.set(59, 0);
+      const s = buildSnapshot(cache)!;
+      expect(s.mode).toBe('eco');
+    });
+
+    it('HR(27)=1, HR(59)=1 → timed_demand', () => {
+      const cache = makeValidCache();
+      cache.holdingRegisters.set(27, 1);
+      cache.holdingRegisters.set(59, 1);
+      const s = buildSnapshot(cache)!;
+      expect(s.mode).toBe('timed_demand');
+    });
+
+    it('HR(27)=0, HR(59)=1 → timed_export', () => {
+      const cache = makeValidCache();
+      cache.holdingRegisters.set(27, 0);
+      cache.holdingRegisters.set(59, 1);
+      const s = buildSnapshot(cache)!;
+      expect(s.mode).toBe('timed_export');
+    });
+
+    it('HR(27)=0, HR(59)=0 → timed_export (fallback — shallow_charge off)', () => {
+      // When both are 0, the else branch produces timed_export.
+      // This is an edge case — a real inverter would not normally have both off.
+      const cache = makeValidCache();
+      cache.holdingRegisters.set(27, 0);
+      cache.holdingRegisters.set(59, 0);
+      const s = buildSnapshot(cache)!;
+      expect(s.mode).toBe('timed_export');
+    });
+  });
+
+  // ── Battery reserve, charge/discharge rate ─────────────────────────────
+  describe('battery reserve and rate settings', () => {
+    it('reads batteryReservePercent from HR(110) for gen2/gen3', () => {
+      const cache = makeValidCache();
+      cache.holdingRegisters.set(110, 20);
+      const s = buildSnapshot(cache)!;
+      expect(s.batteryReservePercent).toBe(20);
+    });
+
+    it('reads chargeRatePercent from HR(313)', () => {
+      const cache = makeValidCache();
+      cache.holdingRegisters.set(313, 50);
+      const s = buildSnapshot(cache)!;
+      expect(s.chargeRatePercent).toBe(50);
+    });
+
+    it('reads dischargeRatePercent from HR(314)', () => {
+      const cache = makeValidCache();
+      cache.holdingRegisters.set(314, 75);
+      const s = buildSnapshot(cache)!;
+      expect(s.dischargeRatePercent).toBe(75);
+    });
+
+    it('defaults to 0 when registers are not present', () => {
+      const cache = makeValidCache();
+      const s = buildSnapshot(cache)!;
+      expect(s.batteryReservePercent).toBe(0);
+      expect(s.chargeRatePercent).toBe(0);
+      expect(s.dischargeRatePercent).toBe(0);
+    });
+  });
+
+  // ── Three-phase register mapping ───────────────────────────────────────
+  describe('three-phase settings use different registers', () => {
+    function makeThreePhaseCache(): RegisterCache {
+      const cache = makeValidCache();
+      // Set device type to three-phase: 0x4001 = HYBRID_3PH
+      cache.holdingRegisters.set(0, 0x4001);
+      cache.holdingRegisters.set(21, 100); // arm_fw doesn't affect 3ph detection
+      return cache;
+    }
+
+    it('reads batteryReservePercent from HR(1109) for three_phase', () => {
+      const cache = makeThreePhaseCache();
+      cache.holdingRegisters.set(110, 99);   // gen2/gen3 register — should be ignored
+      cache.holdingRegisters.set(1109, 15);  // three-phase register
+      const s = buildSnapshot(cache)!;
+      expect(s.generation).toBe('three_phase');
+      expect(s.batteryReservePercent).toBe(15);
+    });
+
+    it('reads chargeRatePercent from HR(1110) for three_phase', () => {
+      const cache = makeThreePhaseCache();
+      cache.holdingRegisters.set(313, 99);
+      cache.holdingRegisters.set(1110, 60);
+      const s = buildSnapshot(cache)!;
+      expect(s.chargeRatePercent).toBe(60);
+    });
+
+    it('reads dischargeRatePercent from HR(1108) for three_phase', () => {
+      const cache = makeThreePhaseCache();
+      cache.holdingRegisters.set(314, 99);
+      cache.holdingRegisters.set(1108, 80);
+      const s = buildSnapshot(cache)!;
+      expect(s.dischargeRatePercent).toBe(80);
+    });
+  });
+
+  // ── Battery pause mode (Gen3-only) ─────────────────────────────────────
+  // HR(318): 0=disabled, 1=pause_charge, 2=pause_discharge, 3=pause_both
+  describe('batteryPauseMode (Gen3-only)', () => {
+    it('maps HR(318)=0 to disabled', () => {
+      const cache = makeValidCache(); // gen3 by default
+      cache.holdingRegisters.set(318, 0);
+      const s = buildSnapshot(cache)!;
+      expect(s.generation).toBe('gen3');
+      expect((s as import('../src/model/inverter-snapshot.js').Gen3Snapshot).batteryPauseMode).toBe('disabled');
+    });
+
+    it('maps HR(318)=1 to pause_charge', () => {
+      const cache = makeValidCache();
+      cache.holdingRegisters.set(318, 1);
+      const s = buildSnapshot(cache)!;
+      expect((s as import('../src/model/inverter-snapshot.js').Gen3Snapshot).batteryPauseMode).toBe('pause_charge');
+    });
+
+    it('maps HR(318)=2 to pause_discharge', () => {
+      const cache = makeValidCache();
+      cache.holdingRegisters.set(318, 2);
+      const s = buildSnapshot(cache)!;
+      expect((s as import('../src/model/inverter-snapshot.js').Gen3Snapshot).batteryPauseMode).toBe('pause_discharge');
+    });
+
+    it('maps HR(318)=3 to pause_both', () => {
+      const cache = makeValidCache();
+      cache.holdingRegisters.set(318, 3);
+      const s = buildSnapshot(cache)!;
+      expect((s as import('../src/model/inverter-snapshot.js').Gen3Snapshot).batteryPauseMode).toBe('pause_both');
+    });
+
+    it('falls back to disabled for unknown values', () => {
+      const cache = makeValidCache();
+      cache.holdingRegisters.set(318, 99);
+      const s = buildSnapshot(cache)!;
+      expect((s as import('../src/model/inverter-snapshot.js').Gen3Snapshot).batteryPauseMode).toBe('disabled');
+    });
+
+    it('is not present on gen2 snapshots', () => {
+      const cache = makeValidCache();
+      // Set to gen2: device_type 0x2001 with arm_fw < 300
+      cache.holdingRegisters.set(0, 0x2001);
+      cache.holdingRegisters.set(21, 100); // arm_fw 100 → gen2
+      cache.holdingRegisters.set(318, 2);
+      const s = buildSnapshot(cache)!;
+      expect(s.generation).toBe('gen2');
+      expect('batteryPauseMode' in s).toBe(false);
+    });
+
+    it('is not present on three_phase snapshots', () => {
+      const cache = makeValidCache();
+      cache.holdingRegisters.set(0, 0x4001);
+      cache.holdingRegisters.set(21, 100);
+      cache.holdingRegisters.set(318, 1);
+      const s = buildSnapshot(cache)!;
+      expect(s.generation).toBe('three_phase');
+      expect('batteryPauseMode' in s).toBe(false);
+    });
+  });
 });
