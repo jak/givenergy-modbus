@@ -199,6 +199,35 @@ describe('discover verification', () => {
     }
   }, 15000);
 
+  it('passes identifyOptions through to the modbus probe', async () => {
+    const registers = buildIdentifyRegisters('CE1234G567', 0x2001, 899);
+    const response = buildMockResponse(registers);
+    let server: net.Server | undefined;
+    try {
+      server = net.createServer(socket => {
+        socket.once('data', () => socket.write(response));
+      });
+      await new Promise<void>((resolve, reject) => {
+        server!.once('error', reject);
+        server!.listen(8899, '127.0.0.1', resolve);
+      });
+    } catch {
+      return;
+    }
+
+    try {
+      // Custom timeout and retries should not break discovery
+      const results = await discover({
+        subnet: '127.0.0.1/32',
+        identifyOptions: { timeout: 5000, retries: 1 },
+      });
+      expect(results).toHaveLength(1);
+      expect(results[0].serialNumber).toBe('CE1234G567');
+    } finally {
+      server.close();
+    }
+  }, 15000);
+
   it('does not call onFound for hosts that fail modbus verification', async () => {
     let server: net.Server | undefined;
     try {

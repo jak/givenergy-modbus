@@ -94,6 +94,13 @@ function tryConnect(host: string, port: number, timeoutMs: number): Promise<bool
 
 export interface DiscoverOptions {
   subnet?: string;
+  /** Options passed to {@link GivEnergyInverter.identify} during Phase 2 modbus verification. */
+  identifyOptions?: {
+    /** Timeout in ms for each identify probe. Default: 3000 */
+    timeout?: number;
+    /** Number of retries per probe. Default: 0 (fail fast for discovery) */
+    retries?: number;
+  };
   /** Fires after each host is TCP-scanned in Phase 1. Use for progress UI. */
   onScanProgress?: (host: string, portOpen: boolean) => void;
   /** Fires when a host passes Phase 2 modbus verification — confirmed GivEnergy inverter. */
@@ -142,7 +149,11 @@ export async function discover(subnetOrOptions?: string | DiscoverOptions): Prom
     const identified = await Promise.all(
       batch.map(async host => {
         try {
-          const identity = await GivEnergyInverter.identify({ host, timeout: IDENTIFY_TIMEOUT_MS, retries: 0 });
+          const identity = await GivEnergyInverter.identify({
+            host,
+            timeout: options.identifyOptions?.timeout ?? IDENTIFY_TIMEOUT_MS,
+            retries: options.identifyOptions?.retries ?? 0,
+          });
           return { host, ...identity };
         } catch {
           return null;
