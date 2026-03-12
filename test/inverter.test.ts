@@ -237,9 +237,9 @@ describe('GivEnergyInverter', () => {
     const registers = new Array(60).fill(0);
     // HR(0) = device type code 0x2001 (Gen2 hybrid)
     registers[0] = 0x2001;
-    // HR(6..10) = serial "SD2227G895" encoded as 5 registers
+    // HR(13..17) = serial "SD2227G895" encoded as 5 registers
     const serialRegs = stringToRegisters('SD2227G895');
-    for (let i = 0; i < 5; i++) registers[6 + i] = serialRegs[i];
+    for (let i = 0; i < 5; i++) registers[13 + i] = serialRegs[i];
     // HR(21) = firmware version 899
     registers[21] = 899;
 
@@ -266,7 +266,7 @@ describe('GivEnergyInverter', () => {
     const registers = new Array(60).fill(0);
     registers[0] = 0x2001;
     const serialRegs = stringToRegisters('EE1234G567');
-    for (let i = 0; i < 5; i++) registers[6 + i] = serialRegs[i];
+    for (let i = 0; i < 5; i++) registers[13 + i] = serialRegs[i];
     registers[21] = 301;
 
     const response = buildIdentifyResponse(registers);
@@ -291,7 +291,7 @@ describe('GivEnergyInverter', () => {
     const sockets: Socket[] = [];
     const registers = new Array(60).fill(0);
     const serialRegs = stringToRegisters('SA9999X123');
-    for (let i = 0; i < 5; i++) registers[6 + i] = serialRegs[i];
+    for (let i = 0; i < 5; i++) registers[13 + i] = serialRegs[i];
 
     const response = buildIdentifyResponse(registers);
     const server: Server = createServer((socket) => {
@@ -337,7 +337,7 @@ describe('GivEnergyInverter', () => {
     const registers = new Array(60).fill(0);
     registers[0] = 0x2001;
     const serialRegs = stringToRegisters('SD2227G895');
-    for (let i = 0; i < 5; i++) registers[6 + i] = serialRegs[i];
+    for (let i = 0; i < 5; i++) registers[13 + i] = serialRegs[i];
     registers[21] = 899;
 
     const response = buildIdentifyResponse(registers);

@@ -1,6 +1,10 @@
 import { EventEmitter } from 'events';
 import { PollManager, type PollManagerOptions } from './poll-manager.js';
-import { encodeWriteHoldingRegisterRequest } from './pdu/encode.js';
+import { encodeWriteHoldingRegisterRequest, encodeReadHoldingRegistersRequest } from './pdu/encode.js';
+import { Client } from './client.js';
+import { registersToString } from './model/converters.js';
+import { detectModel } from './model/device-types.js';
+import { detectGeneration, modelToGeneration, type InverterGeneration } from './generation.js';
 
 import type { InverterSnapshot } from './model/inverter-snapshot.js';
 
@@ -19,6 +23,12 @@ export interface TimeSlotInput {
   start: string;
   end: string;
   targetStateOfCharge?: number;
+}
+
+export interface InverterIdentity {
+  serialNumber: string;
+  generation: InverterGeneration;
+  modelCode: number;
 }
 
 export abstract class GivEnergyInverter extends EventEmitter {
@@ -68,6 +78,48 @@ export abstract class GivEnergyInverter extends EventEmitter {
         const { Gen2Inverter } = await import('./inverters/gen2.js');
         return new Gen2Inverter(pollManager);
       }
+    }
+  }
+
+  /**
+   * Lightweight identity probe — reads only HR 0-59 (one Modbus request)
+   * to extract serial number, model code, and generation without starting
+   * a full poll cycle. Use this during pairing/discovery when you only need
+   * to identify the inverter, not stream live data.
+   */
+  static async identify(options: { host: string; port?: number }): Promise<InverterIdentity> {
+    const client = new Client({
+      host: options.host,
+      port: options.port ?? 8899,
+      timeout: 10_000,
+      retries: 1,
+    });
+    try {
+      await client.connect();
+      const frame = encodeReadHoldingRegistersRequest({
+        dataAdapterSerial: client.dataAdapterSerial,
+        slaveAddress: 0x11,
+        baseRegister: 0,
+        registerCount: 60,
+      });
+      const values = await client.sendRequest(frame);
+
+      const serialRegs = [13, 14, 15, 16, 17].map(i => values[i] ?? 0);
+      const serialNumber = registersToString(serialRegs);
+
+      if (!serialNumber || serialNumber.replace(/[\x00\s]/g, '') === '') {
+        throw new Error(`No valid inverter found at ${options.host} (empty serial number)`);
+      }
+
+      const modelCode = values[0] ?? 0;
+      const armFirmwareVersion = values[21] ?? 0;
+      const generation = modelCode !== 0
+        ? modelToGeneration(detectModel(modelCode, armFirmwareVersion))
+        : detectGeneration(serialNumber);
+
+      return { serialNumber, generation, modelCode };
+    } finally {
+      await client.close();
     }
   }
 
