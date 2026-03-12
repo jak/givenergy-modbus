@@ -2,69 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { parseSubnet, discover } from '../src/discover.js';
 import { detectBatteries } from '../src/model/plant.js';
 import * as net from 'net';
-import { PayloadEncoder } from '../src/codec.js';
-
-/**
- * Build a minimal valid GivEnergy transparent response frame.
- *
- * This constructs a frame that the Framer and decodePdu will accept,
- * matching the shape hash of a read holding registers request
- * (slave=0x11, fc=3, base=0, count=1).
- */
-function buildMockResponse(): Buffer {
-  const serial = '**********';
-  const inverterSerial = '**********';
-  const slaveAddress = 0x11;
-  const fc = 0x03;
-  const baseRegister = 0;
-  const registerCount = 1;
-
-  // Build the inner CRC payload: slave + fc + inverterSerial + base + count + values + CRC
-  const crcEnc = new PayloadEncoder();
-  crcEnc.addUint8(slaveAddress);
-  crcEnc.addUint8(fc);
-  crcEnc.addString(inverterSerial, 10);
-  crcEnc.addUint16(baseRegister);
-  crcEnc.addUint16(registerCount);
-  crcEnc.addUint16(0x0001); // one register value
-  const crc = crcEnc.crc;
-  const swappedCrc = ((crc & 0xFF) << 8) | ((crc >> 8) & 0xFF);
-
-  // Build body (everything after 6-byte MBAP header)
-  const bodyEnc = new PayloadEncoder();
-  bodyEnc.addUint8(0x01); // uid
-  bodyEnc.addUint8(0x02); // fid: transparent
-  bodyEnc.addString(serial, 10);
-  // 8-byte padding
-  bodyEnc.addUint8(0x00);
-  bodyEnc.addUint8(0x00);
-  bodyEnc.addUint8(0x00);
-  bodyEnc.addUint8(0x00);
-  bodyEnc.addUint8(0x00);
-  bodyEnc.addUint8(0x00);
-  bodyEnc.addUint8(0x00);
-  bodyEnc.addUint8(0x08);
-  bodyEnc.addUint8(slaveAddress);
-  bodyEnc.addUint8(fc);
-  bodyEnc.addString(inverterSerial, 10);
-  bodyEnc.addUint16(baseRegister);
-  bodyEnc.addUint16(registerCount);
-  bodyEnc.addUint16(0x0001); // register value
-  bodyEnc.addUint16(swappedCrc);
-
-  const body = bodyEnc.payload;
-
-  // Build full frame with MBAP header
-  const frameEnc = new PayloadEncoder();
-  frameEnc.addUint16(0x5959); // TID
-  frameEnc.addUint16(0x0001); // protocol ID
-  frameEnc.addUint16(body.length); // length
-  for (const byte of body) {
-    frameEnc.addUint8(byte);
-  }
-
-  return frameEnc.payload;
-}
+import { buildMockResponse, stringToRegisters } from './helpers/mock-frame.js';
 
 
 describe('parseSubnet', () => {
@@ -123,7 +61,7 @@ describe('discover verification', () => {
   // If port 8899 is unavailable (e.g. CI), these tests skip.
 
   it('discovers a host that responds with a valid GivEnergy frame', async () => {
-    const response = buildMockResponse();
+    const response = buildMockResponse([0x0001]);
     let server: net.Server | undefined;
     try {
       // Try to bind to port 8899 on localhost
