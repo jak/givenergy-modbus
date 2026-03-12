@@ -1,9 +1,65 @@
 import { describe, it, expect, vi } from 'vitest';
+import { createServer, type Server, type Socket } from 'net';
 import { GivEnergyInverter } from '../src/inverter.js';
 import { Gen2Inverter } from '../src/inverters/gen2.js';
 import { Gen3Inverter } from '../src/inverters/gen3.js';
 import { ThreePhaseInverter } from '../src/inverters/three-phase.js';
 import { PollManager } from '../src/poll-manager.js';
+import { PayloadEncoder } from '../src/codec.js';
+
+// Helper: build a mock response frame for a read holding registers request
+// (slave=0x11, fc=0x03, base=0, count=60) with 60 register values.
+function buildIdentifyResponse(registers: number[]): Buffer {
+  const serial = '**********';
+  const inverterSerial = '**********';
+  const slaveAddress = 0x11;
+  const fc = 0x03;
+  const baseRegister = 0;
+  const registerCount = registers.length;
+
+  const crcEnc = new PayloadEncoder();
+  crcEnc.addUint8(slaveAddress);
+  crcEnc.addUint8(fc);
+  crcEnc.addString(inverterSerial, 10);
+  crcEnc.addUint16(baseRegister);
+  crcEnc.addUint16(registerCount);
+  for (const val of registers) crcEnc.addUint16(val);
+  const crc = crcEnc.crc;
+  const swappedCrc = ((crc & 0xFF) << 8) | ((crc >> 8) & 0xFF);
+
+  const bodyEnc = new PayloadEncoder();
+  bodyEnc.addUint8(0x01); // uid
+  bodyEnc.addUint8(0x02); // fid: transparent
+  bodyEnc.addString(serial, 10);
+  // 8-byte padding
+  for (let i = 0; i < 7; i++) bodyEnc.addUint8(0x00);
+  bodyEnc.addUint8(0x08);
+  bodyEnc.addUint8(slaveAddress);
+  bodyEnc.addUint8(fc);
+  bodyEnc.addString(inverterSerial, 10);
+  bodyEnc.addUint16(baseRegister);
+  bodyEnc.addUint16(registerCount);
+  for (const val of registers) bodyEnc.addUint16(val);
+  bodyEnc.addUint16(swappedCrc);
+
+  const body = bodyEnc.payload;
+  const frameEnc = new PayloadEncoder();
+  frameEnc.addUint16(0x5959); // TID
+  frameEnc.addUint16(0x0001); // protocol ID
+  frameEnc.addUint16(body.length);
+  for (const byte of body) frameEnc.addUint8(byte);
+  return frameEnc.payload;
+}
+
+// Helper: encode a 10-char string into 5 register values (high byte, low byte)
+function stringToRegisters(str: string): number[] {
+  const padded = str.padEnd(10, '\x00');
+  const regs: number[] = [];
+  for (let i = 0; i < 10; i += 2) {
+    regs.push((padded.charCodeAt(i) << 8) | padded.charCodeAt(i + 1));
+  }
+  return regs;
+}
 
 describe('GivEnergyInverter', () => {
   it('exposes a static connect() factory method', () => {
@@ -174,5 +230,137 @@ describe('GivEnergyInverter', () => {
     expect(Gen2Inverter.prototype).toBeInstanceOf(GivEnergyInverter);
     expect(Gen3Inverter.prototype).toBeInstanceOf(GivEnergyInverter);
     expect(ThreePhaseInverter.prototype).toBeInstanceOf(GivEnergyInverter);
+  });
+
+  it('identify() returns serial number and generation from a single register read', async () => {
+    const sockets: Socket[] = [];
+    const registers = new Array(60).fill(0);
+    // HR(0) = device type code 0x2001 (Gen2 hybrid)
+    registers[0] = 0x2001;
+    // HR(6..10) = serial "SD2227G895" encoded as 5 registers
+    const serialRegs = stringToRegisters('SD2227G895');
+    for (let i = 0; i < 5; i++) registers[6 + i] = serialRegs[i];
+    // HR(21) = firmware version 899
+    registers[21] = 899;
+
+    const response = buildIdentifyResponse(registers);
+    const server: Server = createServer((socket) => {
+      sockets.push(socket);
+      socket.once('data', () => socket.write(response));
+    });
+
+    try {
+      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+      const port = (server.address() as any).port;
+      const result = await GivEnergyInverter.identify({ host: '127.0.0.1', port });
+      expect(result.serialNumber).toBe('SD2227G895');
+      expect(result.generation).toBe('gen2');
+    } finally {
+      for (const s of sockets) s.destroy();
+      server.close();
+    }
+  });
+
+  it('identify() detects gen3 from device type code and firmware version', async () => {
+    const sockets: Socket[] = [];
+    const registers = new Array(60).fill(0);
+    registers[0] = 0x2001;
+    const serialRegs = stringToRegisters('EE1234G567');
+    for (let i = 0; i < 5; i++) registers[6 + i] = serialRegs[i];
+    registers[21] = 301;
+
+    const response = buildIdentifyResponse(registers);
+    const server: Server = createServer((socket) => {
+      sockets.push(socket);
+      socket.once('data', () => socket.write(response));
+    });
+
+    try {
+      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+      const port = (server.address() as any).port;
+      const result = await GivEnergyInverter.identify({ host: '127.0.0.1', port });
+      expect(result.serialNumber).toBe('EE1234G567');
+      expect(result.generation).toBe('gen3');
+    } finally {
+      for (const s of sockets) s.destroy();
+      server.close();
+    }
+  });
+
+  it('identify() falls back to serial prefix detection when model code is zero', async () => {
+    const sockets: Socket[] = [];
+    const registers = new Array(60).fill(0);
+    const serialRegs = stringToRegisters('SA9999X123');
+    for (let i = 0; i < 5; i++) registers[6 + i] = serialRegs[i];
+
+    const response = buildIdentifyResponse(registers);
+    const server: Server = createServer((socket) => {
+      sockets.push(socket);
+      socket.once('data', () => socket.write(response));
+    });
+
+    try {
+      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+      const port = (server.address() as any).port;
+      const result = await GivEnergyInverter.identify({ host: '127.0.0.1', port });
+      expect(result.serialNumber).toBe('SA9999X123');
+      expect(result.generation).toBe('three_phase');
+    } finally {
+      for (const s of sockets) s.destroy();
+      server.close();
+    }
+  });
+
+  it('identify() throws when serial number is empty (not a GivEnergy inverter)', async () => {
+    const sockets: Socket[] = [];
+    const registers = new Array(60).fill(0);
+
+    const response = buildIdentifyResponse(registers);
+    const server: Server = createServer((socket) => {
+      sockets.push(socket);
+      socket.once('data', () => socket.write(response));
+    });
+
+    try {
+      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+      const port = (server.address() as any).port;
+      await expect(GivEnergyInverter.identify({ host: '127.0.0.1', port }))
+        .rejects.toThrow('No valid inverter found');
+    } finally {
+      for (const s of sockets) s.destroy();
+      server.close();
+    }
+  });
+
+  it('identify() closes the connection after reading identity', async () => {
+    const sockets: Socket[] = [];
+    const registers = new Array(60).fill(0);
+    registers[0] = 0x2001;
+    const serialRegs = stringToRegisters('SD2227G895');
+    for (let i = 0; i < 5; i++) registers[6 + i] = serialRegs[i];
+    registers[21] = 899;
+
+    const response = buildIdentifyResponse(registers);
+    const server: Server = createServer((socket) => {
+      sockets.push(socket);
+      socket.once('data', () => socket.write(response));
+    });
+
+    try {
+      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+      const port = (server.address() as any).port;
+      await GivEnergyInverter.identify({ host: '127.0.0.1', port });
+
+      // Give a tick for cleanup
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      // All sockets should be destroyed after identify completes
+      for (const s of sockets) {
+        expect(s.destroyed).toBe(true);
+      }
+    } finally {
+      for (const s of sockets) s.destroy();
+      server.close();
+    }
   });
 });
