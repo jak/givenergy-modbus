@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.2.0](https://github.com/jak/givenergy-modbus/compare/givenergy-modbus-v1.1.2...givenergy-modbus-v1.2.0) (2026-03-12)
+
+
+### Features
+
+* add lightweight inverter identity probe ([#29](https://github.com/jak/givenergy-modbus/issues/29)) ([c337ef8](https://github.com/jak/givenergy-modbus/commit/c337ef8e641c2cab6ed52efb4045e211c49f00d5))
+* add mode, battery reserve, charge/discharge rates, and pause mode to snapshot ([4dece9f](https://github.com/jak/givenergy-modbus/commit/4dece9fd1d7869879a2f9ace8e7b86474ed982f7))
+
+
+### Bug Fixes
+
+* replace onProbe with onScanProgress + onFound callbacks ([#30](https://github.com/jak/givenergy-modbus/issues/30)) ([6140a77](https://github.com/jak/givenergy-modbus/commit/6140a77600e801f95b1f66e4b553d72bcf67344e))
+
 ## [1.1.2](https://github.com/jak/givenergy-modbus/compare/givenergy-modbus-v1.1.1...givenergy-modbus-v1.1.2) (2026-03-10)
 
 
