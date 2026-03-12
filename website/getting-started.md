@@ -22,13 +22,29 @@ If you don't know your inverter's IP address, use auto-discovery:
 import { discover } from 'givenergy-modbus';
 
 const devices = await discover();
-// [{ host: '192.168.1.100', serialNumber: 'EE1234B567' }]
+// [{ host: '192.168.1.100', serialNumber: 'EE1234B567', generation: 'gen3', modelCode: 0x2001 }]
 ```
 
-Discovery sends a UDP broadcast and listens for responses. You can also specify a subnet:
+Discovery scans your local subnet for devices with port 8899 open, then verifies each candidate with a Modbus probe. You can also specify a subnet:
 
 ```ts
 const devices = await discover('10.29.0.0/24');
+```
+
+For progress reporting (e.g. a pairing UI), use the callbacks:
+
+```ts
+const devices = await discover({
+  subnet: '10.29.0.0/24',
+  onScanProgress(host, portOpen) {
+    // Fires after each host is TCP-scanned (Phase 1)
+    console.log(`${host}: port ${portOpen ? 'open' : 'closed'}`);
+  },
+  onFound(device) {
+    // Fires when a host is verified as a GivEnergy inverter (Phase 2)
+    console.log(`Found ${device.serialNumber} at ${device.host}`);
+  },
+});
 ```
 
 ## Identify
