@@ -1,9 +1,18 @@
 import { describe, it, expect } from 'vitest';
-import { parseSubnet, discover } from '../src/discover.js';
+import { parseSubnet, discover, type DiscoveredDevice } from '../src/discover.js';
 import { detectBatteries } from '../src/model/plant.js';
 import * as net from 'net';
 import { buildMockResponse, stringToRegisters } from './helpers/mock-frame.js';
 
+/** Build a 60-register response with valid identity for discover's Phase 2 (identify). */
+function buildIdentifyRegisters(serial: string, modelCode: number, firmware: number): number[] {
+  const registers = new Array(60).fill(0);
+  registers[0] = modelCode;
+  const serialRegs = stringToRegisters(serial);
+  for (let i = 0; i < 5; i++) registers[13 + i] = serialRegs[i];
+  registers[21] = firmware;
+  return registers;
+}
 
 describe('parseSubnet', () => {
   it('expands /24 to 254 host addresses', () => {
@@ -50,43 +59,37 @@ describe('discover', () => {
 });
 
 describe('discover verification', () => {
-  // These tests use mock TCP servers on random ports, so we need to
-  // override the port. Since discover() hardcodes port 8899, we test
-  // the verification behavior indirectly through the full discover flow
-  // by patching. Instead, we test with the actual port by binding to 8899
-  // if available, or skip gracefully.
-
-  // For unit-testability, we test the verification logic by creating
-  // servers on port 8899 and using /32 subnets pointing at localhost.
-  // If port 8899 is unavailable (e.g. CI), these tests skip.
+  // These tests bind to port 8899 on localhost. If the port is unavailable
+  // (e.g. a real inverter data adapter or CI), tests skip gracefully.
 
   it('discovers a host that responds with a valid GivEnergy frame', async () => {
-    const response = buildMockResponse([0x0001]);
+    const registers = buildIdentifyRegisters('CE1234G567', 0x2001, 899);
+    const response = buildMockResponse(registers);
     let server: net.Server | undefined;
     try {
-      // Try to bind to port 8899 on localhost
       server = net.createServer(socket => {
-        // Wait for request data, then respond with a valid frame
-        socket.once('data', () => {
-          socket.write(response);
-        });
+        socket.once('data', () => socket.write(response));
       });
       await new Promise<void>((resolve, reject) => {
         server!.once('error', reject);
         server!.listen(8899, '127.0.0.1', resolve);
       });
     } catch {
-      // Port 8899 unavailable — skip
       return;
     }
 
     try {
       const results = await discover('127.0.0.1/32');
-      expect(results).toEqual([{ host: '127.0.0.1' }]);
+      expect(results).toEqual([{
+        host: '127.0.0.1',
+        serialNumber: 'CE1234G567',
+        generation: 'gen2',
+        modelCode: 0x2001,
+      }]);
     } finally {
       server.close();
     }
-  }, 10000);
+  }, 15000);
 
   it('rejects a host that accepts TCP but sends no modbus response', async () => {
     let server: net.Server | undefined;
@@ -110,7 +113,7 @@ describe('discover verification', () => {
     } finally {
       server.close();
     }
-  }, 10000);
+  }, 15000);
 
   it('rejects a host that sends garbage data instead of a valid frame', async () => {
     let server: net.Server | undefined;
@@ -135,7 +138,100 @@ describe('discover verification', () => {
     } finally {
       server.close();
     }
-  }, 10000);
+  }, 15000);
+
+  it('calls onScanProgress during Phase 1 TCP scan', async () => {
+    const registers = buildIdentifyRegisters('CE1234G567', 0x2001, 899);
+    const response = buildMockResponse(registers);
+    let server: net.Server | undefined;
+    try {
+      server = net.createServer(socket => {
+        socket.once('data', () => socket.write(response));
+      });
+      await new Promise<void>((resolve, reject) => {
+        server!.once('error', reject);
+        server!.listen(8899, '127.0.0.1', resolve);
+      });
+    } catch {
+      return;
+    }
+
+    try {
+      const probes: Array<{ host: string; portOpen: boolean }> = [];
+      await discover({
+        subnet: '127.0.0.1/32',
+        onScanProgress: (host, portOpen) => probes.push({ host, portOpen }),
+      });
+      expect(probes).toEqual([{ host: '127.0.0.1', portOpen: true }]);
+    } finally {
+      server.close();
+    }
+  }, 15000);
+
+  it('calls onFound only for verified inverters', async () => {
+    const registers = buildIdentifyRegisters('CE1234G567', 0x2001, 899);
+    const response = buildMockResponse(registers);
+    let server: net.Server | undefined;
+    try {
+      server = net.createServer(socket => {
+        socket.once('data', () => socket.write(response));
+      });
+      await new Promise<void>((resolve, reject) => {
+        server!.once('error', reject);
+        server!.listen(8899, '127.0.0.1', resolve);
+      });
+    } catch {
+      return;
+    }
+
+    try {
+      const found: DiscoveredDevice[] = [];
+      await discover({
+        subnet: '127.0.0.1/32',
+        onFound: (device) => found.push(device),
+      });
+      expect(found).toHaveLength(1);
+      expect(found[0].host).toBe('127.0.0.1');
+      expect(found[0].serialNumber).toBe('CE1234G567');
+      expect(found[0].generation).toBe('gen2');
+    } finally {
+      server.close();
+    }
+  }, 15000);
+
+  it('does not call onFound for hosts that fail modbus verification', async () => {
+    let server: net.Server | undefined;
+    try {
+      server = net.createServer(socket => {
+        socket.once('data', () => {
+          socket.write(Buffer.from('HTTP/1.1 200 OK\r\n\r\nHello'));
+        });
+      });
+      await new Promise<void>((resolve, reject) => {
+        server!.once('error', reject);
+        server!.listen(8899, '127.0.0.1', resolve);
+      });
+    } catch {
+      return;
+    }
+
+    try {
+      const found: DiscoveredDevice[] = [];
+      const probes: Array<{ host: string; portOpen: boolean }> = [];
+      const results = await discover({
+        subnet: '127.0.0.1/32',
+        onScanProgress: (host, portOpen) => probes.push({ host, portOpen }),
+        onFound: (device) => found.push(device),
+      });
+      // Phase 1: port was open
+      expect(probes).toEqual([{ host: '127.0.0.1', portOpen: true }]);
+      // Phase 2: verification failed, so onFound was never called
+      expect(found).toEqual([]);
+      expect(results).toEqual([]);
+    } finally {
+      server.close();
+    }
+  }, 15000);
 });
 
 describe('detectBatteries', () => {

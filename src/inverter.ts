@@ -87,12 +87,12 @@ export abstract class GivEnergyInverter extends EventEmitter {
    * a full poll cycle. Use this during pairing/discovery when you only need
    * to identify the inverter, not stream live data.
    */
-  static async identify(options: { host: string; port?: number }): Promise<InverterIdentity> {
+  static async identify(options: { host: string; port?: number; timeout?: number; retries?: number }): Promise<InverterIdentity> {
     const client = new Client({
       host: options.host,
       port: options.port ?? 8899,
-      timeout: 10_000,
-      retries: 1,
+      timeout: options.timeout ?? 10_000,
+      retries: options.retries ?? 1,
     });
     try {
       await client.connect();
