@@ -27,6 +27,21 @@ npm install givenergy-modbus
 
 Requires **Node.js 20+**. TypeScript is optional — full type definitions are included.
 
+## Identify an inverter
+
+If you just need to know what's at a given IP — without starting a full polling session — use `identify()`. It reads a single register block and closes the connection immediately:
+
+```ts
+import { GivEnergyInverter } from 'givenergy-modbus';
+
+const identity = await GivEnergyInverter.identify({ host: '192.168.1.100' });
+console.log(identity.serialNumber); // e.g. "SD2227G895"
+console.log(identity.generation);   // "gen2", "gen3", or "three_phase"
+console.log(identity.modelCode);    // raw device type code from HR(0)
+```
+
+This is useful during pairing or discovery when you don't need live data.
+
 ## Quick start
 
 ```ts

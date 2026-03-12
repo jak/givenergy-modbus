@@ -35,8 +35,8 @@ import {
   THREE_PHASE_CHARGE_SLOT_REGISTERS,
   THREE_PHASE_DISCHARGE_SLOT_REGISTERS,
 } from './timeslot-registers.js';
-import { detectGeneration, type InverterGeneration } from './generation.js';
-import { detectModel, DeviceType } from './model/device-types.js';
+import { detectGeneration, modelToGeneration, type InverterGeneration } from './generation.js';
+import { detectModel } from './model/device-types.js';
 
 export interface RegisterCache {
   inputRegisters: Map<number, number>;
@@ -60,20 +60,6 @@ function getIR(cache: RegisterCache, address: number): number {
 
 function getHR(cache: RegisterCache, address: number): number {
   return cache.holdingRegisters.get(address) ?? 0;
-}
-
-/** Map DeviceType to InverterGeneration for snapshot discriminant. */
-function modelToGeneration(model: DeviceType): InverterGeneration {
-  switch (model) {
-    case DeviceType.HYBRID_GEN3:
-    case DeviceType.HYBRID_HV_GEN3:
-      return 'gen3';
-    case DeviceType.HYBRID_3PH:
-    case DeviceType.AC_3PH:
-      return 'three_phase';
-    default:
-      return 'gen2';
-  }
 }
 
 /**

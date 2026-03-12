@@ -31,6 +31,21 @@ Discovery sends a UDP broadcast and listens for responses. You can also specify 
 const devices = await discover('10.29.0.0/24');
 ```
 
+## Identify
+
+If you just need to know what's at a given IP — without starting a full polling session — use `identify()`:
+
+```ts
+import { GivEnergyInverter } from 'givenergy-modbus';
+
+const identity = await GivEnergyInverter.identify({ host: '192.168.1.100' });
+console.log(identity.serialNumber); // e.g. "SD2227G895"
+console.log(identity.generation);   // "gen2", "gen3", or "three_phase"
+console.log(identity.modelCode);    // raw device type code
+```
+
+This reads a single register block (HR 0–59) and closes the connection immediately. Useful during pairing or discovery when you don't need live data.
+
 ## Connect
 
 ```ts

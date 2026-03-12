@@ -1,9 +1,9 @@
 export { GivEnergyInverter } from './inverter.js';
-export type { GivEnergyInverterOptions, InverterMode, TimeSlotInput } from './inverter.js';
+export type { GivEnergyInverterOptions, InverterMode, TimeSlotInput, InverterIdentity } from './inverter.js';
 export { Gen2Inverter } from './inverters/gen2.js';
 export { Gen3Inverter } from './inverters/gen3.js';
 export { ThreePhaseInverter } from './inverters/three-phase.js';
-export { detectGeneration } from './generation.js';
+export { detectGeneration, modelToGeneration } from './generation.js';
 export type { InverterGeneration } from './generation.js';
 export { discover, getLocalSubnet, parseSubnet } from './discover.js';
 export type { DiscoveredDevice, DiscoverOptions } from './discover.js';
