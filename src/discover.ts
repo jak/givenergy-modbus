@@ -1,16 +1,19 @@
 import * as net from 'net';
 import * as os from 'os';
-import { Client } from './client.js';
-import { encodeReadHoldingRegistersRequest } from './pdu/encode.js';
+import { GivEnergyInverter } from './inverter.js';
+import type { InverterGeneration } from './generation.js';
 
 /** GivEnergy inverters always listen on this port */
 const INVERTER_PORT = 8899;
 const SCAN_TIMEOUT_MS = 1000;
-const VERIFY_TIMEOUT_MS = 3000;
+const IDENTIFY_TIMEOUT_MS = 3000;
 const CONCURRENCY = 20;
 
 export interface DiscoveredDevice {
   host: string;
+  serialNumber: string;
+  generation: InverterGeneration;
+  modelCode: number;
 }
 
 /**
@@ -89,46 +92,31 @@ function tryConnect(host: string, port: number, timeoutMs: number): Promise<bool
   });
 }
 
-/**
- * Verify a candidate host is a real GivEnergy inverter by sending a modbus
- * read request and checking for a valid response. Matches GivTCP's active
- * probe approach during discovery.
- */
-async function verifyInverter(host: string): Promise<boolean> {
-  const client = new Client({ host, timeout: VERIFY_TIMEOUT_MS, retries: 0 });
-  try {
-    await client.connect();
-    const frame = encodeReadHoldingRegistersRequest({
-      dataAdapterSerial: '**********',
-      slaveAddress: 0x11,
-      baseRegister: 0,
-      registerCount: 1,
-    });
-    await client.sendRequest(frame);
-    return true;
-  } catch {
-    return false;
-  } finally {
-    await client.close();
-  }
-}
-
 export interface DiscoverOptions {
   subnet?: string;
-  /** Called for each host after probing it */
-  onProbe?: (host: string, found: boolean) => void;
+  /** Options passed to {@link GivEnergyInverter.identify} during Phase 2 modbus verification. */
+  identifyOptions?: {
+    /** Timeout in ms for each identify probe. Default: 3000 */
+    timeout?: number;
+    /** Number of retries per probe. Default: 0 (fail fast for discovery) */
+    retries?: number;
+  };
+  /** Fires after each host is TCP-scanned in Phase 1. Use for progress UI. */
+  onScanProgress?: (host: string, portOpen: boolean) => void;
+  /** Fires when a host passes Phase 2 modbus verification — confirmed GivEnergy inverter. */
+  onFound?: (device: DiscoveredDevice) => void;
 }
 
 /**
  * Scan a subnet for GivEnergy inverters using a two-phase approach:
  *
  * 1. Fast TCP port scan on port 8899 (1s timeout, 20 concurrent)
- * 2. Active modbus probe on each candidate to verify it's a real GivEnergy inverter
+ * 2. Active modbus probe on each candidate using {@link GivEnergyInverter.identify}
  *
  * Mirrors GivTCP's findInvertor.py discovery strategy.
  *
  * @param subnetOrOptions - Optional CIDR string or options object. Subnet auto-detected if not provided.
- * @returns Array of discovered devices (host IP strings)
+ * @returns Array of discovered devices with identity information
  */
 export async function discover(subnetOrOptions?: string | DiscoverOptions): Promise<DiscoveredDevice[]> {
   const options: DiscoverOptions = typeof subnetOrOptions === 'string'
@@ -145,7 +133,7 @@ export async function discover(subnetOrOptions?: string | DiscoverOptions): Prom
     const checks = await Promise.all(
       batch.map(async host => {
         const open = await tryConnect(host, INVERTER_PORT, SCAN_TIMEOUT_MS);
-        options.onProbe?.(host, open);
+        options.onScanProgress?.(host, open);
         return open ? host : null;
       })
     );
@@ -154,18 +142,29 @@ export async function discover(subnetOrOptions?: string | DiscoverOptions): Prom
     }
   }
 
-  // Phase 2: Verify each candidate with an active modbus probe
+  // Phase 2: Identify each candidate with a modbus probe
   const results: DiscoveredDevice[] = [];
   for (let i = 0; i < candidates.length; i += CONCURRENCY) {
     const batch = candidates.slice(i, i + CONCURRENCY);
-    const verified = await Promise.all(
+    const identified = await Promise.all(
       batch.map(async host => {
-        const isInverter = await verifyInverter(host);
-        return isInverter ? host : null;
+        try {
+          const identity = await GivEnergyInverter.identify({
+            host,
+            timeout: options.identifyOptions?.timeout ?? IDENTIFY_TIMEOUT_MS,
+            retries: options.identifyOptions?.retries ?? 0,
+          });
+          return { host, ...identity };
+        } catch {
+          return null;
+        }
       })
     );
-    for (const host of verified) {
-      if (host !== null) results.push({ host });
+    for (const device of identified) {
+      if (device !== null) {
+        results.push(device);
+        options.onFound?.(device);
+      }
     }
   }
 
