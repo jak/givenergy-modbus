@@ -15,13 +15,16 @@ console.log(`Scanning ${subnet} (${hosts.length} hosts)...`);
 let probed = 0;
 const devices = await discover({
   subnet,
-  onProbe(host, found) {
+  onScanProgress(host, portOpen) {
     probed++;
-    if (found) {
-      console.log(`  [${probed}/${hosts.length}] ${host} — FOUND`);
+    if (portOpen) {
+      console.log(`  [${probed}/${hosts.length}] ${host} — port open, verifying...`);
     } else {
       process.stdout.write(`\r  [${probed}/${hosts.length}] scanning...`);
     }
+  },
+  onFound(device) {
+    console.log(`  Verified: ${device.host} (${device.serialNumber}, ${device.generation})`);
   },
 });
 
@@ -33,5 +36,5 @@ if (devices.length === 0) {
 }
 
 for (const device of devices) {
-  console.log(`Found: ${device.host}`);
+  console.log(`Found: ${device.host} — ${device.serialNumber} (${device.generation}, model 0x${device.modelCode.toString(16).padStart(4, '0')})`);
 }
