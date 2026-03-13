@@ -15,10 +15,6 @@ export class ThreePhaseInverter extends GivEnergyInverter {
     await this.writeRegister(1112, val);
   }
 
-  async setTimedDischarge(enabled: boolean): Promise<void> {
-    await this.writeRegister(1122, enabled ? 1 : 0);
-  }
-
   async setChargeTarget(percent: number): Promise<void> {
     validateStateOfCharge(percent);
     await this.writeRegister(1111, percent);

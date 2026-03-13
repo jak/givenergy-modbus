@@ -104,7 +104,8 @@ console.log(`Eco mode:          ${s.ecoMode}`);
 console.log(`Timed export:      ${s.timedExport}`);
 console.log(`Timed charge:      ${s.timedCharge}`);
 if (s.generation === 'gen3') {
-  console.log(`Timed discharge:   ${s.timedDischarge}`);
+  console.log(`Battery pause:     ${s.batteryPauseMode}`);
+  console.log(`Timed discharge:   ${s.timedDischargeSlot.start} - ${s.timedDischargeSlot.end}`);
 }
 console.log(`Charge target:     ${s.chargeTargetStateOfCharge}%`);
 console.log(`Battery reserve:   ${s.batteryReservePercent}%`);

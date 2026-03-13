@@ -113,7 +113,7 @@ inverter.on('lost', (err) => {
 await inverter.setEcoMode(true);       // HR(27) — eco mode on/off
 await inverter.setTimedExport(true);   // HR(59) — timed export on/off
 await inverter.setTimedCharge(true);   // HR(96) — timed charge on/off
-await inverter.setTimedDischarge(true); // HR(318) — Gen3 only
+await inverter.setTimedDischarge(true); // Gen3 only — sets battery pause mode to pause_discharge
 
 // Configure charge schedule
 await inverter.setChargeSlot(1, {

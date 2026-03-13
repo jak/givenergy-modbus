@@ -131,7 +131,7 @@ await inverter.setDischargeSlot(1, { start: '00:00', end: '23:59' });
 
 - **Always save state before changing it.** The library doesn't track previous values — snapshot fields like `ecoMode`, `timedExport`, `timedCharge`, `chargeRatePercent`, `batteryReservePercent`, and `chargeSlots` tell you the current config so you can restore it.
 - **Your app owns the timer/revert logic.** Whether that's `setTimeout`, a cron job, or a home automation trigger is up to you.
-- **Modes are independent toggles**, not mutually exclusive states. Eco mode (HR 27), timed export (HR 59), timed charge (HR 96), and timed discharge (HR 318, Gen3 only) can each be toggled independently without affecting each other.
+- **Modes are independent toggles**, not mutually exclusive states. Eco mode (HR 27), timed export (HR 59), and timed charge (HR 96) can each be toggled independently without affecting each other. Gen3 inverters also have a battery pause mode (HR 318) and timed discharge slot (HR 319-320).
 - **The inverter may take a few seconds to act on register writes.** Poll with `getData()` or listen for `'data'` events to confirm changes took effect.
 
 ## API documentation

@@ -165,7 +165,6 @@ export abstract class GivEnergyInverter extends EventEmitter {
   // ── Abstract methods (generation-specific) ──────────────────
 
   abstract setTimedCharge(enabled: boolean): Promise<void>;
-  abstract setTimedDischarge(enabled: boolean): Promise<void>;
   abstract setChargeTarget(percent: number): Promise<void>;
   abstract setChargeSlot(slot: number, config: TimeSlotInput): Promise<void>;
   abstract setChargeSlots(configs: TimeSlotInput[]): Promise<void>;

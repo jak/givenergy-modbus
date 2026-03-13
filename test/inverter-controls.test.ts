@@ -320,10 +320,6 @@ describe('Gen2Inverter controls', () => {
     expect(lastWritten(mock)).toEqual({ register: 96, value: 1 });
   }, 20000);
 
-  it('setTimedDischarge throws on Gen2 — no dedicated register', async () => {
-    await expect((inv as any).setTimedDischarge(true)).rejects.toThrow('Gen2 does not have a dedicated timed discharge register');
-  }, 20000);
-
   it('setChargeTarget(80) writes HR(116)=80', async () => {
     mock.writtenRegisters.length = 0;
     await (inv as any).setChargeTarget(80);
@@ -427,13 +423,37 @@ describe('Gen3Inverter controls', () => {
     expect(lastWritten(mock)).toEqual({ register: 96, value: 1 });
   }, 20000);
 
-  it('setTimedDischarge(true) writes HR(318)=1 — Gen3 has dedicated timed discharge register', async () => {
+  it('setBatteryPauseMode("pause_charge") writes HR(318)=1', async () => {
     mock.writtenRegisters.length = 0;
-    await (inv as any).setTimedDischarge(true);
+    await (inv as any).setBatteryPauseMode('pause_charge');
     expect(lastWritten(mock)).toEqual({ register: 318, value: 1 });
   }, 20000);
 
-  it('setTimedDischarge(false) writes HR(318)=0', async () => {
+  it('setBatteryPauseMode("pause_discharge") writes HR(318)=2', async () => {
+    mock.writtenRegisters.length = 0;
+    await (inv as any).setBatteryPauseMode('pause_discharge');
+    expect(lastWritten(mock)).toEqual({ register: 318, value: 2 });
+  }, 20000);
+
+  it('setBatteryPauseMode("pause_both") writes HR(318)=3', async () => {
+    mock.writtenRegisters.length = 0;
+    await (inv as any).setBatteryPauseMode('pause_both');
+    expect(lastWritten(mock)).toEqual({ register: 318, value: 3 });
+  }, 20000);
+
+  it('setBatteryPauseMode("disabled") writes HR(318)=0', async () => {
+    mock.writtenRegisters.length = 0;
+    await (inv as any).setBatteryPauseMode('disabled');
+    expect(lastWritten(mock)).toEqual({ register: 318, value: 0 });
+  }, 20000);
+
+  it('setTimedDischarge(true) sets battery pause mode to pause_discharge — HR(318)=2', async () => {
+    mock.writtenRegisters.length = 0;
+    await (inv as any).setTimedDischarge(true);
+    expect(lastWritten(mock)).toEqual({ register: 318, value: 2 });
+  }, 20000);
+
+  it('setTimedDischarge(false) sets battery pause mode to disabled — HR(318)=0', async () => {
     mock.writtenRegisters.length = 0;
     await (inv as any).setTimedDischarge(false);
     expect(lastWritten(mock)).toEqual({ register: 318, value: 0 });
@@ -449,11 +469,12 @@ describe('Gen3Inverter controls', () => {
     await expect((inv as any).setExportLimit(70000)).rejects.toThrow(RangeError);
   }, 20000);
 
-  it('setPauseSlot writes HR(319) and HR(320)', async () => {
+  it('setTimedDischargeSlot({ start: "23:00", end: "00:01" }) writes HR(320)=2300 HR(319)=1 — swapped because registers are pause slot', async () => {
     mock.writtenRegisters.length = 0;
-    await (inv as any).setPauseSlot({ start: '01:00', end: '02:30' });
-    expect(mock.writtenRegisters).toContainEqual({ register: 319, value: 100 });
-    expect(mock.writtenRegisters).toContainEqual({ register: 320, value: 230 });
+    await (inv as any).setTimedDischargeSlot({ start: '23:00', end: '00:01' });
+    // Discharge start → HR(320), discharge end → HR(319) (inverse of pause slot)
+    expect(mock.writtenRegisters).toContainEqual({ register: 320, value: 2300 });
+    expect(mock.writtenRegisters).toContainEqual({ register: 319, value: 1 });
   }, 20000);
 });
 

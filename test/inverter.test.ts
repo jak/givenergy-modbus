@@ -27,7 +27,6 @@ describe('GivEnergyInverter', () => {
 
   it('Gen2Inverter exposes generation-specific methods', () => {
     expect(typeof Gen2Inverter.prototype.setTimedCharge).toBe('function');
-    expect(typeof Gen2Inverter.prototype.setTimedDischarge).toBe('function');
     expect(typeof Gen2Inverter.prototype.setChargeTarget).toBe('function');
     expect(typeof Gen2Inverter.prototype.setChargeSlot).toBe('function');
     expect(typeof Gen2Inverter.prototype.setChargeSlots).toBe('function');
@@ -43,15 +42,14 @@ describe('GivEnergyInverter', () => {
 
   it('Gen3Inverter exposes generation-specific methods including Gen3-only', () => {
     expect(typeof Gen3Inverter.prototype.setTimedCharge).toBe('function');
-    expect(typeof Gen3Inverter.prototype.setTimedDischarge).toBe('function');
+    expect(typeof Gen3Inverter.prototype.setBatteryPauseMode).toBe('function');
     expect(typeof Gen3Inverter.prototype.setChargeSlot).toBe('function');
     expect(typeof Gen3Inverter.prototype.setExportLimit).toBe('function');
-    expect(typeof Gen3Inverter.prototype.setPauseSlot).toBe('function');
+    expect(typeof Gen3Inverter.prototype.setTimedDischargeSlot).toBe('function');
   });
 
   it('ThreePhaseInverter exposes generation-specific methods', () => {
     expect(typeof ThreePhaseInverter.prototype.setTimedCharge).toBe('function');
-    expect(typeof ThreePhaseInverter.prototype.setTimedDischarge).toBe('function');
     expect(typeof ThreePhaseInverter.prototype.setChargeSlot).toBe('function');
     expect(typeof ThreePhaseInverter.prototype.setDischargeSlot).toBe('function');
   });

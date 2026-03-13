@@ -188,9 +188,9 @@ export const INVERTER_HOLDING_REGISTERS: Record<string, RegisterDef> = {
   // ── Block 300+ (Single Phase New registers) ─────────────────────────────────
   battery_charge_limit_ac: { type: 'HR', address: 313 },
   battery_discharge_limit_ac: { type: 'HR', address: 314 },
-  timed_discharge: { type: 'HR', address: 318 },
-  battery_pause_slot_1_start: { type: 'HR', address: 319 },
-  battery_pause_slot_1_end: { type: 'HR', address: 320 },
+  battery_pause_mode: { type: 'HR', address: 318 },
+  timed_discharge_slot_start: { type: 'HR', address: 319 },
+  timed_discharge_slot_end: { type: 'HR', address: 320 },
 };
 
 /**

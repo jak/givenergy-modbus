@@ -279,8 +279,18 @@ export function buildSnapshot(
   const dischargeRatePercent = generation === 'three_phase'
     ? getHR(cache, 1108) : getHR(cache, 314);
 
-  // timed_discharge: HR(318) — Gen3-only (#31)
-  const timedDischarge = getHR(cache, 318) !== 0;
+  // battery_pause_mode: HR(318) — Gen3-only
+  // 0=disabled, 1=pause_charge, 2=pause_discharge, 3=pause_both
+  // In the GivEnergy app, pause_discharge corresponds to "timed discharge" being enabled.
+  const batteryPauseModeRaw = getHR(cache, 318);
+  const PAUSE_MODE_MAP = ['disabled', 'pause_charge', 'pause_discharge', 'pause_both'] as const;
+  const batteryPauseMode = PAUSE_MODE_MAP[batteryPauseModeRaw] ?? 'disabled';
+
+  // timed_discharge_slot: HR(319-320) — Gen3-only
+  // Under the hood these are battery pause slot registers (GivTCP calls them that).
+  // The app shows the inverse: when discharge is *allowed*, not when it's paused.
+  // So we swap: HR(320) is the discharge start, HR(319) is the discharge end.
+  const timedDischargeSlot = toTimeslot(getHR(cache, 320), getHR(cache, 319));
 
   // ── System time ───────────────────────────────────────────────────────────
   // system_time: HR(35-40) — year, month, day, hour, minute, second
@@ -460,7 +470,7 @@ export function buildSnapshot(
     batteryReservePercent,
     chargeRatePercent,
     dischargeRatePercent,
-    ...(generation === 'gen3' ? { timedDischarge } : {}),
+    ...(generation === 'gen3' ? { batteryPauseMode, timedDischargeSlot } : {}),
     systemTime,
     powerFlows,
     batteries,

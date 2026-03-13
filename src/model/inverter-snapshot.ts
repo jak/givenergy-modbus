@@ -13,6 +13,22 @@ import type { BatterySnapshot } from './battery-snapshot.js';
 import type { MeterSnapshot } from './meter-snapshot.js';
 import type { PowerFlows } from '../power-flow.js';
 
+/**
+ * Battery pause mode — Gen3-only feature.
+ *
+ * Controls whether the battery is paused from charging, discharging, or both.
+ * 'disabled' means normal operation. This is independent of the timed charge/export
+ * toggles and timeslot configuration.
+ *
+ * HR(318): 0=disabled, 1=pause_charge, 2=pause_discharge, 3=pause_both.
+ *
+ * Terminology note: GivTCP calls HR(59) "enable_discharge" and doesn't model
+ * timed discharge separately. This library follows the GivEnergy app's terminology
+ * instead, where HR(59) is "timed export" (export to grid) and HR(318) is
+ * "battery pause mode" with an associated "timed discharge" slot (HR 319-320).
+ */
+export type BatteryPauseMode = 'disabled' | 'pause_charge' | 'pause_discharge' | 'pause_both';
+
 /** Fields shared by all inverter generations */
 interface BaseSnapshot {
   // Identity
@@ -187,10 +203,18 @@ export interface Gen3Snapshot extends BaseSnapshot {
   /** Discharge timeslots with per-slot target state of charge */
   dischargeSlots: TimeSlotConfig[];
   /**
-   * Timed discharge toggle from HR(318) — Gen3-only.
-   * When enabled, battery discharges on schedule. Independent of other toggles.
+   * Battery pause mode from HR(318) — Gen3-only.
+   * Controls whether the battery is paused from charging, discharging, or both.
+   * 'disabled' means normal operation. Closely related to the timed discharge
+   * feature in the GivEnergy app — setting pause_discharge enables timed discharge.
    */
-  timedDischarge: boolean;
+  batteryPauseMode: BatteryPauseMode;
+  /**
+   * Timed discharge slot from HR(319-320) — Gen3-only.
+   * The time window during which battery discharge is scheduled.
+   * In the GivEnergy app this is shown as the "timed discharge" slot.
+   */
+  timedDischargeSlot: TimeSlot;
 }
 
 export interface ThreePhaseSnapshot extends BaseSnapshot {
