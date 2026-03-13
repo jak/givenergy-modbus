@@ -314,16 +314,14 @@ describe('Gen2Inverter controls', () => {
     await expect((inv as any).setDischargeSlot(3, { start: '01:00', end: '02:00' })).rejects.toThrow(RangeError);
   }, 20000);
 
-  it('setChargeScheduleEnabled(true) writes HR(96)=1', async () => {
+  it('setTimedCharge(true) writes HR(96)=1', async () => {
     mock.writtenRegisters.length = 0;
-    await (inv as any).setChargeScheduleEnabled(true);
+    await (inv as any).setTimedCharge(true);
     expect(lastWritten(mock)).toEqual({ register: 96, value: 1 });
   }, 20000);
 
-  it('setDischargeScheduleEnabled(false) writes HR(59)=0', async () => {
-    mock.writtenRegisters.length = 0;
-    await (inv as any).setDischargeScheduleEnabled(false);
-    expect(lastWritten(mock)).toEqual({ register: 59, value: 0 });
+  it('setTimedDischarge throws on Gen2 — no dedicated register', async () => {
+    await expect((inv as any).setTimedDischarge(true)).rejects.toThrow('Gen2 does not have a dedicated timed discharge register');
   }, 20000);
 
   it('setChargeTarget(80) writes HR(116)=80', async () => {
@@ -423,22 +421,22 @@ describe('Gen3Inverter controls', () => {
     await expect((inv as any).setChargeSlots(slots)).rejects.toThrow(RangeError);
   }, 20000);
 
-  it('setChargeScheduleEnabled(true) writes HR(96)=1', async () => {
+  it('setTimedCharge(true) writes HR(96)=1', async () => {
     mock.writtenRegisters.length = 0;
-    await (inv as any).setChargeScheduleEnabled(true);
+    await (inv as any).setTimedCharge(true);
     expect(lastWritten(mock)).toEqual({ register: 96, value: 1 });
   }, 20000);
 
-  it('setBatteryPauseMode("pause_charge") writes HR(318)=1', async () => {
+  it('setTimedDischarge(true) writes HR(318)=1 — Gen3 has dedicated timed discharge register', async () => {
     mock.writtenRegisters.length = 0;
-    await (inv as any).setBatteryPauseMode('pause_charge');
+    await (inv as any).setTimedDischarge(true);
     expect(lastWritten(mock)).toEqual({ register: 318, value: 1 });
   }, 20000);
 
-  it('setBatteryPauseMode("pause_both") writes HR(318)=3', async () => {
+  it('setTimedDischarge(false) writes HR(318)=0', async () => {
     mock.writtenRegisters.length = 0;
-    await (inv as any).setBatteryPauseMode('pause_both');
-    expect(lastWritten(mock)).toEqual({ register: 318, value: 3 });
+    await (inv as any).setTimedDischarge(false);
+    expect(lastWritten(mock)).toEqual({ register: 318, value: 0 });
   }, 20000);
 
   it('setExportLimit(5000) writes HR(2071)=5000', async () => {
@@ -514,9 +512,9 @@ describe('ThreePhaseInverter controls', () => {
     expect(mock.writtenRegisters).toContainEqual({ register: 1121, value: 800 });
   }, 20000);
 
-  it('setChargeScheduleEnabled(true) writes HR(1123)=1 AND HR(1112)=1 (two writes)', async () => {
+  it('setTimedCharge(true) writes HR(1123)=1 AND HR(1112)=1 (two writes)', async () => {
     mock.writtenRegisters.length = 0;
-    await (inv as any).setChargeScheduleEnabled(true);
+    await (inv as any).setTimedCharge(true);
     expect(mock.writtenRegisters).toContainEqual({ register: 1123, value: 1 });
     expect(mock.writtenRegisters).toContainEqual({ register: 1112, value: 1 });
     expect(mock.writtenRegisters.length).toBe(2);
@@ -563,31 +561,28 @@ describe('Shared control methods (tested via Gen3Inverter)', () => {
     await mock.close();
   });
 
-  it('setMode("eco") writes HR(27)=1 then HR(59)=0', async () => {
+  it('setEcoMode(true) writes HR(27)=1 only — does not touch HR(59)', async () => {
     mock.writtenRegisters.length = 0;
-    await inv.setMode('eco');
-    expect(mock.writtenRegisters).toEqual([
-      { register: 27, value: 1 },
-      { register: 59, value: 0 },
-    ]);
+    await inv.setEcoMode(true);
+    expect(mock.writtenRegisters).toEqual([{ register: 27, value: 1 }]);
   }, 20000);
 
-  it('setMode("timed_demand") writes HR(27)=1 then HR(59)=1', async () => {
+  it('setEcoMode(false) writes HR(27)=0 only', async () => {
     mock.writtenRegisters.length = 0;
-    await inv.setMode('timed_demand');
-    expect(mock.writtenRegisters).toEqual([
-      { register: 27, value: 1 },
-      { register: 59, value: 1 },
-    ]);
+    await inv.setEcoMode(false);
+    expect(mock.writtenRegisters).toEqual([{ register: 27, value: 0 }]);
   }, 20000);
 
-  it('setMode("timed_export") writes HR(27)=0 then HR(59)=1', async () => {
+  it('setTimedExport(true) writes HR(59)=1 only — does not touch HR(27)', async () => {
     mock.writtenRegisters.length = 0;
-    await inv.setMode('timed_export');
-    expect(mock.writtenRegisters).toEqual([
-      { register: 27, value: 0 },
-      { register: 59, value: 1 },
-    ]);
+    await inv.setTimedExport(true);
+    expect(mock.writtenRegisters).toEqual([{ register: 59, value: 1 }]);
+  }, 20000);
+
+  it('setTimedExport(false) writes HR(59)=0 only', async () => {
+    mock.writtenRegisters.length = 0;
+    await inv.setTimedExport(false);
+    expect(mock.writtenRegisters).toEqual([{ register: 59, value: 0 }]);
   }, 20000);
 
   it('reboot() writes HR(163)=100', async () => {

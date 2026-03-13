@@ -78,7 +78,7 @@ export const INVERTER_HOLDING_REGISTERS: Record<string, RegisterDef> = {
   discharge_slot_1_start: { type: 'HR', address: 56 },
   discharge_slot_1_end: { type: 'HR', address: 57 },
   enable_auto_judge_battery_type: { type: 'HR', address: 58 },
-  enable_discharge: { type: 'HR', address: 59 },
+  timed_export: { type: 'HR', address: 59 },
 
   // ── Block 60–119 ────────────────────────────────────────────────────────────
   v_pv_start: { type: 'HR', address: 60 },
@@ -86,7 +86,7 @@ export const INVERTER_HOLDING_REGISTERS: Record<string, RegisterDef> = {
   restart_delay_time: { type: 'HR', address: 62 },
   charge_slot_1_start: { type: 'HR', address: 94 },
   charge_slot_1_end: { type: 'HR', address: 95 },
-  enable_charge: { type: 'HR', address: 96 },
+  timed_charge: { type: 'HR', address: 96 },
   battery_low_voltage_protection_limit: { type: 'HR', address: 97 },
   battery_high_voltage_protection_limit: { type: 'HR', address: 98 },
   battery_voltage_adjust: { type: 'HR', address: 105 },
@@ -188,7 +188,7 @@ export const INVERTER_HOLDING_REGISTERS: Record<string, RegisterDef> = {
   // ── Block 300+ (Single Phase New registers) ─────────────────────────────────
   battery_charge_limit_ac: { type: 'HR', address: 313 },
   battery_discharge_limit_ac: { type: 'HR', address: 314 },
-  battery_pause_mode: { type: 'HR', address: 318 },
+  timed_discharge: { type: 'HR', address: 318 },
   battery_pause_slot_1_start: { type: 'HR', address: 319 },
   battery_pause_slot_1_end: { type: 'HR', address: 320 },
 };

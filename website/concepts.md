@@ -19,7 +19,7 @@ Snapshots are **immutable values** — each call to `getData()` or each `'data'`
 | **Battery** | `stateOfCharge`, `batteryVoltage`, `batteryCurrent` | 75%, 48.0V, 2.5A |
 | **Energy today** | `pvEnergyTodayKwh`, `gridImportEnergyTodayKwh`, ... | Daily totals in kWh |
 | **Energy total** | `pvEnergyTotalKwh`, `batteryChargeEnergyTotalKwh`, ... | Lifetime totals in kWh |
-| **Config** | `mode`, `enableCharge`, `chargeRatePercent`, `batteryReservePercent` | Current settings |
+| **Config** | `ecoMode`, `timedExport`, `timedCharge`, `chargeRatePercent`, `batteryReservePercent` | Current settings |
 | **Timeslots** | `chargeSlots`, `dischargeSlots` | Scheduled periods |
 | **Grid** | `gridVoltage`, `gridFrequency` | AC measurements |
 | **Temperature** | `inverterHeatsinkTemp`, `batteryTemperature` | Sensor readings in °C |
@@ -35,7 +35,7 @@ GivEnergy inverters come in three generations, each with different capabilities:
 | **Charge slots** | 1 | 10 | 2 |
 | **Discharge slots** | 2 | 10 | 2 |
 | **Per-slot target SOC** | No | Yes | No |
-| **Battery pause mode** | No | Yes | No |
+| **Timed discharge** | No | Yes | No |
 | **Export limit control** | No | Yes | No |
 
 The library auto-detects the generation during `connect()` and returns the appropriate subclass (`Gen2Inverter`, `Gen3Inverter`, or `ThreePhaseInverter`). The snapshot type is a [discriminated union](https://www.typescriptlang.org/docs/handbook/2/narrowing.html#discriminated-unions) on the `generation` field:
@@ -45,28 +45,30 @@ const snapshot = inverter.getData();
 
 if (snapshot.generation === 'gen3') {
   // TypeScript knows this is Gen3Snapshot
-  console.log(snapshot.batteryPauseMode);
+  console.log(snapshot.timedDischarge);
   console.log(snapshot.chargeSlots[0].targetStateOfCharge);
 }
 ```
 
 Generation detection uses the device type code (HR 0) and ARM firmware version (HR 21). If those registers aren't available, it falls back to serial number prefix detection — but this is unreliable as many serial prefixes (like "FD" for Gen3) aren't in the prefix map.
 
-## Operating Modes
+## Mode Toggles
 
-The inverter's operating mode is derived from two holding registers:
+Inverter operating modes are **independent toggles**, each controlling a single holding register. They are not mutually exclusive — multiple toggles can be active simultaneously.
 
-| Mode | Description |
-|------|-------------|
-| `eco` | Battery charges from solar only, discharges to meet household load. Grid import/export happens naturally. |
-| `timed_demand` | Battery charges and discharges on a schedule (timeslots). Used for cheap-rate charging and peak-rate discharging. |
-| `timed_export` | Battery discharges to the grid on a schedule. Used for grid export tariffs. |
+| Toggle | Register | Description |
+|--------|----------|-------------|
+| `ecoMode` | HR(27) | Battery charges from solar only, discharges to meet household load |
+| `timedExport` | HR(59) | Battery discharges to the grid on a schedule |
+| `timedCharge` | HR(96) | Battery charges on a schedule (timeslots) |
+| `timedDischarge` | HR(318) | Battery discharges on a schedule — Gen3 only |
 
 ```ts
-await inverter.setMode('timed_demand');
+await inverter.setEcoMode(true);
+await inverter.setTimedExport(false);
+await inverter.setTimedCharge(true);
+await inverter.setTimedDischarge(true); // Gen3 only
 ```
-
-The `enableDischarge` snapshot field corresponds to the same register used for mode derivation — in `eco` mode, timed discharge is disabled.
 
 ## Power Flows
 

@@ -72,8 +72,8 @@ describe('Register Lookup Tables', () => {
       expect(INVERTER_HOLDING_REGISTERS['charge_slot_1_start'].address).toBe(94);
     });
 
-    it('defines enable_charge at HR(96)', () => {
-      expect(INVERTER_HOLDING_REGISTERS['enable_charge'].address).toBe(96);
+    it('defines timed_charge at HR(96)', () => {
+      expect(INVERTER_HOLDING_REGISTERS['timed_charge'].address).toBe(96);
     });
 
     it('defines charge_target_soc at HR(116)', () => {

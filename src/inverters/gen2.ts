@@ -8,12 +8,14 @@ import {
 } from '../inverter.js';
 
 export class Gen2Inverter extends GivEnergyInverter {
-  async setChargeScheduleEnabled(enabled: boolean): Promise<void> {
+  async setTimedCharge(enabled: boolean): Promise<void> {
     await this.writeRegister(96, enabled ? 1 : 0);
   }
 
-  async setDischargeScheduleEnabled(enabled: boolean): Promise<void> {
-    await this.writeRegister(59, enabled ? 1 : 0);
+  async setTimedDischarge(enabled: boolean): Promise<void> {
+    // Gen2 has no dedicated timed discharge register.
+    // HR(59) was previously used but is actually the timed export toggle (see #31).
+    throw new Error('Gen2 does not have a dedicated timed discharge register');
   }
 
   async setChargeTarget(percent: number): Promise<void> {

@@ -17,8 +17,6 @@ export interface GivEnergyInverterOptions {
   reconnectMaxBackoffMs?: number;
 }
 
-export type InverterMode = 'eco' | 'timed_demand' | 'timed_export';
-
 export interface TimeSlotInput {
   start: string;
   end: string;
@@ -132,22 +130,15 @@ export abstract class GivEnergyInverter extends EventEmitter {
   }
 
   // ── Shared control methods ──────────────────────────────────
+  // Inverter modes are independent toggles, each controlling a single register.
+  // See https://github.com/britkat1980/giv_tcp and issue #31.
 
-  async setMode(mode: InverterMode): Promise<void> {
-    switch (mode) {
-      case 'eco':
-        await this.writeRegister(27, 1);
-        await this.writeRegister(59, 0);
-        break;
-      case 'timed_demand':
-        await this.writeRegister(27, 1);
-        await this.writeRegister(59, 1);
-        break;
-      case 'timed_export':
-        await this.writeRegister(27, 0);
-        await this.writeRegister(59, 1);
-        break;
-    }
+  async setEcoMode(enabled: boolean): Promise<void> {
+    await this.writeRegister(27, enabled ? 1 : 0);
+  }
+
+  async setTimedExport(enabled: boolean): Promise<void> {
+    await this.writeRegister(59, enabled ? 1 : 0);
   }
 
   async setDateTime(date: Date): Promise<void> {
@@ -173,8 +164,8 @@ export abstract class GivEnergyInverter extends EventEmitter {
 
   // ── Abstract methods (generation-specific) ──────────────────
 
-  abstract setChargeScheduleEnabled(enabled: boolean): Promise<void>;
-  abstract setDischargeScheduleEnabled(enabled: boolean): Promise<void>;
+  abstract setTimedCharge(enabled: boolean): Promise<void>;
+  abstract setTimedDischarge(enabled: boolean): Promise<void>;
   abstract setChargeTarget(percent: number): Promise<void>;
   abstract setChargeSlot(slot: number, config: TimeSlotInput): Promise<void>;
   abstract setChargeSlots(configs: TimeSlotInput[]): Promise<void>;

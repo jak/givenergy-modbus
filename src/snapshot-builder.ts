@@ -7,8 +7,7 @@
  * Reference: GivTCP/read.py — processInverterInfo()
  */
 
-import type { InverterSnapshot, BatteryPauseMode } from './model/inverter-snapshot.js';
-import type { InverterMode } from './inverter.js';
+import type { InverterSnapshot } from './model/inverter-snapshot.js';
 import type { BatterySnapshot } from './model/battery-snapshot.js';
 import type { MeterSnapshot } from './model/meter-snapshot.js';
 import type { TimeSlot, TimeSlotConfig } from './model/register-types.js';
@@ -262,28 +261,15 @@ export function buildSnapshot(
     ];
   }
 
-  // enable_charge: HR(96)
-  const enableCharge = getHR(cache, 96) !== 0;
-
-  // enable_discharge: HR(59)
-  const enableDischarge = getHR(cache, 59) !== 0;
+  // ── Mode toggles ────────────────────────────────────────────────────────
+  // These are independent toggles, not mutually exclusive states (#31).
+  // Each controls a single holding register.
+  const ecoMode = getHR(cache, 27) !== 0;         // HR(27): eco mode
+  const timedExport = getHR(cache, 59) !== 0;      // HR(59): timed export
+  const timedCharge = getHR(cache, 96) !== 0;       // HR(96): timed charge
 
   // charge_target_soc: HR(116) — legacy single target, applies to slot 1 on Gen2
   const chargeTargetStateOfCharge = getHR(cache, 116);
-
-  // ── Mode & settings ─────────────────────────────────────────────────────
-  // Mode derivation from HR(27) and HR(59) — matches setMode() in inverter.ts.
-  // HR(59) is also enableDischarge; the overlap is intentional (eco = discharge disabled).
-  const shallowCharge = getHR(cache, 27);
-  const enableTimedDischarge = getHR(cache, 59);
-  let mode: InverterMode;
-  if (shallowCharge !== 0 && enableTimedDischarge === 0) {
-    mode = 'eco';
-  } else if (shallowCharge !== 0 && enableTimedDischarge !== 0) {
-    mode = 'timed_demand';
-  } else {
-    mode = 'timed_export';
-  }
 
   // Three-phase uses different holding registers for these settings
   const batteryReservePercent = generation === 'three_phase'
@@ -293,12 +279,8 @@ export function buildSnapshot(
   const dischargeRatePercent = generation === 'three_phase'
     ? getHR(cache, 1108) : getHR(cache, 314);
 
-  // battery_pause_mode: HR(318) — Gen3-only
-  // 0=disabled, 1=pause_charge, 2=pause_discharge, 3=pause_both
-  const PAUSE_MODE_MAP: BatteryPauseMode[] = [
-    'disabled', 'pause_charge', 'pause_discharge', 'pause_both',
-  ];
-  const batteryPauseMode: BatteryPauseMode = PAUSE_MODE_MAP[getHR(cache, 318)] ?? 'disabled';
+  // timed_discharge: HR(318) — Gen3-only (#31)
+  const timedDischarge = getHR(cache, 318) !== 0;
 
   // ── System time ───────────────────────────────────────────────────────────
   // system_time: HR(35-40) — year, month, day, hour, minute, second
@@ -471,14 +453,14 @@ export function buildSnapshot(
     consumptionEnergyTodayKwh,
     chargeSlots,
     dischargeSlots,
-    enableCharge,
-    enableDischarge,
+    ecoMode,
+    timedExport,
+    timedCharge,
     chargeTargetStateOfCharge,
-    mode,
     batteryReservePercent,
     chargeRatePercent,
     dischargeRatePercent,
-    ...(generation === 'gen3' ? { batteryPauseMode } : {}),
+    ...(generation === 'gen3' ? { timedDischarge } : {}),
     systemTime,
     powerFlows,
     batteries,

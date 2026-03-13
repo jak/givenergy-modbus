@@ -12,16 +12,6 @@ import type { TimeSlot, TimeSlotConfig } from './register-types.js';
 import type { BatterySnapshot } from './battery-snapshot.js';
 import type { MeterSnapshot } from './meter-snapshot.js';
 import type { PowerFlows } from '../power-flow.js';
-import type { InverterMode } from '../inverter.js';
-
-/**
- * Battery pause mode — Gen3-only feature from HR(318).
- *
- * Controls whether the battery is paused from charging, discharging, or both.
- * 'disabled' means normal operation. This is independent of the charge/discharge
- * enable flags (HR 96/59) and timeslot configuration.
- */
-export type BatteryPauseMode = 'disabled' | 'pause_charge' | 'pause_discharge' | 'pause_both';
 
 /** Fields shared by all inverter generations */
 interface BaseSnapshot {
@@ -147,20 +137,21 @@ interface BaseSnapshot {
   /** Consumption energy today in kWh — derived: (inverter_out_day - ac_charge_day) - (export_day - import_day) */
   consumptionEnergyTodayKwh: number;
 
-  /** Enable charge flag from HR(96) */
-  enableCharge: boolean;
-  /** Enable discharge flag from HR(59) */
-  enableDischarge: boolean;
+  /**
+   * Eco mode toggle from HR(27).
+   * When enabled, battery charges from solar only and discharges to meet load.
+   */
+  ecoMode: boolean;
+  /**
+   * Timed export toggle from HR(59).
+   * When enabled, battery discharges to grid on schedule.
+   * Independent of eco mode — both can be on simultaneously.
+   */
+  timedExport: boolean;
+  /** Timed charge toggle from HR(96) — enables charge schedule slots */
+  timedCharge: boolean;
   /** Legacy charge target SOC % from HR(116) — applies to slot 1 on Gen2 */
   chargeTargetStateOfCharge: number;
-
-  /**
-   * Operating mode derived from HR(27) and HR(59):
-   *  - 'eco': HR(27)=1, HR(59)=0 — battery charges from solar only, discharges to meet load
-   *  - 'timed_demand': HR(27)=1, HR(59)=1 — battery charges/discharges on schedule
-   *  - 'timed_export': HR(27)=0, HR(59)=1 — battery discharges to grid on schedule
-   */
-  mode: InverterMode;
   /** Minimum SOC the inverter will discharge to (4-100%), from HR(110) or HR(1109) for three-phase */
   batteryReservePercent: number;
   /** Battery charge rate AC limit (0-100%), from HR(313) or HR(1110) for three-phase */
@@ -196,10 +187,10 @@ export interface Gen3Snapshot extends BaseSnapshot {
   /** Discharge timeslots with per-slot target state of charge */
   dischargeSlots: TimeSlotConfig[];
   /**
-   * Battery pause mode from HR(318) — Gen3-only feature.
-   * Controls whether the battery is paused from charging, discharging, or both.
+   * Timed discharge toggle from HR(318) — Gen3-only.
+   * When enabled, battery discharges on schedule. Independent of other toggles.
    */
-  batteryPauseMode: BatteryPauseMode;
+  timedDischarge: boolean;
 }
 
 export interface ThreePhaseSnapshot extends BaseSnapshot {

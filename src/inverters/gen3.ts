@@ -9,12 +9,12 @@ import {
 import { CHARGE_SLOT_REGISTERS, DISCHARGE_SLOT_REGISTERS } from '../timeslot-registers.js';
 
 export class Gen3Inverter extends GivEnergyInverter {
-  async setChargeScheduleEnabled(enabled: boolean): Promise<void> {
+  async setTimedCharge(enabled: boolean): Promise<void> {
     await this.writeRegister(96, enabled ? 1 : 0);
   }
 
-  async setDischargeScheduleEnabled(enabled: boolean): Promise<void> {
-    await this.writeRegister(59, enabled ? 1 : 0);
+  async setTimedDischarge(enabled: boolean): Promise<void> {
+    await this.writeRegister(318, enabled ? 1 : 0);
   }
 
   async setChargeTarget(percent: number): Promise<void> {
@@ -109,11 +109,6 @@ export class Gen3Inverter extends GivEnergyInverter {
   async setExportLimit(watts: number): Promise<void> {
     if (watts < 0 || watts > 65000) throw new RangeError(`export limit must be 0-65000, got ${watts}`);
     await this.writeRegister(2071, watts);
-  }
-
-  async setBatteryPauseMode(mode: 'disabled' | 'pause_charge' | 'pause_discharge' | 'pause_both'): Promise<void> {
-    const modeMap = { disabled: 0, pause_charge: 1, pause_discharge: 2, pause_both: 3 };
-    await this.writeRegister(318, modeMap[mode]);
   }
 
   async setPauseSlot(config: { start: string; end: string }): Promise<void> {

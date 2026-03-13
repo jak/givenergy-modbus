@@ -14,10 +14,9 @@ Charge the battery from the grid at full rate. Useful during cheap overnight tar
 ```ts
 // Save current state to restore later
 const before = inverter.getData();
-const previousMode = before.mode;
 
-// Switch to timed demand with an all-day charge slot
-await inverter.setMode('timed_demand');
+// Enable timed charge with an all-day charge slot
+await inverter.setTimedCharge(true);
 await inverter.setChargeSlot(1, {
   start: '00:00',
   end: '23:59',
@@ -27,8 +26,8 @@ await inverter.setChargeRatePercent(100);
 
 // ... your app waits (timer, cron, automation trigger) ...
 
-// Restore previous mode when done
-await inverter.setMode(previousMode);
+// Restore previous state when done
+await inverter.setTimedCharge(before.timedCharge);
 ```
 
 ::: tip
@@ -42,40 +41,28 @@ Discharge the battery to the grid. Useful during peak export tariff windows.
 ```ts
 const before = inverter.getData();
 
-await inverter.setMode('timed_export');
+await inverter.setTimedExport(true);
 await inverter.setDischargeSlot(1, { start: '00:00', end: '23:59' });
 await inverter.setDischargeRatePercent(100);
 await inverter.setBatteryReserve(4);  // don't drain below 4%
 
 // ... wait, then revert ...
-await inverter.setMode(before.mode);
+await inverter.setTimedExport(before.timedExport);
 await inverter.setBatteryReserve(before.batteryReservePercent);
 ```
 
-## Gen3: Battery Pause Mode
+## Gen3: Timed Discharge
 
-Gen3 inverters have a dedicated pause mode that's simpler than mode switching for short-term holds:
-
-```ts
-// Prevent discharging (hold charge)
-await inverter.setBatteryPauseMode('pause_discharge');
-
-// Prevent charging (e.g. during expensive import period)
-await inverter.setBatteryPauseMode('pause_charge');
-
-// Pause both
-await inverter.setBatteryPauseMode('pause_both');
-
-// Resume normal operation
-await inverter.setBatteryPauseMode('disabled');
-```
-
-The current pause mode is visible in the snapshot:
+Gen3 inverters have a dedicated timed discharge toggle at HR(318), independent of timed export:
 
 ```ts
+// Enable timed discharge
+await inverter.setTimedDischarge(true);
+
+// Check current state
 const s = inverter.getData();
 if (s.generation === 'gen3') {
-  console.log(s.batteryPauseMode); // 'disabled' | 'pause_charge' | ...
+  console.log(s.timedDischarge); // true | false
 }
 ```
 
