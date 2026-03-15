@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.0.0](https://github.com/jak/givenergy-modbus/compare/givenergy-modbus-v1.2.0...givenergy-modbus-v2.0.0) (2026-03-15)
+
+
+### Bug Fixes
+
+* replace mutually exclusive mode with independent toggles ([#32](https://github.com/jak/givenergy-modbus/issues/32)) ([dd6eba1](https://github.com/jak/givenergy-modbus/commit/dd6eba14e273c0d057d91fba0c77b771612100e0))
+
+
+### Miscellaneous
+
+* release 2.0.0 ([556621c](https://github.com/jak/givenergy-modbus/commit/556621c5b4eef5be65c2f7935548d5cfed1390ba))
+
 ## [1.2.0](https://github.com/jak/givenergy-modbus/compare/givenergy-modbus-v1.1.2...givenergy-modbus-v1.2.0) (2026-03-12)
 
 
