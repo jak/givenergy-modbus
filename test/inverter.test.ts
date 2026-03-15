@@ -15,7 +15,8 @@ describe('GivEnergyInverter', () => {
   it('exposes shared control methods on prototype', () => {
     // Verify method signatures exist on the abstract class prototype
     // (subclasses inherit these shared methods)
-    expect(typeof GivEnergyInverter.prototype.setMode).toBe('function');
+    expect(typeof GivEnergyInverter.prototype.setEcoMode).toBe('function');
+    expect(typeof GivEnergyInverter.prototype.setTimedExport).toBe('function');
     expect(typeof GivEnergyInverter.prototype.setDateTime).toBe('function');
     expect(typeof GivEnergyInverter.prototype.syncDateTime).toBe('function');
     expect(typeof GivEnergyInverter.prototype.reboot).toBe('function');
@@ -25,8 +26,7 @@ describe('GivEnergyInverter', () => {
   });
 
   it('Gen2Inverter exposes generation-specific methods', () => {
-    expect(typeof Gen2Inverter.prototype.setChargeScheduleEnabled).toBe('function');
-    expect(typeof Gen2Inverter.prototype.setDischargeScheduleEnabled).toBe('function');
+    expect(typeof Gen2Inverter.prototype.setTimedCharge).toBe('function');
     expect(typeof Gen2Inverter.prototype.setChargeTarget).toBe('function');
     expect(typeof Gen2Inverter.prototype.setChargeSlot).toBe('function');
     expect(typeof Gen2Inverter.prototype.setChargeSlots).toBe('function');
@@ -41,15 +41,15 @@ describe('GivEnergyInverter', () => {
   });
 
   it('Gen3Inverter exposes generation-specific methods including Gen3-only', () => {
-    expect(typeof Gen3Inverter.prototype.setChargeScheduleEnabled).toBe('function');
+    expect(typeof Gen3Inverter.prototype.setTimedCharge).toBe('function');
+    expect(typeof Gen3Inverter.prototype.setBatteryPauseMode).toBe('function');
     expect(typeof Gen3Inverter.prototype.setChargeSlot).toBe('function');
     expect(typeof Gen3Inverter.prototype.setExportLimit).toBe('function');
-    expect(typeof Gen3Inverter.prototype.setBatteryPauseMode).toBe('function');
-    expect(typeof Gen3Inverter.prototype.setPauseSlot).toBe('function');
+    expect(typeof Gen3Inverter.prototype.setTimedDischargeSlot).toBe('function');
   });
 
   it('ThreePhaseInverter exposes generation-specific methods', () => {
-    expect(typeof ThreePhaseInverter.prototype.setChargeScheduleEnabled).toBe('function');
+    expect(typeof ThreePhaseInverter.prototype.setTimedCharge).toBe('function');
     expect(typeof ThreePhaseInverter.prototype.setChargeSlot).toBe('function');
     expect(typeof ThreePhaseInverter.prototype.setDischargeSlot).toBe('function');
   });
@@ -103,8 +103,9 @@ describe('GivEnergyInverter', () => {
       consumptionEnergyTodayKwh: 0,
       chargeSlots: [],
       dischargeSlots: [],
-      enableCharge: false,
-      enableDischarge: false,
+      ecoMode: false,
+      timedExport: false,
+      timedCharge: false,
       chargeTargetStateOfCharge: 0,
       systemTime: new Date(),
       powerFlows: {
@@ -152,7 +153,7 @@ describe('GivEnergyInverter', () => {
       batteryDischargeEnergyTodayKwh: 0, gridImportEnergyTodayKwh: 0,
       gridExportEnergyTodayKwh: 0, consumptionEnergyTodayKwh: 0,
       chargeSlots: [], dischargeSlots: [],
-      enableCharge: false, enableDischarge: false, chargeTargetStateOfCharge: 0,
+      ecoMode: false, timedExport: false, timedCharge: false, chargeTargetStateOfCharge: 0,
       systemTime: new Date(),
       powerFlows: {
         solarToHouse: 0, solarToBattery: 0, solarToGrid: 0,

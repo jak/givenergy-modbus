@@ -74,8 +74,9 @@ inverter.on('lost', (err) => {
 // Read the latest snapshot at any time
 const snapshot = inverter.getData();
 
-// Control the inverter
-await inverter.setMode('eco');
+// Control the inverter — modes are independent toggles
+await inverter.setEcoMode(true);
+await inverter.setTimedCharge(true);
 await inverter.setChargeSlot(1, { start: '00:30', end: '04:30', targetStateOfCharge: 100 });
 await inverter.setChargeRate(2600);
 await inverter.syncDateTime();
@@ -100,16 +101,14 @@ const inverter = await GivEnergyInverter.connect({ host: '192.168.1.100' });
 
 // 1. Save the current state so you can restore it later
 const before = inverter.getData();
-const previousMode = before.mode;
-const previousChargeRate = before.chargeRatePercent;
 
-// 2. Enable timed demand mode and set a charge slot covering "now"
-await inverter.setMode('timed_demand');
+// 2. Enable timed charge and set a charge slot covering "now"
+await inverter.setTimedCharge(true);
 await inverter.setChargeSlot(1, { start: '00:00', end: '23:59', targetStateOfCharge: 100 });
 
 // 3. Your app is responsible for reverting when done — use a timer, cron, etc.
 setTimeout(async () => {
-  await inverter.setMode(previousMode);
+  await inverter.setTimedCharge(before.timedCharge);
   // Restore original charge slot, rate, etc.
   await inverter.stop();
 }, 2 * 60 * 60 * 1000); // 2 hours
@@ -121,8 +120,8 @@ setTimeout(async () => {
 // 1. Save current state
 const before = inverter.getData();
 
-// 2. Set timed export mode with a discharge slot covering "now"
-await inverter.setMode('timed_export');
+// 2. Enable timed export with a discharge slot covering "now"
+await inverter.setTimedExport(true);
 await inverter.setDischargeSlot(1, { start: '00:00', end: '23:59' });
 
 // 3. Revert when done (your app's responsibility)
@@ -130,9 +129,9 @@ await inverter.setDischargeSlot(1, { start: '00:00', end: '23:59' });
 
 #### Key points
 
-- **Always save state before changing it.** The library doesn't track previous values — snapshot fields like `mode`, `chargeRatePercent`, `batteryReservePercent`, and `chargeSlots` tell you the current config so you can restore it.
+- **Always save state before changing it.** The library doesn't track previous values — snapshot fields like `ecoMode`, `timedExport`, `timedCharge`, `chargeRatePercent`, `batteryReservePercent`, and `chargeSlots` tell you the current config so you can restore it.
 - **Your app owns the timer/revert logic.** Whether that's `setTimeout`, a cron job, or a home automation trigger is up to you.
-- **Gen3 has `batteryPauseMode`** — an alternative to mode switching. Set it to `'pause_discharge'` to hold charge, or `'pause_charge'` to prevent charging, without changing timeslots.
+- **Modes are independent toggles**, not mutually exclusive states. Eco mode (HR 27), timed export (HR 59), and timed charge (HR 96) can each be toggled independently without affecting each other. Gen3 inverters also have a battery pause mode (HR 318) and timed discharge slot (HR 319-320).
 - **The inverter may take a few seconds to act on register writes.** Poll with `getData()` or listen for `'data'` events to confirm changes took effect.
 
 ## API documentation

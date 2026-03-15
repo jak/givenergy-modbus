@@ -170,8 +170,8 @@ const REGISTER_NAMES = {
   313: 'battery_charge_limit_ac',
   314: 'battery_discharge_limit_ac',
   318: 'battery_pause_mode (0=off,1=pause_charge,2=pause_discharge,3=both)',
-  319: 'battery_pause_slot_1_start',
-  320: 'battery_pause_slot_1_end',
+  319: 'timed_discharge_slot_start',
+  320: 'timed_discharge_slot_end',
 };
 
 function formatTime(val) {

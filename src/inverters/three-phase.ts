@@ -9,14 +9,10 @@ import {
 import { THREE_PHASE_CHARGE_SLOT_REGISTERS, THREE_PHASE_DISCHARGE_SLOT_REGISTERS } from '../timeslot-registers.js';
 
 export class ThreePhaseInverter extends GivEnergyInverter {
-  async setChargeScheduleEnabled(enabled: boolean): Promise<void> {
+  async setTimedCharge(enabled: boolean): Promise<void> {
     const val = enabled ? 1 : 0;
     await this.writeRegister(1123, val);
     await this.writeRegister(1112, val);
-  }
-
-  async setDischargeScheduleEnabled(enabled: boolean): Promise<void> {
-    await this.writeRegister(1122, enabled ? 1 : 0);
   }
 
   async setChargeTarget(percent: number): Promise<void> {

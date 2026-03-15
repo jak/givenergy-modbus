@@ -85,7 +85,8 @@ console.log(snapshot.solarPower);       // watts
 console.log(snapshot.stateOfCharge);    // 0-100%
 console.log(snapshot.gridPower);        // watts (positive = export)
 console.log(snapshot.batteryPower);     // watts (positive = discharge)
-console.log(snapshot.mode);             // 'eco' | 'timed_demand' | 'timed_export'
+console.log(snapshot.ecoMode);          // true | false
+console.log(snapshot.timedExport);      // true | false
 ```
 
 The snapshot is a plain object — see [Concepts](./concepts) for what's in it.
@@ -108,10 +109,11 @@ inverter.on('lost', (err) => {
 ## Control the Inverter
 
 ```ts
-// Set operating mode
-await inverter.setMode('eco');
-await inverter.setMode('timed_demand');
-await inverter.setMode('timed_export');
+// Toggle independent mode settings
+await inverter.setEcoMode(true);       // HR(27) — eco mode on/off
+await inverter.setTimedExport(true);   // HR(59) — timed export on/off
+await inverter.setTimedCharge(true);   // HR(96) — timed charge on/off
+await inverter.setTimedDischarge(true); // Gen3 only — sets battery pause mode to pause_discharge
 
 // Configure charge schedule
 await inverter.setChargeSlot(1, {

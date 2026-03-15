@@ -429,9 +429,9 @@ export class PollManager extends EventEmitter {
         ? [{ base: 0, count: 60 }, { base: 60, count: 60 }, { base: 180, count: 60 }, { base: 4080, count: 60 }]
         : [{ base: 0, count: 60 }, { base: 180, count: 60 }, { base: 4080, count: 60 }];
     }
-    // gen3
+    // gen3 — includes HR 300-359 for timed discharge toggle at HR(318) (#31)
     return full
-      ? [{ base: 0, count: 60 }, { base: 60, count: 60 }, { base: 180, count: 60 }, { base: 240, count: 60 }, { base: 4080, count: 60 }]
+      ? [{ base: 0, count: 60 }, { base: 60, count: 60 }, { base: 180, count: 60 }, { base: 240, count: 60 }, { base: 300, count: 60 }, { base: 4080, count: 60 }]
       : [{ base: 0, count: 60 }, { base: 180, count: 60 }, { base: 4080, count: 60 }];
   }
 

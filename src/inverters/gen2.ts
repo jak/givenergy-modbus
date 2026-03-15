@@ -8,12 +8,8 @@ import {
 } from '../inverter.js';
 
 export class Gen2Inverter extends GivEnergyInverter {
-  async setChargeScheduleEnabled(enabled: boolean): Promise<void> {
+  async setTimedCharge(enabled: boolean): Promise<void> {
     await this.writeRegister(96, enabled ? 1 : 0);
-  }
-
-  async setDischargeScheduleEnabled(enabled: boolean): Promise<void> {
-    await this.writeRegister(59, enabled ? 1 : 0);
   }
 
   async setChargeTarget(percent: number): Promise<void> {

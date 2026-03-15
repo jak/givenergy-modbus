@@ -14,10 +14,9 @@ Charge the battery from the grid at full rate. Useful during cheap overnight tar
 ```ts
 // Save current state to restore later
 const before = inverter.getData();
-const previousMode = before.mode;
 
-// Switch to timed demand with an all-day charge slot
-await inverter.setMode('timed_demand');
+// Enable timed charge with an all-day charge slot
+await inverter.setTimedCharge(true);
 await inverter.setChargeSlot(1, {
   start: '00:00',
   end: '23:59',
@@ -27,8 +26,8 @@ await inverter.setChargeRatePercent(100);
 
 // ... your app waits (timer, cron, automation trigger) ...
 
-// Restore previous mode when done
-await inverter.setMode(previousMode);
+// Restore previous state when done
+await inverter.setTimedCharge(before.timedCharge);
 ```
 
 ::: tip
@@ -42,40 +41,34 @@ Discharge the battery to the grid. Useful during peak export tariff windows.
 ```ts
 const before = inverter.getData();
 
-await inverter.setMode('timed_export');
+await inverter.setTimedExport(true);
 await inverter.setDischargeSlot(1, { start: '00:00', end: '23:59' });
 await inverter.setDischargeRatePercent(100);
 await inverter.setBatteryReserve(4);  // don't drain below 4%
 
 // ... wait, then revert ...
-await inverter.setMode(before.mode);
+await inverter.setTimedExport(before.timedExport);
 await inverter.setBatteryReserve(before.batteryReservePercent);
 ```
 
-## Gen3: Battery Pause Mode
+## Gen3: Timed Discharge and Battery Pause
 
-Gen3 inverters have a dedicated pause mode that's simpler than mode switching for short-term holds:
-
-```ts
-// Prevent discharging (hold charge)
-await inverter.setBatteryPauseMode('pause_discharge');
-
-// Prevent charging (e.g. during expensive import period)
-await inverter.setBatteryPauseMode('pause_charge');
-
-// Pause both
-await inverter.setBatteryPauseMode('pause_both');
-
-// Resume normal operation
-await inverter.setBatteryPauseMode('disabled');
-```
-
-The current pause mode is visible in the snapshot:
+Gen3 inverters have a battery pause mode (HR 318) that controls whether the battery charges, discharges, or both. The timed discharge feature in the GivEnergy app works by setting the pause mode to `pause_discharge` and configuring a discharge time window (HR 319-320).
 
 ```ts
+// Enable timed discharge with a slot (matches the GivEnergy app toggle)
+await inverter.setTimedDischarge(true);
+await inverter.setTimedDischargeSlot({ start: '23:00', end: '00:01' });
+
+// Or use the full pause mode API
+await inverter.setBatteryPauseMode('pause_charge');  // prevent charging
+await inverter.setBatteryPauseMode('pause_both');     // freeze the battery
+
+// Check current state
 const s = inverter.getData();
 if (s.generation === 'gen3') {
-  console.log(s.batteryPauseMode); // 'disabled' | 'pause_charge' | ...
+  console.log(s.batteryPauseMode);    // 'disabled' | 'pause_charge' | 'pause_discharge' | 'pause_both'
+  console.log(s.timedDischargeSlot);  // { start: '23:00', end: '00:01' }
 }
 ```
 

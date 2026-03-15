@@ -12,14 +12,20 @@ import type { TimeSlot, TimeSlotConfig } from './register-types.js';
 import type { BatterySnapshot } from './battery-snapshot.js';
 import type { MeterSnapshot } from './meter-snapshot.js';
 import type { PowerFlows } from '../power-flow.js';
-import type { InverterMode } from '../inverter.js';
 
 /**
- * Battery pause mode — Gen3-only feature from HR(318).
+ * Battery pause mode — Gen3-only feature.
  *
  * Controls whether the battery is paused from charging, discharging, or both.
- * 'disabled' means normal operation. This is independent of the charge/discharge
- * enable flags (HR 96/59) and timeslot configuration.
+ * 'disabled' means normal operation. This is independent of the timed charge/export
+ * toggles and timeslot configuration.
+ *
+ * HR(318): 0=disabled, 1=pause_charge, 2=pause_discharge, 3=pause_both.
+ *
+ * Terminology note: GivTCP calls HR(59) "enable_discharge" and doesn't model
+ * timed discharge separately. This library follows the GivEnergy app's terminology
+ * instead, where HR(59) is "timed export" (export to grid) and HR(318) is
+ * "battery pause mode" with an associated "timed discharge" slot (HR 319-320).
  */
 export type BatteryPauseMode = 'disabled' | 'pause_charge' | 'pause_discharge' | 'pause_both';
 
@@ -147,20 +153,21 @@ interface BaseSnapshot {
   /** Consumption energy today in kWh — derived: (inverter_out_day - ac_charge_day) - (export_day - import_day) */
   consumptionEnergyTodayKwh: number;
 
-  /** Enable charge flag from HR(96) */
-  enableCharge: boolean;
-  /** Enable discharge flag from HR(59) */
-  enableDischarge: boolean;
+  /**
+   * Eco mode toggle from HR(27).
+   * When enabled, battery charges from solar only and discharges to meet load.
+   */
+  ecoMode: boolean;
+  /**
+   * Timed export toggle from HR(59).
+   * When enabled, battery discharges to grid on schedule.
+   * Independent of eco mode — both can be on simultaneously.
+   */
+  timedExport: boolean;
+  /** Timed charge toggle from HR(96) — enables charge schedule slots */
+  timedCharge: boolean;
   /** Legacy charge target SOC % from HR(116) — applies to slot 1 on Gen2 */
   chargeTargetStateOfCharge: number;
-
-  /**
-   * Operating mode derived from HR(27) and HR(59):
-   *  - 'eco': HR(27)=1, HR(59)=0 — battery charges from solar only, discharges to meet load
-   *  - 'timed_demand': HR(27)=1, HR(59)=1 — battery charges/discharges on schedule
-   *  - 'timed_export': HR(27)=0, HR(59)=1 — battery discharges to grid on schedule
-   */
-  mode: InverterMode;
   /** Minimum SOC the inverter will discharge to (4-100%), from HR(110) or HR(1109) for three-phase */
   batteryReservePercent: number;
   /** Battery charge rate AC limit (0-100%), from HR(313) or HR(1110) for three-phase */
@@ -196,10 +203,18 @@ export interface Gen3Snapshot extends BaseSnapshot {
   /** Discharge timeslots with per-slot target state of charge */
   dischargeSlots: TimeSlotConfig[];
   /**
-   * Battery pause mode from HR(318) — Gen3-only feature.
+   * Battery pause mode from HR(318) — Gen3-only.
    * Controls whether the battery is paused from charging, discharging, or both.
+   * 'disabled' means normal operation. Closely related to the timed discharge
+   * feature in the GivEnergy app — setting pause_discharge enables timed discharge.
    */
   batteryPauseMode: BatteryPauseMode;
+  /**
+   * Timed discharge slot from HR(319-320) — Gen3-only.
+   * The time window during which battery discharge is scheduled.
+   * In the GivEnergy app this is shown as the "timed discharge" slot.
+   */
+  timedDischargeSlot: TimeSlot;
 }
 
 export interface ThreePhaseSnapshot extends BaseSnapshot {

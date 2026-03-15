@@ -320,14 +320,14 @@ describe('SnapshotBuilder', () => {
       const cache = makeValidCache();
       cache.holdingRegisters.set(96, 1);
       const snapshot = buildSnapshot(cache);
-      expect(snapshot!.enableCharge).toBe(true);
+      expect(snapshot!.timedCharge).toBe(true);
     });
 
-    it('reads enable_discharge flag correctly', () => {
+    it('reads timed_export flag correctly', () => {
       const cache = makeValidCache();
-      cache.holdingRegisters.set(59, 0); // HR(59) = enable_discharge
+      cache.holdingRegisters.set(59, 0); // HR(59) = timed export
       const snapshot = buildSnapshot(cache);
-      expect(snapshot!.enableDischarge).toBe(false);
+      expect(snapshot!.timedExport).toBe(false);
     });
 
     it('reads heatsink temp via toDeci', () => {
@@ -1131,43 +1131,141 @@ describe('SnapshotBuilder', () => {
     });
   });
 
-  // ── Mode derivation ────────────────────────────────────────────────────
-  // HR(27) = shallow_charge (eco bit), HR(59) = enable_timed_discharge.
-  // These two registers together determine the operating mode, matching
-  // the setMode() logic in inverter.ts.
-  describe('mode derivation from HR(27) and HR(59)', () => {
-    it('HR(27)=1, HR(59)=0 → eco', () => {
+  // ── Independent mode toggles ─────────────────────────────────────────
+  // HR(27) = eco mode, HR(59) = timed export, HR(96) = timed charge,
+  // HR(318) = timed discharge (Gen3 only). These are independent toggles,
+  // not mutually exclusive states (#31).
+  describe('independent mode toggles from HR(27), HR(59), HR(96), HR(318)', () => {
+    it('reads ecoMode from HR(27)', () => {
       const cache = makeValidCache();
       cache.holdingRegisters.set(27, 1);
-      cache.holdingRegisters.set(59, 0);
       const s = buildSnapshot(cache)!;
-      expect(s.mode).toBe('eco');
+      expect(s.ecoMode).toBe(true);
     });
 
-    it('HR(27)=1, HR(59)=1 → timed_demand', () => {
-      const cache = makeValidCache();
-      cache.holdingRegisters.set(27, 1);
-      cache.holdingRegisters.set(59, 1);
-      const s = buildSnapshot(cache)!;
-      expect(s.mode).toBe('timed_demand');
-    });
-
-    it('HR(27)=0, HR(59)=1 → timed_export', () => {
+    it('ecoMode is false when HR(27)=0', () => {
       const cache = makeValidCache();
       cache.holdingRegisters.set(27, 0);
-      cache.holdingRegisters.set(59, 1);
       const s = buildSnapshot(cache)!;
-      expect(s.mode).toBe('timed_export');
+      expect(s.ecoMode).toBe(false);
     });
 
-    it('HR(27)=0, HR(59)=0 → timed_export (fallback — shallow_charge off)', () => {
-      // When both are 0, the else branch produces timed_export.
-      // This is an edge case — a real inverter would not normally have both off.
+    it('reads timedExport from HR(59)', () => {
       const cache = makeValidCache();
-      cache.holdingRegisters.set(27, 0);
+      cache.holdingRegisters.set(59, 1);
+      const s = buildSnapshot(cache)!;
+      expect(s.timedExport).toBe(true);
+    });
+
+    it('timedExport is false when HR(59)=0', () => {
+      const cache = makeValidCache();
       cache.holdingRegisters.set(59, 0);
       const s = buildSnapshot(cache)!;
-      expect(s.mode).toBe('timed_export');
+      expect(s.timedExport).toBe(false);
+    });
+
+    it('reads timedCharge from HR(96)', () => {
+      const cache = makeValidCache();
+      cache.holdingRegisters.set(96, 1);
+      const s = buildSnapshot(cache)!;
+      expect(s.timedCharge).toBe(true);
+    });
+
+    it('all toggles are independent — eco on + timed export on is valid', () => {
+      const cache = makeValidCache();
+      cache.holdingRegisters.set(27, 1); // eco on
+      cache.holdingRegisters.set(59, 1); // timed export on
+      cache.holdingRegisters.set(96, 0); // timed charge off
+      const s = buildSnapshot(cache)!;
+      expect(s.ecoMode).toBe(true);
+      expect(s.timedExport).toBe(true);
+      expect(s.timedCharge).toBe(false);
+    });
+
+    it('reads batteryPauseMode from HR(318) on Gen3 — 0=disabled', () => {
+      const cache = makeValidCache();
+      cache.holdingRegisters.set(318, 0);
+      const s = buildSnapshot(cache)!;
+      expect(s.generation).toBe('gen3');
+      expect((s as import('../src/model/inverter-snapshot.js').Gen3Snapshot).batteryPauseMode).toBe('disabled');
+    });
+
+    it('reads batteryPauseMode from HR(318) on Gen3 — 1=pause_charge', () => {
+      const cache = makeValidCache();
+      cache.holdingRegisters.set(318, 1);
+      const s = buildSnapshot(cache)!;
+      expect((s as import('../src/model/inverter-snapshot.js').Gen3Snapshot).batteryPauseMode).toBe('pause_charge');
+    });
+
+    it('reads batteryPauseMode from HR(318) on Gen3 — 2=pause_discharge', () => {
+      const cache = makeValidCache();
+      cache.holdingRegisters.set(318, 2);
+      const s = buildSnapshot(cache)!;
+      expect((s as import('../src/model/inverter-snapshot.js').Gen3Snapshot).batteryPauseMode).toBe('pause_discharge');
+    });
+
+    it('reads batteryPauseMode from HR(318) on Gen3 — 3=pause_both', () => {
+      const cache = makeValidCache();
+      cache.holdingRegisters.set(318, 3);
+      const s = buildSnapshot(cache)!;
+      expect((s as import('../src/model/inverter-snapshot.js').Gen3Snapshot).batteryPauseMode).toBe('pause_both');
+    });
+
+    it('batteryPauseMode defaults to disabled for unknown values', () => {
+      const cache = makeValidCache();
+      cache.holdingRegisters.set(318, 99);
+      const s = buildSnapshot(cache)!;
+      expect((s as import('../src/model/inverter-snapshot.js').Gen3Snapshot).batteryPauseMode).toBe('disabled');
+    });
+
+    it('reads timedDischargeSlot from HR(319-320) on Gen3 — swapped because registers are pause slot', () => {
+      const cache = makeValidCache();
+      // Under the hood: HR(319)=pause_end=1 (00:01), HR(320)=pause_start=2300 (23:00)
+      // Displayed as timed discharge: start=23:00 (HR 320), end=00:01 (HR 319)
+      cache.holdingRegisters.set(319, 1);    // pause end → discharge end
+      cache.holdingRegisters.set(320, 2300); // pause start → discharge start
+      const s = buildSnapshot(cache)!;
+      expect(s.generation).toBe('gen3');
+      const gen3 = s as import('../src/model/inverter-snapshot.js').Gen3Snapshot;
+      expect(gen3.timedDischargeSlot).toEqual({ start: '23:00', end: '00:01' });
+    });
+
+    it('timedDischargeSlot defaults to 00:00-00:00 when not set', () => {
+      const cache = makeValidCache();
+      const s = buildSnapshot(cache)!;
+      const gen3 = s as import('../src/model/inverter-snapshot.js').Gen3Snapshot;
+      expect(gen3.timedDischargeSlot).toEqual({ start: '00:00', end: '00:00' });
+    });
+
+    it('timedDischargeSlot is not present on gen2 snapshots', () => {
+      const cache = makeValidCache();
+      cache.holdingRegisters.set(0, 0x2001);
+      cache.holdingRegisters.set(21, 100);
+      cache.holdingRegisters.set(319, 2300);
+      cache.holdingRegisters.set(320, 1);
+      const s = buildSnapshot(cache)!;
+      expect(s.generation).toBe('gen2');
+      expect('timedDischargeSlot' in s).toBe(false);
+    });
+
+    it('batteryPauseMode is not present on gen2 snapshots', () => {
+      const cache = makeValidCache();
+      cache.holdingRegisters.set(0, 0x2001);
+      cache.holdingRegisters.set(21, 100);
+      cache.holdingRegisters.set(318, 1);
+      const s = buildSnapshot(cache)!;
+      expect(s.generation).toBe('gen2');
+      expect('batteryPauseMode' in s).toBe(false);
+    });
+
+    it('batteryPauseMode is not present on three_phase snapshots', () => {
+      const cache = makeValidCache();
+      cache.holdingRegisters.set(0, 0x4001);
+      cache.holdingRegisters.set(21, 100);
+      cache.holdingRegisters.set(318, 1);
+      const s = buildSnapshot(cache)!;
+      expect(s.generation).toBe('three_phase');
+      expect('batteryPauseMode' in s).toBe(false);
     });
   });
 
@@ -1239,64 +1337,4 @@ describe('SnapshotBuilder', () => {
     });
   });
 
-  // ── Battery pause mode (Gen3-only) ─────────────────────────────────────
-  // HR(318): 0=disabled, 1=pause_charge, 2=pause_discharge, 3=pause_both
-  describe('batteryPauseMode (Gen3-only)', () => {
-    it('maps HR(318)=0 to disabled', () => {
-      const cache = makeValidCache(); // gen3 by default
-      cache.holdingRegisters.set(318, 0);
-      const s = buildSnapshot(cache)!;
-      expect(s.generation).toBe('gen3');
-      expect((s as import('../src/model/inverter-snapshot.js').Gen3Snapshot).batteryPauseMode).toBe('disabled');
-    });
-
-    it('maps HR(318)=1 to pause_charge', () => {
-      const cache = makeValidCache();
-      cache.holdingRegisters.set(318, 1);
-      const s = buildSnapshot(cache)!;
-      expect((s as import('../src/model/inverter-snapshot.js').Gen3Snapshot).batteryPauseMode).toBe('pause_charge');
-    });
-
-    it('maps HR(318)=2 to pause_discharge', () => {
-      const cache = makeValidCache();
-      cache.holdingRegisters.set(318, 2);
-      const s = buildSnapshot(cache)!;
-      expect((s as import('../src/model/inverter-snapshot.js').Gen3Snapshot).batteryPauseMode).toBe('pause_discharge');
-    });
-
-    it('maps HR(318)=3 to pause_both', () => {
-      const cache = makeValidCache();
-      cache.holdingRegisters.set(318, 3);
-      const s = buildSnapshot(cache)!;
-      expect((s as import('../src/model/inverter-snapshot.js').Gen3Snapshot).batteryPauseMode).toBe('pause_both');
-    });
-
-    it('falls back to disabled for unknown values', () => {
-      const cache = makeValidCache();
-      cache.holdingRegisters.set(318, 99);
-      const s = buildSnapshot(cache)!;
-      expect((s as import('../src/model/inverter-snapshot.js').Gen3Snapshot).batteryPauseMode).toBe('disabled');
-    });
-
-    it('is not present on gen2 snapshots', () => {
-      const cache = makeValidCache();
-      // Set to gen2: device_type 0x2001 with arm_fw < 300
-      cache.holdingRegisters.set(0, 0x2001);
-      cache.holdingRegisters.set(21, 100); // arm_fw 100 → gen2
-      cache.holdingRegisters.set(318, 2);
-      const s = buildSnapshot(cache)!;
-      expect(s.generation).toBe('gen2');
-      expect('batteryPauseMode' in s).toBe(false);
-    });
-
-    it('is not present on three_phase snapshots', () => {
-      const cache = makeValidCache();
-      cache.holdingRegisters.set(0, 0x4001);
-      cache.holdingRegisters.set(21, 100);
-      cache.holdingRegisters.set(318, 1);
-      const s = buildSnapshot(cache)!;
-      expect(s.generation).toBe('three_phase');
-      expect('batteryPauseMode' in s).toBe(false);
-    });
-  });
 });

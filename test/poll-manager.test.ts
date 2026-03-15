@@ -53,8 +53,9 @@ const mockSnapshot: InverterSnapshot = {
     { start: '00:00', end: '00:00', targetStateOfCharge: 0 },
     ...Array.from({ length: 9 }, () => ({ start: '00:00', end: '00:00', targetStateOfCharge: 0 })),
   ],
-  enableCharge: true,
-  enableDischarge: false,
+  ecoMode: true,
+  timedExport: false,
+  timedCharge: true,
   chargeTargetStateOfCharge: 100,
   systemTime: new Date(),
   powerFlows: {

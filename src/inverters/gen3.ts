@@ -6,15 +6,27 @@ import {
   validateRatePercent,
   timeToInt,
 } from '../inverter.js';
+import type { BatteryPauseMode } from '../model/inverter-snapshot.js';
 import { CHARGE_SLOT_REGISTERS, DISCHARGE_SLOT_REGISTERS } from '../timeslot-registers.js';
 
+const PAUSE_MODE_VALUES: Record<BatteryPauseMode, number> = {
+  disabled: 0,
+  pause_charge: 1,
+  pause_discharge: 2,
+  pause_both: 3,
+};
+
 export class Gen3Inverter extends GivEnergyInverter {
-  async setChargeScheduleEnabled(enabled: boolean): Promise<void> {
+  async setTimedCharge(enabled: boolean): Promise<void> {
     await this.writeRegister(96, enabled ? 1 : 0);
   }
 
-  async setDischargeScheduleEnabled(enabled: boolean): Promise<void> {
-    await this.writeRegister(59, enabled ? 1 : 0);
+  async setBatteryPauseMode(mode: BatteryPauseMode): Promise<void> {
+    await this.writeRegister(318, PAUSE_MODE_VALUES[mode]);
+  }
+
+  async setTimedDischarge(enabled: boolean): Promise<void> {
+    await this.setBatteryPauseMode(enabled ? 'pause_discharge' : 'disabled');
   }
 
   async setChargeTarget(percent: number): Promise<void> {
@@ -111,15 +123,13 @@ export class Gen3Inverter extends GivEnergyInverter {
     await this.writeRegister(2071, watts);
   }
 
-  async setBatteryPauseMode(mode: 'disabled' | 'pause_charge' | 'pause_discharge' | 'pause_both'): Promise<void> {
-    const modeMap = { disabled: 0, pause_charge: 1, pause_discharge: 2, pause_both: 3 };
-    await this.writeRegister(318, modeMap[mode]);
-  }
-
-  async setPauseSlot(config: { start: string; end: string }): Promise<void> {
+  async setTimedDischargeSlot(config: { start: string; end: string }): Promise<void> {
     validateTime(config.start);
     validateTime(config.end);
-    await this.writeRegister(319, timeToInt(config.start));
-    await this.writeRegister(320, timeToInt(config.end));
+    // Under the hood HR(319-320) are battery pause slot registers.
+    // The app shows the inverse: start/end of when discharge is *allowed*.
+    // So we swap: discharge start → HR(320), discharge end → HR(319).
+    await this.writeRegister(320, timeToInt(config.start));
+    await this.writeRegister(319, timeToInt(config.end));
   }
 }
