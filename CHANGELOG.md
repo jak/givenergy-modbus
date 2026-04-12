@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.0.1](https://github.com/jak/givenergy-modbus/compare/givenergy-modbus-v2.0.0...givenergy-modbus-v2.0.1) (2026-04-12)
+
+
+### Bug Fixes
+
+* add connect timeout to prevent indefinite hang on silent packet drops ([#36](https://github.com/jak/givenergy-modbus/issues/36)) ([fe883a5](https://github.com/jak/givenergy-modbus/commit/fe883a50ba911124f98013ac4f3847d4fff00d68))
+
 ## [2.0.0](https://github.com/jak/givenergy-modbus/compare/givenergy-modbus-v1.2.0...givenergy-modbus-v2.0.0) (2026-03-15)
 
 
