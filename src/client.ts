@@ -52,16 +52,33 @@ export class Client {
 
   connect(): Promise<void> {
     return new Promise((resolve, reject) => {
+      this.onDebug(`connecting to ${this.host}:${this.port} (timeout ${this.timeout}ms)`);
       const socket = createConnection({ host: this.host, port: this.port });
       socket.setNoDelay(true);
+
+      // Guard against silent SYN drops (WiFi dongle offline, firewall blackhole).
+      // Without this the OS-level TCP timeout (~75s) is the only backstop.
+      const timer = setTimeout(() => {
+        socket.destroy();
+        reject(new Error(`connect timeout after ${this.timeout}ms to ${this.host}:${this.port}`));
+      }, this.timeout);
+
+      const onError = (err: Error) => {
+        clearTimeout(timer);
+        reject(err);
+      };
+
       socket.once('connect', () => {
+        clearTimeout(timer);
+        socket.off('error', onError);
+        this.onDebug(`connected to ${this.host}:${this.port}`);
         this.socket = socket;
+        socket.on('data', (data: Buffer) => this._onData(data));
+        socket.on('close', () => this._failAllPending(new Error('connection closed')));
+        socket.on('error', (err) => this._failAllPending(err));
         resolve();
       });
-      socket.once('error', reject);
-      socket.on('data', (data: Buffer) => this._onData(data));
-      socket.on('close', () => this._failAllPending(new Error('connection closed')));
-      socket.on('error', (err) => this._failAllPending(err));
+      socket.once('error', onError);
     });
   }
 

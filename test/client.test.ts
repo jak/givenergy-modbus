@@ -88,6 +88,9 @@ describe('Client', () => {
   it('connects to inverter on specified host and port', async () => {
     const client = new Client({ host: '127.0.0.1', port: serverPort });
     await client.connect();
+    // Client 'connect' can fire before server's 'connection' event is processed;
+    // wait for the server side to catch up before asserting.
+    await waitForServerSocket(serverSockets, 1000);
     expect(serverSockets.length).toBe(1);
     await client.close();
   });
@@ -165,6 +168,40 @@ describe('Client', () => {
     await expect(
       client.sendRequest(fakeReadRequest(0x31, 0, 60))
     ).rejects.toThrow('timeout');
+
+    await client.close();
+  });
+
+  it('rejects connect() within timeout when host silently drops packets', async () => {
+    // Issue #35: a silently-blackholed host (WiFi dongle offline, firewall drop)
+    // must not cause connect() to hang past the configured timeout.
+    // 192.0.2.1 is TEST-NET-1 (RFC 5737) — reserved, non-routable, typically drops.
+    // We accept either a connect-timeout or an unreachable error; the contract
+    // being tested is "does not hang indefinitely".
+    const client = new Client({
+      host: '192.0.2.1', port: 1,
+      timeout: 200,
+    });
+
+    const start = Date.now();
+    await expect(client.connect()).rejects.toThrow();
+    const elapsed = Date.now() - start;
+
+    // Must reject well before the OS-level TCP connect timeout (~75s).
+    // Give generous headroom for CI jitter / unreachable-error paths.
+    expect(elapsed).toBeLessThan(2000);
+  });
+
+  it('emits debug events for connect start and success', async () => {
+    const debugMessages: string[] = [];
+    const client = new Client({
+      host: '127.0.0.1', port: serverPort,
+      onDebug: msg => debugMessages.push(msg),
+    });
+    await client.connect();
+
+    expect(debugMessages.some(m => m.includes('connecting to 127.0.0.1'))).toBe(true);
+    expect(debugMessages.some(m => m.includes('connected'))).toBe(true);
 
     await client.close();
   });
