@@ -1,6 +1,6 @@
 {
   "name": "givenergy-modbus",
-  "version": "2.0.2",
+  "version": "3.0.0",
   "description": "Native Node.js client for GivEnergy inverters over their proprietary Modbus TCP protocol",
   "repository": "github:jak/givenergy-modbus",
   "type": "module",
