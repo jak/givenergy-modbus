@@ -142,6 +142,34 @@ describe('Client', () => {
     await client.close();
   });
 
+  it('drops the socket reference when the transport closes, so sendRequest fast-fails', async () => {
+    // When the inverter reboots or the network drops, the socket closes. The client must
+    // null its socket reference so subsequent reads fast-fail with 'not connected' — this
+    // is what lets the PollManager detect a dead transport and trigger reconnect, instead
+    // of silently writing into a dead socket and waiting out every timeout.
+    const client = new Client({ host: '127.0.0.1', port: serverPort });
+    await client.connect();
+    const serverSocket = await waitForServerSocket(serverSockets, 1000);
+
+    expect((client as any).socket).not.toBeNull();
+
+    // Simulate the inverter dropping the connection.
+    serverSocket.destroy();
+
+    // Wait for the client's 'close' handler to run.
+    const deadline = Date.now() + 1000;
+    while ((client as any).socket !== null && Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, 10));
+    }
+    expect((client as any).socket).toBeNull();
+
+    await expect(
+      client.sendRequest(fakeReadRequest(0x31, 0, 60))
+    ).rejects.toThrow('not connected');
+
+    await client.close();
+  });
+
   it('does not crash when server sends a short frame that decodePdu cannot parse', async () => {
     // A malicious or buggy device could send a frame with valid MBAP header but
     // a body too short for decodePdu (which reads fixed offsets up to byte 41).

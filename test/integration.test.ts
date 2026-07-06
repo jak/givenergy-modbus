@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { createServer, type Server, type Socket } from 'net';
 import { Framer } from '../src/framer.js';
 import { decodePdu } from '../src/pdu/decode.js';
@@ -11,6 +11,9 @@ interface MockInverterState {
   port: number;
   lastWrittenRegister: number | null;
   lastWrittenValue: number | null;
+  sockets: Socket[];
+  /** Simulate a transport drop (inverter reboot / WiFi blip) without closing the server. */
+  dropConnections(): void;
   close(): Promise<void>;
 }
 
@@ -179,13 +182,21 @@ async function startMockInverter(): Promise<MockInverterState> {
     port: 0,
     lastWrittenRegister: null,
     lastWrittenValue: null,
+    sockets: [],
+    dropConnections: () => {
+      state.sockets.forEach(s => s.destroy());
+      state.sockets = [];
+    },
     close: async () => {
+      state.sockets.forEach(s => s.destroy());
+      state.sockets = [];
       await new Promise<void>(resolve => state.server.close(() => resolve()));
     },
   };
 
   await new Promise<void>(resolve => {
     state.server = createServer((socket: Socket) => {
+      state.sockets.push(socket);
       const framer = new Framer();
       socket.on('data', (data: Buffer) => {
         const results = framer.decode(data);
@@ -336,4 +347,66 @@ describe('Integration: GivEnergyInverter with mock inverter', () => {
       await mock.close();
     }
   }, 30000);
+
+  it('recovers after the inverter reboots: transport drop → lost → reconnect → data resumes', async () => {
+    // End-to-end proof of the freeze fix. Before the fix, a dropped transport left a
+    // stale-but-buildable snapshot, so _failCount never climbed, 'lost' never fired, and
+    // readings froze. Now a dead-transport cycle is counted as a failed poll, the reconnect
+    // loop runs, and the inverter recovers once it is reachable again.
+    let GivEnergyInverter: any;
+    try {
+      const mod = await import('../src/inverter.js');
+      GivEnergyInverter = mod.GivEnergyInverter;
+    } catch {
+      console.log('Skipping: src/inverter.ts not yet implemented');
+      return;
+    }
+
+    const mock = await startMockInverter();
+    const inv = await GivEnergyInverter.connect({
+      host: '127.0.0.1',
+      port: mock.port,
+      pollIntervalMs: 100,
+      reconnectBackoffMs: 50,
+      reconnectMaxBackoffMs: 50,
+    });
+
+    const events = { lost: 0, reconnecting: 0, reconnected: 0 };
+    inv.on('lost', () => { events.lost++; });
+    inv.on('reconnecting', () => { events.reconnecting++; });
+    inv.on('reconnected', () => { events.reconnected++; });
+
+    // Pin _failCount just below the threshold until 'lost' fires, so the test hits the
+    // failure threshold in one dead poll instead of waiting for ten (~40s of soak delays).
+    const pm = (inv as any).pollManager;
+    const pin = setInterval(() => {
+      if (events.lost === 0 && !pm._reconnecting) pm._failCount = 9;
+    }, 20);
+
+    try {
+      // Baseline: live data.
+      expect(inv.getData().serialNumber).toBe('SA1234B567');
+
+      // Inverter reboots — the TCP connection drops. The server stays listening so the
+      // reconnect can succeed once the client detects the dead transport and retries.
+      mock.dropConnections();
+
+      await vi.waitFor(() => {
+        expect(events.lost).toBeGreaterThanOrEqual(1);
+        expect(events.reconnecting).toBeGreaterThanOrEqual(1);
+      }, { timeout: 20000, interval: 50 });
+      clearInterval(pin);
+
+      // The reconnect loop should re-establish the connection and resume polling.
+      await vi.waitFor(() => {
+        expect(events.reconnected).toBeGreaterThanOrEqual(1);
+      }, { timeout: 20000, interval: 50 });
+
+      expect(inv.getData().serialNumber).toBe('SA1234B567');
+    } finally {
+      clearInterval(pin);
+      await inv.stop();
+      await mock.close();
+    }
+  }, 60000);
 });

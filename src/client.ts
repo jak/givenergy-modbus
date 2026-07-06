@@ -74,8 +74,20 @@ export class Client {
         this.onDebug(`connected to ${this.host}:${this.port}`);
         this.socket = socket;
         socket.on('data', (data: Buffer) => this._onData(data));
-        socket.on('close', () => this._failAllPending(new Error('connection closed')));
-        socket.on('error', (err) => this._failAllPending(err));
+        // On transport death, fail pending requests AND drop the socket reference so
+        // subsequent sendRequest() calls fast-fail with 'not connected' instead of
+        // writing into a dead socket and waiting out full timeouts. This is what lets
+        // the PollManager detect the drop and trigger its reconnect loop.
+        // Guard with `this.socket === socket` so a late close from a stale socket can't
+        // null out a freshly reconnected one.
+        socket.on('close', () => {
+          this._failAllPending(new Error('connection closed'));
+          if (this.socket === socket) this.socket = null;
+        });
+        socket.on('error', (err) => {
+          this._failAllPending(err);
+          if (this.socket === socket) this.socket = null;
+        });
         resolve();
       });
       socket.once('error', onError);
@@ -98,6 +110,9 @@ export class Client {
 
     let lastError: Error = new Error('timeout');
     for (let attempt = 0; attempt <= this.retries; attempt++) {
+      // Re-check on every attempt: the socket can die mid-cycle (a 'close'/'error'
+      // handler nulls it), and there's no point retrying writes into a dead socket.
+      if (!this.socket) throw new Error('not connected');
       if (attempt > 0) {
         this.onDebug(`retry ${attempt}/${this.retries} for ${key}`);
         await new Promise(r => setTimeout(r, 500)); // inter-retry delay
