@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.0.2](https://github.com/jak/givenergy-modbus/compare/givenergy-modbus-v2.0.1...givenergy-modbus-v2.0.2) (2026-07-06)
+
+
+### Bug Fixes
+
+* detect dead transport so a rebooted inverter reconnects instead of freezing ([#38](https://github.com/jak/givenergy-modbus/issues/38)) ([cc89e9c](https://github.com/jak/givenergy-modbus/commit/cc89e9cef5ef1679a16691e9ee8b6e57c6b33720))
+
 ## [2.0.1](https://github.com/jak/givenergy-modbus/compare/givenergy-modbus-v2.0.0...givenergy-modbus-v2.0.1) (2026-04-12)
 
 
