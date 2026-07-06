@@ -1,5 +1,16 @@
 # Changelog
 
+## [3.0.0](https://github.com/jak/givenergy-modbus/compare/givenergy-modbus-v2.0.2...givenergy-modbus-v3.0.0) (2026-07-06)
+
+
+### ⚠ BREAKING CHANGES
+
+* drop EOL Node 20, add Node 26 ([#40](https://github.com/jak/givenergy-modbus/issues/40))
+
+### ci
+
+* drop EOL Node 20, add Node 26 ([#40](https://github.com/jak/givenergy-modbus/issues/40)) ([41fe60d](https://github.com/jak/givenergy-modbus/commit/41fe60da3eed54158fada57186b59039bd5fc89f))
+
 ## [2.0.2](https://github.com/jak/givenergy-modbus/compare/givenergy-modbus-v2.0.1...givenergy-modbus-v2.0.2) (2026-07-06)
 
 
