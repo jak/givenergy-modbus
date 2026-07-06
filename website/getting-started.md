@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- **Node.js 20+**
+- **Node.js 22+**
 - GivEnergy inverter on your local network (port 8899)
 - No other clients connected to port 8899 (e.g. GivTCP) — the data adapter doesn't reliably handle multiple concurrent connections
 
