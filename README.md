@@ -25,7 +25,7 @@ This library communicates **directly with the inverter over your local network**
 npm install givenergy-modbus
 ```
 
-Requires **Node.js 20+**. TypeScript is optional — full type definitions are included.
+Requires **Node.js 22+**. TypeScript is optional — full type definitions are included.
 
 ## Identify an inverter
 
