@@ -28,7 +28,7 @@ features:
 npm install givenergy-modbus
 ```
 
-Requires Node.js 20+. TypeScript types included.
+Requires Node.js 22+. TypeScript types included.
 
 ## Quick Example
 
