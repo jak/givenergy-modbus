@@ -85,6 +85,11 @@ export class PollManager extends EventEmitter {
   private _generation: InverterGeneration | null = null;
   private _reconnecting = false;
   private _reconnectAbort = false;
+  // Set by the onRegisterData push callback whenever the inverter sends register data
+  // during a poll cycle. Reset at the start of each cycle. A cycle is only "dead" if
+  // BOTH the matched sendRequest responses AND the push callback produced nothing —
+  // see the liveness check in _executePoll.
+  private _pushDataReceivedThisCycle = false;
   private _deviceType: DeviceType | null = null;
   private _bcuList: Array<{ bcuIndex: number; moduleCount: number }> = [];
 
@@ -122,6 +127,9 @@ export class PollManager extends EventEmitter {
         if (slave === INVERTER_SLAVE) {
           const cache = fc === 4 ? this._inputRegisters : this._holdingRegisters;
           values.forEach((v, i) => cache.set(base + i, v));
+          // Push data is proof the inverter is alive even when the matched sendRequest
+          // responses time out — count it toward this cycle's liveness.
+          this._pushDataReceivedThisCycle = true;
           this.emit('debug', `accumulated push data: slave=0x${slave.toString(16)} fc=${fc} base=${base} count=${values.length}`);
         }
       },
@@ -282,6 +290,7 @@ export class PollManager extends EventEmitter {
   private async _executePoll(fullRefresh = false): Promise<void> {
     if (this._polling) return;
     this._polling = true;
+    this._pushDataReceivedThisCycle = false;
     const now = Date.now();
     const doFull = fullRefresh || (now - this._lastFullRefresh >= this.options.fullRefreshIntervalMs);
 
@@ -295,6 +304,10 @@ export class PollManager extends EventEmitter {
       // the transport is dead — but a stale snapshot is still buildable from the cached
       // registers, so without this signal _failCount would keep resetting to 0 and the
       // reconnect loop would never fire. See _handlePollResult below.
+      //
+      // A matched sendRequest response is one liveness signal; unsolicited push data via
+      // onRegisterData (tracked in _pushDataReceivedThisCycle) is another. Either proves
+      // the inverter is alive, so both must be exhausted before we declare the cycle dead.
       let liveResponses = 0;
 
       for (const { base, count } of INPUT_REGISTER_RANGES) {
@@ -411,10 +424,13 @@ export class PollManager extends EventEmitter {
         bcuList: this._bcuList,
       });
 
-      // A cycle where the inverter answered nothing means the transport is dead, even
-      // though buildSnapshot() can still assemble a stale snapshot from cached registers.
-      // Count it as a failed poll so _failCount climbs toward the reconnect threshold.
-      if (liveResponses === 0) {
+      // A cycle where the inverter answered nothing — no matched response AND no push
+      // data — means the transport is dead, even though buildSnapshot() can still
+      // assemble a stale snapshot from cached registers. Count it as a failed poll so
+      // _failCount climbs toward the reconnect threshold. If push data arrived while the
+      // explicit reads timed out, the inverter is alive (push mode), so this stays a
+      // successful poll and the fresh snapshot is emitted.
+      if (liveResponses === 0 && !this._pushDataReceivedThisCycle) {
         this.emit('debug', 'no live response from inverter this cycle — treating poll as failed');
         this._handlePollResult(null, new Error('no response from inverter'));
         return;

@@ -185,6 +185,44 @@ describe('PollManager', () => {
     expect((pm as any)._failCount).toBe(1);
   });
 
+  it('treats a cycle as live when push data arrives even though every matched read times out', async () => {
+    // Push-mode liveness: the inverter is alive and streaming register data via the
+    // onRegisterData callback, but the explicit sendRequest reads time out (the push
+    // frames don't match the pending requests). Every _readRange returns false, so
+    // liveResponses stays 0 — but push data proves the transport is alive, so this must
+    // remain a SUCCESSFUL poll. Otherwise a healthy push-mode inverter would be wrongly
+    // declared lost and needlessly reconnected.
+    const pm = new PollManager({ host: '127.0.0.1', pollIntervalMs: 100 });
+    (pm as any)._started = true;
+    (pm as any)._cache = mockSnapshot;
+    (pm as any)._previousSnapshot = mockSnapshot;
+    (pm as any)._generation = 'gen3';
+    (pm as any)._failCount = 3;
+    (pm as any)._lastFullRefresh = Date.now(); // skip the full battery/meter scan
+    (pm as any)._delay = () => Promise.resolve(); // no real waits
+
+    // Every matched read times out...
+    (pm as any).client = {
+      dataAdapterSerial: 'CE1234G567',
+      sendRequest: vi.fn().mockRejectedValue(new Error('request timeout')),
+    };
+    // ...but the inverter is pushing data: simulate the onRegisterData callback firing.
+    (pm as any)._pushDataReceivedThisCycle = false;
+    const originalReadRange = (pm as any)._readRange.bind(pm);
+    (pm as any)._readRange = async (...args: unknown[]) => {
+      (pm as any)._pushDataReceivedThisCycle = true; // push frame accumulated mid-cycle
+      return originalReadRange(...args);
+    };
+
+    const dataEvents: InverterSnapshot[] = [];
+    pm.on('data', (s: InverterSnapshot) => dataEvents.push(s));
+
+    await (pm as any)._executePoll(false);
+
+    expect(dataEvents).toHaveLength(1);      // fresh snapshot emitted
+    expect((pm as any)._failCount).toBe(0);  // liveness reset the failure count
+  });
+
   it('stores device type after first successful poll for HV detection', () => {
     const pm = new PollManager({ host: '127.0.0.1' });
     expect((pm as any)._deviceType).toBeNull();
