@@ -2,6 +2,14 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { PollManager } from '../src/poll-manager.js';
 import type { InverterSnapshot } from '../src/model/inverter-snapshot.js';
 
+// Force buildSnapshot to always yield a (stale) snapshot. This lets the dead-transport
+// test below prove that a cycle with zero live responses is treated as a FAILED poll even
+// when a snapshot is buildable from cached registers. No other test drives the real
+// buildSnapshot through _executePoll, so mocking it here is safe.
+vi.mock('../src/snapshot-builder.js', () => ({
+  buildSnapshot: vi.fn(() => ({ generation: 'gen3', serialNumber: 'EE1234B567' })),
+}));
+
 // Minimal mock snapshot
 const mockSnapshot: InverterSnapshot = {
   generation: 'gen3',
@@ -145,6 +153,36 @@ describe('PollManager', () => {
     (pm as any)._failCount = 9;
     (pm as any)._handlePollResult(null, new Error('connection lost'));
     expect(lostEvents).toHaveLength(1);
+  });
+
+  it('counts a dead-transport cycle as a failed poll even when a stale snapshot is available', async () => {
+    // Regression: when the inverter reboots / network drops, every register read fails but
+    // buildSnapshot() can still assemble a stale snapshot from the cached registers. The
+    // old code emitted that stale snapshot and reset _failCount to 0, so the reconnect
+    // loop never fired and readings froze forever. A cycle with no live response must now
+    // NOT emit data and must count as a failure so _failCount climbs to the threshold.
+    const pm = new PollManager({ host: '127.0.0.1', pollIntervalMs: 100 });
+    (pm as any)._started = true;
+    (pm as any)._cache = mockSnapshot;
+    (pm as any)._previousSnapshot = mockSnapshot;
+    (pm as any)._generation = 'gen3';
+    (pm as any)._failCount = 0;
+    (pm as any)._lastFullRefresh = Date.now(); // skip the full battery/meter scan
+    (pm as any)._delay = () => Promise.resolve(); // no real waits
+
+    // Dead transport: every read rejects.
+    (pm as any).client = {
+      dataAdapterSerial: 'CE1234G567',
+      sendRequest: vi.fn().mockRejectedValue(new Error('not connected')),
+    };
+
+    const dataEvents: InverterSnapshot[] = [];
+    pm.on('data', (s: InverterSnapshot) => dataEvents.push(s));
+
+    await (pm as any)._executePoll(false);
+
+    expect(dataEvents).toHaveLength(0);
+    expect((pm as any)._failCount).toBe(1);
   });
 
   it('stores device type after first successful poll for HV detection', () => {

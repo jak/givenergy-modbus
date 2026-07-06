@@ -156,15 +156,17 @@ export class PollManager extends EventEmitter {
   }
 
   /**
-   * Read a single register range. Sends the request and waits for a matched
-   * response. Even if the explicit response times out, the onRegisterData
-   * callback may have already populated the cache from push data.
+   * Read a single register range. Returns true if the inverter sent a live matched
+   * response, false if the request failed. A failure is NOT fatal on its own — push
+   * data via onRegisterData may have already filled the cache — but the caller uses
+   * the return value to tell a live connection (some response arrived) apart from a
+   * dead one (every read failed), which is what drives reconnect detection.
    */
   private async _readRange(
     type: 'input' | 'holding',
     base: number,
     count: number,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const encode = type === 'input' ? encodeReadInputRegistersRequest : encodeReadHoldingRegistersRequest;
     const label = type === 'input' ? 'input' : 'holding';
     this.emit('debug', `reading ${label} registers (slave=0x${INVERTER_SLAVE.toString(16)}, base=${base}, count=${count})`);
@@ -177,11 +179,13 @@ export class PollManager extends EventEmitter {
     try {
       const values = await this.client.sendRequest(frame);
       this.emit('debug', `${label} registers [${base}..${base + values.length - 1}] ok`);
+      return true;
     } catch (err) {
       // Not fatal — push data via onRegisterData may have already filled the cache.
       // Log the failure and continue.
       const msg = err instanceof Error ? err.message : String(err);
       this.emit('debug', `${label} registers [${base}..${base + count - 1}] request failed: ${msg} (push data may have filled cache)`);
+      return false;
     }
   }
 
@@ -287,14 +291,20 @@ export class PollManager extends EventEmitter {
       // independently retries on timeout. Even if some requests fail, the
       // onRegisterData callback accumulates all push data unconditionally.
 
+      // Track whether the inverter answered any read this cycle. If every read fails
+      // the transport is dead — but a stale snapshot is still buildable from the cached
+      // registers, so without this signal _failCount would keep resetting to 0 and the
+      // reconnect loop would never fire. See _handlePollResult below.
+      let liveResponses = 0;
+
       for (const { base, count } of INPUT_REGISTER_RANGES) {
-        await this._readRange('input', base, count);
+        if (await this._readRange('input', base, count)) liveResponses++;
         await this._delay(INTER_READ_DELAY_MS);
       }
 
       const holdingRanges = this._holdingRanges(doFull);
       for (const { base, count } of holdingRanges) {
-        await this._readRange('holding', base, count);
+        if (await this._readRange('holding', base, count)) liveResponses++;
         await this._delay(INTER_READ_DELAY_MS);
       }
 
@@ -400,6 +410,15 @@ export class PollManager extends EventEmitter {
         isHighVoltage: this._deviceType !== null && isHighVoltage(this._deviceType),
         bcuList: this._bcuList,
       });
+
+      // A cycle where the inverter answered nothing means the transport is dead, even
+      // though buildSnapshot() can still assemble a stale snapshot from cached registers.
+      // Count it as a failed poll so _failCount climbs toward the reconnect threshold.
+      if (liveResponses === 0) {
+        this.emit('debug', 'no live response from inverter this cycle — treating poll as failed');
+        this._handlePollResult(null, new Error('no response from inverter'));
+        return;
+      }
 
       if (this._generation === null && snapshot !== null) {
         this._generation = snapshot.generation;
