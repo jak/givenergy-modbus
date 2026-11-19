@@ -22,7 +22,9 @@ if (!host) {
   console.log(`Using ${host}`);
 }
 
-// GivTCP holding register map (from givenergy_modbus_async/model/baseinverter.py)
+// Holding register names. Based on GivTCP's map (givenergy_modbus_async/model/baseinverter.py),
+// corrected where the official GivEnergy app's Direct Control screen disagrees. Quoted names
+// are the app's labels; see website/register-map.md for the cross-check against a Gen3 Hybrid.
 const REGISTER_NAMES = {
   0: 'device_type_code',
   3: 'num_mppt',
@@ -31,7 +33,7 @@ const REGISTER_NAMES = {
   13: 'serial_number [13-17]',
   18: 'first_battery_bms_firmware_version',
   19: 'dsp_firmware_version',
-  20: 'enable_charge_target (winter mode)',
+  20: 'enable_ac_charge_upper_limit "Enable AC Charge Upper % Limit", gates HR 116 (GivTCP: enable_charge_target / winter mode)',
   21: 'arm_firmware_version',
   22: 'usb_device_inserted',
   23: 'select_arm_chip',
@@ -40,7 +42,7 @@ const REGISTER_NAMES = {
   26: 'grid_port_max_power_output',
   27: 'eco_mode',
   28: 'enable_60hz_freq_mode',
-  29: 'soc_force_adjust',
+  29: 'battery_calibration "Battery Calibration" (0=stop; GivTCP: soc_force_adjust)',
   30: 'modbus_address',
   31: 'charge_slot_2_start',
   32: 'charge_slot_2_end',
@@ -79,6 +81,7 @@ const REGISTER_NAMES = {
   96: 'enable_charge',
   97: 'battery_low_voltage_protection_limit (centi)',
   98: 'battery_high_voltage_protection_limit (centi)',
+  104: 'enable_battery_self_heating "Enable Battery Self-Heating"',
   105: 'battery_voltage_adjust (centi)',
   108: 'battery_low_force_charge_time',
   109: 'enable_bms_read',
@@ -86,8 +89,8 @@ const REGISTER_NAMES = {
   111: 'battery_charge_limit',
   112: 'battery_discharge_limit',
   113: 'enable_buzzer',
-  114: 'battery_discharge_min_power_reserve',
-  116: 'charge_target_soc',
+  114: 'battery_cutoff_soc "Battery Cutoff % Limit" (percent; GivTCP: battery_discharge_min_power_reserve)',
+  116: 'ac_charge_upper_soc "AC Charge Upper % Limit" (percent, enabled by HR 20; GivTCP: charge_target_soc)',
   117: 'charge_soc_stop_2',
   118: 'discharge_soc_stop_2',
   119: 'charge_soc_stop_1',
@@ -101,15 +104,16 @@ const REGISTER_NAMES = {
   127: 'start_system_auto_test',
   128: 'enable_spi',
   163: 'inverter_reboot',
-  166: 'rtc_enable',
+  166: 'enable_real_time_control "Real-Time Control" (GivTCP: rtc_enable)',
   167: 'threephase_balance_mode',
+  172: 'enable_manual_battery_heater "Enable Manual Battery Heater"',
   175: 'enable_battery_on_pv_or_grid',
   176: 'debug_inverter',
   177: 'enable_ups_mode',
   178: 'enable_g100_limit_switch',
   179: 'enable_battery_cable_impedance_alarm',
   180: 'e_battery_discharge_total_2 (deci)',
-  199: 'enable_standard_self_consumption_logic',
+  199: 'enable_inverter_parallel_mode "Enable Inverter Parallel Mode", for All in One units in parallel with a Gateway (GivTCP mislabels as enable_standard_self_consumption_logic)',
   // Extended timeslots (Gen 3+)
   242: 'charge_target_soc_1 (gen3)',
   243: 'charge_slot_2_start (gen3)',
@@ -139,9 +143,11 @@ const REGISTER_NAMES = {
   267: 'charge_slot_10_start',
   268: 'charge_slot_10_end',
   269: 'charge_target_soc_10',
-  272: 'discharge_slot_1_start (gen3)',
-  273: 'discharge_slot_1_end (gen3)',
-  274: 'discharge_target_soc_1',
+  // Discharge slots 1 and 2 keep their legacy time registers (56/57, 44/45) but take
+  // their SOC limits from this block. 273 and 274 are not exposed by the official app.
+  272: 'discharge_target_soc_1',
+  273: 'unknown (not exposed by official app)',
+  274: 'unknown (not exposed by official app)',
   275: 'discharge_target_soc_2',
   276: 'discharge_slot_3_start',
   277: 'discharge_slot_3_end',
@@ -167,11 +173,32 @@ const REGISTER_NAMES = {
   297: 'discharge_slot_10_start',
   298: 'discharge_slot_10_end',
   299: 'discharge_target_soc_10',
-  313: 'battery_charge_limit_ac',
-  314: 'battery_discharge_limit_ac',
+  311: 'export_power_priority "Export Power Priority" (value meaning unknown)',
+  313: 'inverter_charge_power_percentage "Inverter Charge Power Percentage" (GivTCP: battery_charge_limit_ac)',
+  314: 'inverter_discharge_power_percentage "Inverter Discharge Power Percentage" (GivTCP: battery_discharge_limit_ac)',
+  317: 'enable_eps "Enable EPS"',
   318: 'battery_pause_mode (0=off,1=pause_charge,2=pause_discharge,3=both)',
-  319: 'timed_discharge_slot_start',
-  320: 'timed_discharge_slot_end',
+  319: 'battery_pause_slot_start "Pause Battery Start Time"',
+  320: 'battery_pause_slot_end "Pause Battery End Time"',
+  331: 'enable_force_off_grid "Force Off Grid"',
+  479: 'dc_wind_cvt_voltage "DC Wind CVT Voltage"',
+  // Smart Load / Generator (HR 540-573). Shown by the app but not implemented on Gen3:
+  // reads of this block time out. Probably for newer models.
+  540: 'enable_smart_load "Enable Smart Load"',
+  541: 'smart_load_control_soc "Smart Load Control SOC"',
+  542: 'enable_general_load "Enable General Load"',
+  543: 'general_load_control_soc "General Load Control SOC"',
+  544: 'generator_control_soc "Generator Control SOC"',
+  545: 'generator_voltage_min "Generator Voltage Min"',
+  546: 'generator_voltage_max "Generator Voltage Max"',
+  547: 'generator_frequency_min "Generator Frequency Min"',
+  548: 'generator_frequency_max "Generator Frequency Max"',
+  552: 'smart_load_export_power "Smart Load Export Power"',
+  553: 'smart_load_delay_time "Smart Load Delay Time"',
+  ...Object.fromEntries(Array.from({ length: 10 }, (_, i) => [
+    [554 + 2 * i, `smart_load_slot_${i + 1}_start "Smart Load Start Time ${i + 1}"`],
+    [555 + 2 * i, `smart_load_slot_${i + 1}_end "Smart Load End Time ${i + 1}"`],
+  ]).flat()),
 };
 
 function formatTime(val) {
@@ -208,14 +235,16 @@ if (!hrCache) {
   process.exit(1);
 }
 
-// Read extended register blocks (240-299, 300-359) that the poll manager doesn't read
+// Read holding register blocks the poll manager doesn't read (HR 120-179 and 240-599).
+// Blocks an inverter doesn't implement (e.g. HR 540-599 on Gen3) time out; that is
+// reported as unsupported rather than treated as a failure.
 // We need to trigger reads for these ranges
 const { encodeReadHoldingRegistersRequest, encodeReadInputRegistersRequest, encodeReadMeterProductRegistersRequest } = await import('../dist/pdu/encode.js');
 const client = pm.client ?? pm._client;
 const serial = client?.dataAdapterSerial ?? '**********';
 
 try {
-  for (const base of [240, 300, 360, 420, 480]) {
+  for (const base of [120, 240, 300, 360, 420, 480, 540]) {
     console.log(`Reading extended HR block ${base}-${base + 59}...`);
     const frame = encodeReadHoldingRegistersRequest({
       dataAdapterSerial: serial,
@@ -227,7 +256,14 @@ try {
       const values = await client.sendRequest(frame);
       values.forEach((v, i) => hrCache.set(base + i, v));
     } catch (e) {
-      console.log(`  (block ${base} not available: ${e.message})`);
+      // Pushed frames land in hrCache too, so a timed-out block may already be filled.
+      const pushed = Array.from({ length: 60 }, (_, i) => hrCache.has(base + i)).every(Boolean);
+      if (pushed) {
+        console.log(`  (block ${base}-${base + 59} read timed out, but push data filled it)`);
+      } else {
+        const reason = /timeout/i.test(e.message) ? 'unsupported on this inverter (read timed out)' : e.message;
+        console.log(`  (block ${base}-${base + 59} not available: ${reason})`);
+      }
     }
   }
 } catch (e) {
@@ -353,14 +389,14 @@ const IR_NAMES = {
   24: 'p_inverter_out (signed)',
   25: 'e_grid_out_day (deci)',
   26: 'e_grid_in_day (deci)',
-  27: 'e_inverter_in_total_h',
-  28: 'e_inverter_in_total_l',
+  27: 'e_inverter_in_total_h "AC charge" total (IR 27:28)',
+  28: 'e_inverter_in_total_l "AC charge" total (IR 27:28)',
   29: 'e_discharge_year',
   30: 'p_grid_out (signed)',
   31: 'p_eps_backup',
   32: 'e_grid_in_total_h',
   33: 'e_grid_in_total_l',
-  35: 'e_inverter_in_day (deci)',
+  35: 'e_inverter_in_day (deci) "AC charge" today',
   36: 'e_battery_charge_today (deci)',
   37: 'e_battery_discharge_today (deci)',
   38: 'inverter_countdown',

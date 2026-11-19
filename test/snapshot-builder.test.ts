@@ -237,16 +237,17 @@ describe('SnapshotBuilder', () => {
 
     it('detects gen3 from registers even with unknown serial prefix', () => {
       // FD prefix is not in the serial prefix map, but HR(0)/HR(21) correctly identify gen3.
-      // This was a real bug: FD2308F729 was misdetected as gen2.
+      // This was a real bug: a real FD-prefixed Gen3 serial was misdetected as gen2.
+      // The serial below is made up; only the FD prefix matters.
       const cache = makeValidCache();
-      const serial = 'FD2308F729';
+      const serial = 'FD0000A000';
       for (let i = 0; i < 5; i++) {
         cache.holdingRegisters.set(13 + i, (serial.charCodeAt(i * 2) << 8) | serial.charCodeAt(i * 2 + 1));
       }
       cache.holdingRegisters.set(0, 0x2001);
       cache.holdingRegisters.set(21, 300);
       const snapshot = buildSnapshot(cache);
-      expect(snapshot!.serialNumber).toBe('FD2308F729');
+      expect(snapshot!.serialNumber).toBe('FD0000A000');
       expect(snapshot!.generation).toBe('gen3');
     });
 
