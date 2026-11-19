@@ -5,7 +5,7 @@ cross-checked against a live Modbus dump of the same inverter.
 
 | | |
 |---|---|
-| Inverter | Gen3 Hybrid 5 kW, serial `FD2308F***`, app model label "GEN1/2/3 5KW" |
+| Inverter | Gen3 Hybrid 5 kW, serial redacted, app model label "GEN1/2/3 5KW" |
 | Firmware | DSP 316, ARM 316 (HR 19 / HR 21), Modbus version 140 (HR 34) |
 | Battery | Lithium (HR 54 = 1), capacity 186 Ah (HR 55), BMS firmware 4009 (HR 18) |
 | Meter | One GivEnergy meter on slave `0x01` (meter type 33, fw 518) |
@@ -140,7 +140,7 @@ reading (22:22:30) against the dump (22:25:47). Input registers are fc=4, slave 
 
 | App name | App value | Source | Scale | Dump value | Match |
 |---|---|---|---|---|:-:|
-| Inverter serial | FD2308F*** | HR 13–17 (ASCII, 2 chars/register) | — | FD2308F*** | ✅ |
+| Inverter serial | (redacted) | HR 13–17 (ASCII, 2 chars/register) | — | (redacted) | ✅ |
 | Model | GEN1/2/3 5KW | HR 0 device type `0x2001` | — | 0x2001 | 🔶 2001 → 5 kW hybrid (as in GivTCP) |
 | Solar generation | 0 W | IR 18 + IR 20 (`p_pv1 + p_pv2`) | 1 W | 0 + 0 | ✅ 🔶 |
 | Grid power (net) | −375 W, importing | IR 30 `p_grid_out` | int16 W, negative = import | −367 | ≈ |
