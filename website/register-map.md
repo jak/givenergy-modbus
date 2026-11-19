@@ -47,7 +47,7 @@ Times are encoded as `HHMM` decimal (e.g. `2330` = 23:30).
 | HR | App name | Type / range | App value | Raw | Match | Notes |
 |---:|---|---|---|---:|:-:|---|
 | 50 | Inverter Max Output Active Power Percent | 0–100 % | 100 % | 100 | ✅ | GivTCP: `active_power_rate`. |
-| 199 | Enable Inverter Parallel Mode | toggle | off | 0 | ✅ | **GivTCP labels this `enable_standard_self_consumption_logic`; the official app says parallel mode.** |
+| 199 | Enable Inverter Parallel Mode | toggle | off | 0 | ✅ | **GivTCP labels this `enable_standard_self_consumption_logic`; the official app says parallel mode**, for All in One units running in parallel with a Gateway. |
 | 311 | Export Power Priority | number | 0 | 0 | ✅ | Not in GivTCP map. Value semantics unknown. |
 | 317 | Enable EPS | toggle | on | 1 | ✅ | Not in GivTCP map. |
 | 479 | DC Wind CVT Voltage | number | 0 | 0 | ✅ | Not in GivTCP map. |
@@ -165,7 +165,10 @@ reading (22:22:30) against the dump (22:25:47). Input registers are fc=4, slave 
 | Grid voltage L1 | 239.0 V | IR 5 (meter IR 60 = 239.3) | ÷10 | 239.6 | ≈ |
 | PV string 1 voltage | 12.4 V | IR 1 `v_pv1` | ÷10 | 12.3 | ≈ |
 | PV string 2 voltage | 10.3 V | IR 2 `v_pv2` | ÷10 | 10.2 | ≈ |
-| Battery voltage | (cut off in screenshot) | IR 50 `v_battery` | ÷100 | 50.65 V | — |
+| Battery voltage | 50.6 V | IR 50 `v_battery` | ÷100 | 50.64 | ✅ |
+| Inverter temperature | 28.9 °C | IR 41 `temp_inverter_heatsink` | ÷10 | 28.9 | ✅ |
+| Battery temperature | 19.0 °C | IR 56 `temp_battery` | ÷10 | 19.0 | ✅ |
+| Charger temperature | 28.3 °C | IR 55 `temp_charger` | ÷10 | 27.8 | ≈ |
 
 Takeaways:
 - "AC charge" in the app is GivTCP's `e_inverter_in_*` (IR 35 today, IR 27:28 total).
@@ -173,7 +176,7 @@ Takeaways:
   `grid import − grid export + inverter out (IR 44 / IR 45:46) − AC charge (IR 35 / IR 27:28)`.
   The totals match exactly. The "today" value is 0.01 kWh off, which suggests the app keeps its own
   finer-grained running value.
-- The Read Only tab goes on below "Battery voltage", and those entries aren't covered here.
+- The temperature values are from the full scan at 22:28, a few minutes after the app screenshots.
 
 ---
 
@@ -198,9 +201,11 @@ tagged with how strong its source is:
 
 - **[manual]**: GivEnergy's own documentation
 - **[library]**: another open-source integration's documentation
-- **[forum]**: a GivEnergy Community Forum thread, seen only as a search excerpt and not read in full
+- **[maintainer]**: knowledge from this project's maintainer, not yet backed by a written source
+- **[forum]**: a post on the GivEnergy Community Forum, read from a Wayback Machine snapshot
+  (the forum is no longer reachable). Unless noted, posters are ordinary users.
 
-Claims marked [forum] are leads, not facts.
+Claims marked [forum] are reports from individual owners, not confirmed behaviour.
 
 ### Battery Reserve vs Battery Cutoff (HR 110 / HR 114)
 
@@ -208,9 +213,12 @@ Claims marked [forum] are leads, not facts.
   *"sets the minimum allowable battery SOC during battery discharge"*, and says of Battery Reserve %
   (HR 110): *"Despite the name, this does not set a minimum SOC under normal conditions"*, noting a
   GivEnergy document suggests it only matters for systems with EPS configured.<sup>[3]</sup>
-- **[forum]** A user reports the battery stopping at the cutoff (15 %) rather than the lower
-  reserve (10 %), and that advice in GivEnergy's portal forum was that the cutoff protects the battery
-  and should be set low, e.g. 4 %.<sup>[5]</sup>
+- **[forum]** An All in One owner with Reserve 10 % and Cutoff 15 % found the battery *"will not drop
+  below 15%"*, so the higher of the two stopped discharge. They passed on advice that *"the Cutoff is to
+  protect the battery and should be set lower e.g. 4%. The Reserve is your buffer for power outages."*
+  Two other owners report both set to 4 %, as on the reference unit.<sup>[5]</sup>
+- **[forum]** Another owner warns that discharge slots' lower SOC limits can act as *"an unofficial
+  reserve"* if they are set above 4 %.<sup>[7]</sup>
 
 On the reference unit both are 4 %, so the dump can't tell them apart.
 
@@ -239,21 +247,28 @@ On the reference unit both are 4 %, so the dump can't tell them apart.
 
 ### Inverter Charge/Discharge Power Percentage (HR 313 / HR 314)
 
-- **[forum]** A user says the percentage setting only affects AC (grid) charging, but says it was
-  "from memory". The same thread says "Inverter Max Output Active Power Percent" (HR 50) limits the
-  whole inverter's output, including what it supplies to the house.<sup>[6]</sup>
+- **[forum]** The owner of a Gen3 5 kW Hybrid, the same model as the reference unit, set GivTCP's
+  "Battery charge rate AC" (HR 313, this app's "Inverter Charge Power Percentage") to 60 %. Grid charging
+  then ran at about 2 kW, roughly 60 % of 3.6 kW, while solar charging later reached 3 kW. That fits
+  another reply's recollection that the percentage setting *"only impacts AC charging"*.<sup>[6]</sup>
+- **[forum]** The same thread says "Inverter Max Output Active Power Percent" (HR 50) limits the whole
+  inverter, *"including what it supplies to the house"*. At 50 %, a 5 kW hybrid behaves as a 2.5 kW
+  inverter.<sup>[6]</sup>
 
 ### Export Power Priority (HR 311)
 
-- **[forum]** Users mention the options "Load first" and "Grid first". One reading is that "Load
-  first" serves house load before exporting. Others say they don't know what it does.<sup>[7]</sup>
-  How those options map to register values is unknown. The reference unit reads 0.
+- **[forum]** In the portal this setting is a choice that includes *"Load first"*, which an experienced
+  user recommends but admits *"I have never really understood"*. They take it to mean the inverter meets
+  house load before exporting. Another owner's setting showed blank.<sup>[7]</sup>
+  The full list of options and how they map to register values is unknown. The reference unit reads 0,
+  and the app shows it as a plain number.
 
 ### Force Off Grid (HR 331)
 
-- **[forum]** On an All in One, a user reports the switch works but also turns off PV import, and
-  another says off-grid output is limited to 6 kW sustained.<sup>[8]</sup> Nothing confirms how it
-  behaves on a Gen3 Hybrid.
+- **[forum]** An All in One owner found that turning it on *"turns the PV import off as well"*, every
+  time, with the battery at 100 %. Another poster guesses PV only continues off-grid while the battery is
+  under 80 %, and a third says off-grid running is limited to 6 kW sustained and that reconnecting to
+  the grid was not always seamless.<sup>[8]</sup> Nothing confirms how it behaves on a Gen3 Hybrid.
 
 ### Smart Load, General Load and Generator (HR 540–573)
 
@@ -280,9 +295,24 @@ HR 544 "Generator Control SOC" (10–90 %) would be the generator start SOC,
 and HR 552 "Smart Load Export Power" might be the export threshold the manual gives as 1 kW.
 No register for the generator's cut-off SOC was seen in the app.
 
+**[forum]** A reply that another member addresses as part of the GivEnergy team describes the load
+split in a power cut. With the critical-load SOC at its default 20 %, everything stays powered until
+20 %, then only the critical load stays on. Setting it to 4 % makes general and critical loads behave
+the same. The same reply says smart loads can be switched *"Manual setting on/off/auto"*, by *"timer
+with scehdule"* (sic), or *"Auto on SOC reached eg 95%"*.<sup>[9]</sup> That matches the app's Smart Load
+Control SOC (HR 541, 50–100 %) and the ten Smart Load start/end times (HR 554–573). It also suggests
+HR 543 "General Load Control SOC" is this cutover SOC, although the app limits HR 543 to 50–100 %,
+which doesn't fit a 20 % default. That remains unresolved.
+
+### Inverter Parallel Mode (HR 199)
+
+- **[maintainer]** This is for All in One units running in parallel with a Gateway. On a standalone
+  Gen3 Hybrid it reads 0 (off). This contradicts GivTCP's label, `enable_standard_self_consumption_logic`.
+  The app itself shows only the toggle, with no description.
+
 ### Not found in any source
 
-HR 104 Battery Self-Heating, HR 172 Manual Battery Heater, HR 199 Inverter Parallel Mode,
+HR 104 Battery Self-Heating, HR 172 Manual Battery Heater,
 HR 166 Real-Time Control, HR 317 Enable EPS and HR 479 DC Wind CVT Voltage. GivTCP doesn't map any
 of them either.
 
@@ -297,14 +327,16 @@ of them either.
    <https://github.com/cdpuk/givenergy-local/blob/master/docs/controls.md>
 4. GivEnergy, *Energy Management System Guide*:
    <https://givenergy.com/resource-hub/customer-guides/energy-management-system-guide/>
-5. GivEnergy Community Forum, *Battery CutOff %?*:
-   <https://community-beta.givenergy.cloud/t/battery-cutoff/2540>
-6. GivEnergy Community Forum, *Charge power from mains vs solar*:
-   <https://community-beta.givenergy.cloud/t/charge-power-from-mains-vs-solar/4941>
-7. GivEnergy Community Forum, *Battery not discharging after pause using quick settings*:
-   <https://community-beta.givenergy.cloud/t/battery-not-discharging-after-pause-using-quick-settings/4158>
-8. GivEnergy Community Forum, *Force off grid*:
-   <https://community-beta.givenergy.cloud/t/force-off-grid/2188>
+5. GivEnergy Community Forum, *Battery CutOff %?* (Wayback Machine snapshot):
+   <https://web.archive.org/web/20260412202117/https://community-beta.givenergy.cloud/t/battery-cutoff/2540>
+6. GivEnergy Community Forum, *Charge power from mains vs solar* (Wayback Machine snapshot):
+   <https://web.archive.org/web/20260412201824/https://community-beta.givenergy.cloud/t/charge-power-from-mains-vs-solar/4941>
+7. GivEnergy Community Forum, *Battery not discharging after pause using quick settings* (Wayback Machine snapshot):
+   <https://web.archive.org/web/20260412233324/https://community-beta.givenergy.cloud/t/battery-not-discharging-after-pause-using-quick-settings/4158>
+8. GivEnergy Community Forum, *Force off grid* (Wayback Machine snapshot):
+   <https://web.archive.org/web/20260412201928/https://community-beta.givenergy.cloud/t/force-off-grid/2188>
+9. GivEnergy Community Forum, *AIO-2 and Gateway-2 question* (Wayback Machine snapshot):
+   <https://web.archive.org/web/20260412201924/https://community-beta.givenergy.cloud/t/aio-2-and-gateway-2-question/5012>
 
 ---
 
@@ -325,4 +357,4 @@ These are recorded rather than guessed at. Corrections from other Gen3 owners ar
   or read it from the cloud, or from a register outside the scanned ranges (HR 0–599, IR 0–299).
 - **What do 273 / 274 do?** They sit inside the Gen3 discharge slot block but the app doesn't show them.
 - **What does HR 311 "Export Power Priority" accept?** The app shows a plain number (0 here) with no
-  range or option list. Forum posts mention "Load first" and "Grid first" (section 4), but not how they map to values.
+  range or option list. The portal offers "Load first" among other options (section 4), but not how they map to values.

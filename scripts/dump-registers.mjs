@@ -113,7 +113,7 @@ const REGISTER_NAMES = {
   178: 'enable_g100_limit_switch',
   179: 'enable_battery_cable_impedance_alarm',
   180: 'e_battery_discharge_total_2 (deci)',
-  199: 'enable_inverter_parallel_mode "Enable Inverter Parallel Mode" (GivTCP mislabels as enable_standard_self_consumption_logic)',
+  199: 'enable_inverter_parallel_mode "Enable Inverter Parallel Mode", for All in One units in parallel with a Gateway (GivTCP mislabels as enable_standard_self_consumption_logic)',
   // Extended timeslots (Gen 3+)
   242: 'charge_target_soc_1 (gen3)',
   243: 'charge_slot_2_start (gen3)',
