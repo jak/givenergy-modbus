@@ -235,7 +235,7 @@ if (!hrCache) {
   process.exit(1);
 }
 
-// Read extended register blocks (HR 240-599) that the poll manager doesn't read.
+// Read holding register blocks the poll manager doesn't read (HR 120-179 and 240-599).
 // Blocks an inverter doesn't implement (e.g. HR 540-599 on Gen3) time out; that is
 // reported as unsupported rather than treated as a failure.
 // We need to trigger reads for these ranges
@@ -244,7 +244,7 @@ const client = pm.client ?? pm._client;
 const serial = client?.dataAdapterSerial ?? '**********';
 
 try {
-  for (const base of [240, 300, 360, 420, 480, 540]) {
+  for (const base of [120, 240, 300, 360, 420, 480, 540]) {
     console.log(`Reading extended HR block ${base}-${base + 59}...`);
     const frame = encodeReadHoldingRegistersRequest({
       dataAdapterSerial: serial,
