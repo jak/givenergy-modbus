@@ -256,8 +256,14 @@ try {
       const values = await client.sendRequest(frame);
       values.forEach((v, i) => hrCache.set(base + i, v));
     } catch (e) {
-      const reason = /timeout/i.test(e.message) ? 'unsupported on this inverter (read timed out)' : e.message;
-      console.log(`  (block ${base}-${base + 59} not available: ${reason})`);
+      // Pushed frames land in hrCache too, so a timed-out block may already be filled.
+      const pushed = Array.from({ length: 60 }, (_, i) => hrCache.has(base + i)).every(Boolean);
+      if (pushed) {
+        console.log(`  (block ${base}-${base + 59} read timed out, but push data filled it)`);
+      } else {
+        const reason = /timeout/i.test(e.message) ? 'unsupported on this inverter (read timed out)' : e.message;
+        console.log(`  (block ${base}-${base + 59} not available: ${reason})`);
+      }
     }
   }
 } catch (e) {
