@@ -12,6 +12,7 @@ export default defineConfig({
       { text: 'Concepts', link: '/concepts' },
       { text: 'Cookbook', link: '/cookbook' },
       { text: 'Protocol', link: '/protocol' },
+      { text: 'Register Map', link: '/register-map' },
       { text: 'API Reference', link: '/api/' },
     ],
 
@@ -31,6 +32,7 @@ export default defineConfig({
             { text: 'Concepts', link: '/concepts' },
             { text: 'Cookbook', link: '/cookbook' },
             { text: 'Protocol Internals', link: '/protocol' },
+            { text: 'Gen3 Register Map', link: '/register-map' },
           ],
         },
       ],
