@@ -65,7 +65,7 @@ Times are encoded as `HHMM` decimal (e.g. `2330` = 23:30).
 | 554–573 | Smart Load Start/End Time 1–10 | time | failed | — | ❌ | Pairs: start = 554 + 2(n−1), end = 555 + 2(n−1). |
 
 HR 540–573 are **not implemented on this inverter**: the app shows "Failed to read register"
-and a Modbus read of HR 540–599 times out. These are probably for newer models (e.g. All-in-One / Gen4).
+and a Modbus read of HR 540–599 times out. They belong to the Gateway 2 used with the All in One 2 (see [section 4](#smart-load-general-load-and-generator-hr-540–573)).
 
 ### Battery
 
@@ -191,7 +191,124 @@ Takeaways:
 
 ---
 
-## 4. Open questions
+## 4. What the settings do (from GivEnergy and community sources)
+
+This section says what the settings *do*, which the register dump can't show. Each claim is
+tagged with how strong its source is:
+
+- **[manual]**: GivEnergy's own documentation
+- **[library]**: another open-source integration's documentation
+- **[forum]**: a GivEnergy Community Forum thread, seen only as a search excerpt and not read in full
+
+Claims marked [forum] are leads, not facts.
+
+### Battery Reserve vs Battery Cutoff (HR 110 / HR 114)
+
+- **[library]** `givenergy-local` describes Battery Cutoff % (HR 114) as the setting that
+  *"sets the minimum allowable battery SOC during battery discharge"*, and says of Battery Reserve %
+  (HR 110): *"Despite the name, this does not set a minimum SOC under normal conditions"*, noting a
+  GivEnergy document suggests it only matters for systems with EPS configured.<sup>[3]</sup>
+- **[forum]** A user reports the battery stopping at the cutoff (15 %) rather than the lower
+  reserve (10 %), and that advice in GivEnergy's portal forum was that the cutoff protects the battery
+  and should be set low, e.g. 4 %.<sup>[5]</sup>
+
+On the reference unit both are 4 %, so the dump can't tell them apart.
+
+### AC Charge Upper % Limit and Eco Mode (HR 20 / HR 116 / HR 27)
+
+- **[library]** HR 116 *"sets the target battery percentage when charging from the grid"*, and the
+  HR 20 toggle decides whether that percentage *"is actually respected or simply ignored"*.<sup>[3]</sup>
+- **[library]** With Eco Mode (HR 27) on, *"the battery will only discharge to match demand. No energy
+  will be exported."* With it off, the battery discharges at maximum power.<sup>[3]</sup>
+
+### Battery Calibration (HR 29)
+
+- **[manual]** GivEnergy describes calibration as correcting State of Charge drift. There are two
+  kinds: a *soft* calibration (a full discharge then a full charge through normal use) and a *full*
+  calibration started from a "Calibrate Battery" button in the portal, which *"forces the system to
+  re-evaluate its internal energy model"*.<sup>[2]</sup> The guide doesn't list the app's option
+  values. Only 0 = Stop has been seen on the device.
+
+### Timed charge, discharge and export
+
+- **[manual]** Charge slots can't cross midnight, so a 23:30–05:30 tariff is split into two slots.
+  Timed Discharge is overridden by Timed Charge and Timed Export. Once a discharge slot reaches its
+  target SOC, the system falls back to the grid but still charges from surplus solar.<sup>[4]</sup>
+  The reference unit's charge slot 1 is 23:30–05:30 (HR 94/95), which the app accepts as one slot,
+  so the midnight rule may not apply to Gen3 firmware 316. This is unverified.
+
+### Inverter Charge/Discharge Power Percentage (HR 313 / HR 314)
+
+- **[forum]** A user says the percentage setting only affects AC (grid) charging, but says it was
+  "from memory". The same thread says "Inverter Max Output Active Power Percent" (HR 50) limits the
+  whole inverter's output, including what it supplies to the house.<sup>[6]</sup>
+
+### Export Power Priority (HR 311)
+
+- **[forum]** Users mention the options "Load first" and "Grid first". One reading is that "Load
+  first" serves house load before exporting. Others say they don't know what it does.<sup>[7]</sup>
+  How those options map to register values is unknown. The reference unit reads 0.
+
+### Force Off Grid (HR 331)
+
+- **[forum]** On an All in One, a user reports the switch works but also turns off PV import, and
+  another says off-grid output is limited to 6 kW sustained.<sup>[8]</sup> Nothing confirms how it
+  behaves on a Gen3 Hybrid.
+
+### Smart Load, General Load and Generator (HR 540–573)
+
+These settings belong to the **Gateway 2**, which pairs with the **All in One 2**. That explains why
+the block times out on a Gen3 Hybrid. The All in One 2 manual describes the following behaviour
+**[manual]**<sup>[1]</sup>:
+
+- **Smart Load** is a switched output for large loads that don't need to run continuously, such as
+  water heaters. It *"begins to work"* when surplus energy flowing to the grid *"is greater than
+  1kW"*, and keeps running *"until the system energy demand is greater than the supply"*. It can be
+  forced on or off.
+- **General Load** is for large loads used often, such as air conditioning or heating. It is always on
+  while on-grid. Off-grid, *"when the AIO2 battery SOC is lower than the set value, the general load
+  stops working until the SOC is higher than the set value"*, which keeps energy back for critical
+  loads. It can be forced on or off.
+- **Generator**: when the grid is off and the battery is low, the Gateway 2 starts a remote-start
+  generator below a configurable *start SOC*, and stops it at a *"cut-off SOC"*. Grid power always
+  takes priority. The PV inverter does not run while the generator runs.
+
+The app's register names line up with these descriptions, but **no register-level mapping has been
+checked on a device that has a Gateway 2**. Going by name only:
+HR 543 "General Load Control SOC" would be the general load's off-grid SOC,
+HR 544 "Generator Control SOC" (10–90 %) would be the generator start SOC,
+and HR 552 "Smart Load Export Power" might be the export threshold the manual gives as 1 kW.
+No register for the generator's cut-off SOC was seen in the app.
+
+### Not found in any source
+
+HR 104 Battery Self-Heating, HR 172 Manual Battery Heater, HR 199 Inverter Parallel Mode,
+HR 166 Real-Time Control, HR 317 Enable EPS and HR 479 DC Wind CVT Voltage. GivTCP doesn't map any
+of them either.
+
+### Sources
+
+1. GivEnergy, *All in One 2, MPPT Unit, Gateway 2, Expansion Battery User Manual*, V1 Oct 2025, pp. 11–12
+   (copy hosted by distributor Segen):
+   <https://portal.segen.co.uk/reseller/docs/All%20in%20One%202%20Manual.pdf>
+2. GivEnergy, *How to Calibrate Your GivEnergy Battery*:
+   <https://givenergy.com/resource-hub/customer-guides/how-to-calibrate-your-givenergy-battery/>
+3. `givenergy-local` (Home Assistant integration), *controls.md*:
+   <https://github.com/cdpuk/givenergy-local/blob/master/docs/controls.md>
+4. GivEnergy, *Energy Management System Guide*:
+   <https://givenergy.com/resource-hub/customer-guides/energy-management-system-guide/>
+5. GivEnergy Community Forum, *Battery CutOff %?*:
+   <https://community-beta.givenergy.cloud/t/battery-cutoff/2540>
+6. GivEnergy Community Forum, *Charge power from mains vs solar*:
+   <https://community-beta.givenergy.cloud/t/charge-power-from-mains-vs-solar/4941>
+7. GivEnergy Community Forum, *Battery not discharging after pause using quick settings*:
+   <https://community-beta.givenergy.cloud/t/battery-not-discharging-after-pause-using-quick-settings/4158>
+8. GivEnergy Community Forum, *Force off grid*:
+   <https://community-beta.givenergy.cloud/t/force-off-grid/2188>
+
+---
+
+## 5. Open questions
 
 These are recorded rather than guessed at. Corrections from other Gen3 owners are welcome.
 
@@ -208,4 +325,4 @@ These are recorded rather than guessed at. Corrections from other Gen3 owners ar
   or read it from the cloud, or from a register outside the scanned ranges (HR 0–599, IR 0–299).
 - **What do 273 / 274 do?** They sit inside the Gen3 discharge slot block but the app doesn't show them.
 - **What does HR 311 "Export Power Priority" accept?** The app shows a plain number (0 here) with no
-  range or option list.
+  range or option list. Forum posts mention "Load first" and "Grid first" (section 4), but not how they map to values.
