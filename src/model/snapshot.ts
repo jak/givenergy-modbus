@@ -227,25 +227,27 @@ export interface SinglePhaseSolar extends Solar {
 /** Battery energy counters. */
 export interface BatteryEnergy {
   /**
-   * Energy charged today, kWh. Single-phase IR 36 ÷10 (Gen1 falls back to IR 183 ÷10);
+   * Energy charged today, kWh. Single-phase IR 36 ÷10 (Gen1 reads IR 183 ÷10 instead);
    * three-phase IR 1392–1393 uint32 ÷10.
    */
   chargeTodayKwh: number;
   /**
-   * Energy discharged today, kWh. Single-phase IR 37 ÷10 (Gen1 falls back to IR 182 ÷10);
+   * Energy discharged today, kWh. Single-phase IR 37 ÷10 (Gen1 reads IR 182 ÷10 instead);
    * three-phase IR 1388–1389 uint32 ÷10.
    */
   dischargeTodayKwh: number;
   /**
-   * Lifetime energy charged, kWh. Single-phase, first non-zero of: HV battery stacks summed
-   * (uint32 ÷10); the LV battery module's IR 106 ÷10 (a stack-level value, identical on every
-   * pack, so not summed; wraps at 6553.5); inverter IR 181 ÷10; IR 27–28. HR 4109–4112 are
-   * write-only seed registers and are not used. Three-phase IR 1394–1395 uint32 ÷10.
+   * Lifetime energy charged, kWh. Single-phase, the first source where charge and discharge
+   * aren't both 0: HV battery stacks summed (BCU IR 82–83 uint32 ÷10); the first LV battery
+   * module's IR 106 ÷10 (a stack-level value every pack repeats, so not summed; wraps at
+   * 6553.5); inverter IR 181 ÷10; IR 27–28 uint32 ÷10. HR 4109–4112 are write-only seed
+   * registers, not live totals, and are not used. Three-phase IR 1394–1395 uint32 ÷10.
    */
   chargeTotalKwh: number;
   /**
-   * Lifetime energy discharged, kWh. Same fallback chain as `chargeTotalKwh`, using IR 105,
-   * then HR 180 ÷10, then IR 29. Three-phase IR 1390–1391 uint32 ÷10.
+   * Lifetime energy discharged, kWh. Same fallback chain as `chargeTotalKwh`, using BCU
+   * IR 84–85, module IR 105, inverter IR 180, then IR 29 (all ÷10). Not HR 180, which 2.x
+   * used: it reads 0x5858 ("XX") on the reference Gen3. Three-phase IR 1390–1391 uint32 ÷10.
    */
   dischargeTotalKwh: number;
   /** Lifetime battery throughput, kWh. Single-phase IR 6–7 uint32 ÷10. Absent on three-phase. */
