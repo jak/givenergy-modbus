@@ -703,10 +703,10 @@ describe('PollManager against a mock inverter', { timeout: 20_000 }, () => {
       expect(pm.getData().meters).toMatchObject([{ slaveAddress: 1, voltage: [241.2, 0, 0], current: [4.33, 0, 0], activePower: [-44, 0, 0] }]);
     });
 
-    it('quirk: does not read product registers for an address that answers with no meter (IR 60 = 0)', async () => {
-      // On the real Gen3 every meter address 0x02–0x08 answered IR 60–88 and the product
-      // registers, with no meter fitted. Phase 1 voltage 0 means no meter (2.x), so their
-      // product registers aren't worth a read.
+    it('quirk: the dongle answers absent meter addresses with zeros, which are neither meters nor asked for product registers', async () => {
+      // Seen on the real Gen3: every empty meter address 0x02–0x08 answered IR 60–88 with all
+      // zeros (and answered the product registers too). Phase 1 voltage 0 means no meter (2.x),
+      // so they aren't meters and their product registers aren't worth a read.
       const devices = devicesWithMeter();
       for (let slave = 2; slave <= 8; slave++) devices.set(slave, { input: new Map(), product: new Map() });
       const { mock, pm } = await setUp(devices);
