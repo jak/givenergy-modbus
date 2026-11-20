@@ -6,6 +6,8 @@ import type {
   DeviceModel,
   DiscoveredDevice,
   GivEnergyInverterOptions,
+  InverterEventName,
+  InverterEvents,
   InverterIdentity,
   InverterModel,
   InverterSnapshot,
@@ -13,10 +15,12 @@ import type {
   Meter,
   ModelOf,
   NumberedTimeSlotInput,
+  PlantControllerModel,
   PowerFlows,
   SettingDefinition,
   SettingKey,
   Settings,
+  SettingsCatalogue,
   SettingWriteValue,
   SinglePhaseModel,
   SinglePhaseSettings,
@@ -28,8 +32,10 @@ import type {
   TimeSlotConfig,
   TimeSlotInput,
   UnsafeSettingKey,
+  ValueOf,
   WritableOnBothLayouts,
   WritableSettingKey,
+  WriteValueOf,
 } from '../src/index.js';
 
 describe('public exports', () => {
@@ -84,5 +90,11 @@ describe('public exports', () => {
     expectTypeOf<InverterModel>().toExtend<DeviceModel>();
     expectTypeOf<'ems'>().toExtend<DeviceModel>();
     expectTypeOf<'batteryReserve'>().toExtend<WritableOnBothLayouts>();
+    expectTypeOf<PlantControllerModel>().toEqualTypeOf<'ems' | 'gateway'>();
+    expectTypeOf<SettingsCatalogue>().toEqualTypeOf<typeof library.SETTINGS>();
+    expectTypeOf<ValueOf<SettingsCatalogue['exportPriority']>>().toEqualTypeOf<'loadFirst' | 'batteryFirst' | 'gridFirst' | 'unknown'>();
+    expectTypeOf<WriteValueOf<SettingsCatalogue['batteryCalibration']>>().toEqualTypeOf<'off' | 'discharge' | 'charge'>();
+    expectTypeOf<InverterEventName>().toEqualTypeOf<'data' | 'lost' | 'reconnecting' | 'reconnected' | 'debug'>();
+    expectTypeOf<InverterEvents<'three_phase'>['data']>().toEqualTypeOf<[snapshot: ThreePhaseSnapshot]>();
   });
 });

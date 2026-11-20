@@ -90,3 +90,27 @@ test('setSetting works on the un-narrowed result of connect() for settings on bo
   if (inverter.layout === 'three_phase') void inverter.setSetting('forceCharge', true);
   else void inverter.setSetting('batteryChargeRate', 1000);
 });
+
+test('events are typed by layout, and unknown events still compile', async () => {
+  single.on('data', (snapshot) => expectTypeOf(snapshot).toEqualTypeOf<SinglePhaseSnapshot>());
+  three.once('data', (snapshot) => expectTypeOf(snapshot).toEqualTypeOf<ThreePhaseSnapshot>());
+  single.on('lost', (error) => expectTypeOf(error).toEqualTypeOf<Error>());
+  single.on('reconnecting', (attempt, nextRetryMs) => {
+    expectTypeOf(attempt).toEqualTypeOf<number>();
+    expectTypeOf(nextRetryMs).toEqualTypeOf<number>();
+  });
+  single.on('reconnected', () => {});
+  single.on('debug', (message) => expectTypeOf(message).toEqualTypeOf<string>());
+  // @ts-expect-error a data listener takes a snapshot, not a string
+  single.on('data', (snapshot: string) => void snapshot);
+  // Events outside InverterEvents fall back to EventEmitter's untyped signature.
+  single.on('newListener', () => {});
+  expectTypeOf(single.on('data', () => {})).toEqualTypeOf<SinglePhaseInverter>();
+
+  // On the un-narrowed result of connect(), data listeners get either snapshot.
+  const inverter = await GivEnergyInverter.connect({ host: 'x' });
+  inverter.on('data', (snapshot) => expectTypeOf(snapshot).toEqualTypeOf<SinglePhaseSnapshot | ThreePhaseSnapshot>());
+  const listener = (snapshot: SinglePhaseSnapshot) => void snapshot;
+  single.on('data', listener);
+  single.off('data', listener);
+});

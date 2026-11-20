@@ -73,7 +73,10 @@ export type WriteValueOf<D> =
   D extends { kind: 'enum'; values: infer V } ? keyof V & string :
   ValueOf<D>;
 
-/** `true` when setting definition `D` exists on layout `L`. */
+/**
+ * `true` when setting definition `D` exists on layout `L`.
+ * @internal
+ */
 export type InLayout<D, L extends Layout> =
   D extends { register: number }
     ? D extends { layouts: readonly (infer X)[] } ? (L extends X ? true : false) : true
