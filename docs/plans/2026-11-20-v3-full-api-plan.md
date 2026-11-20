@@ -692,10 +692,10 @@ export interface BuildContext { model: InverterModel; layout: Layout; capabiliti
 
 | Layout | Holding blocks | Input blocks |
 |---|---|---|
-| Single-phase | `0`; full refresh adds `60`, `120`; `240` if `tenSlots`; `300` if `acSettingsBlock` | `0`, `180` |
+| Single-phase | `0`; full refresh adds `60`, `120`, `180` (HR 199 parallel mode); `240` if `tenSlots`; `300` if `acSettingsBlock` | `0`, `180` |
 | Three-phase | `0`, `1000`, `1060`, `1120` (count 5); full refresh adds `60`, `120`, `240` | `0`, `180`, then `1000` to `1360` in steps of 60 |
 
-Neither layout reads holding `4080` or `180`.
+Neither layout reads holding `4080`. Single-phase reads holding `180` only for HR 199 (`inverterParallelMode`); its HR 180 battery total is not used.
 
 - Add a test that every catalogue register for a layout is inside its full-refresh blocks. This replaces
   Task 5's hard-coded list.
