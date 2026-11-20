@@ -8,7 +8,8 @@
  * - `silent(request)` leaves chosen reads unanswered, for blocks a model never answers.
  * - `push()` sends register data unsolicited, as the inverter does in push mode. A push only
  *   resolves a pending request when it has the request's exact base and count.
- * - Writes (function 6) are recorded in `writes` and echoed.
+ * - Writes (function 6) are recorded in `writes` and echoed, unless `silent` leaves them
+ *   unanswered (then they are in `requests` only).
  *
  * Frames carry a zero CRC; the client doesn't check it.
  */
@@ -33,7 +34,7 @@ export interface MockRequest {
 
 export interface MockInverterOptions {
   devices: Map<number, MockDevice>;
-  /** Return true to leave this read unanswered. */
+  /** Return true to leave this read or write unanswered. */
   silent?: (request: MockRequest) => boolean;
 }
 
@@ -147,6 +148,7 @@ export async function startMockInverter(options: MockInverterOptions): Promise<M
         const { type: _type, ...read } = request;
         mock.requests.push(read);
         if (read.functionCode === 0x06) {
+          if (mock.silent(read)) continue;
           mock.writes.push({ register: read.baseRegister, value: read.registerCount });
           socket.write(buildTransparentResponse(read.slaveAddress, 0x06, read.baseRegister, [read.registerCount]));
           continue;
@@ -170,4 +172,20 @@ export function inverterReads(requests: MockRequest[]): string[] {
   return requests
     .filter((request) => request.slaveAddress === 0x11 && (request.functionCode === 0x03 || request.functionCode === 0x04))
     .map((request) => `${request.functionCode === 0x03 ? 'HR' : 'IR'} ${request.baseRegister}${request.registerCount === 60 ? '' : `/${request.registerCount}`}`);
+}
+
+/**
+ * Mock devices serving register caches as the poll manager would read them: the inverter at
+ * 0x11, low-voltage battery modules from 0x32 and meters at their own addresses.
+ */
+export function devicesOf(registers: {
+  holding: Map<number, number>;
+  input: Map<number, number>;
+  batteryModules?: Map<number, number>[];
+  meters?: Array<{ slaveAddress: number; input: Map<number, number>; product: Map<number, number> }>;
+}): Map<number, MockDevice> {
+  const devices = new Map<number, MockDevice>([[0x11, { holding: registers.holding, input: registers.input }]]);
+  registers.batteryModules?.forEach((input, i) => devices.set(0x32 + i, { input }));
+  for (const meter of registers.meters ?? []) devices.set(meter.slaveAddress, { input: meter.input, product: meter.product });
+  return devices;
 }

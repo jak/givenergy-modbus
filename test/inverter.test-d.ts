@@ -1,0 +1,57 @@
+import { expectTypeOf, test } from 'vitest';
+import { GivEnergyInverter, SinglePhaseInverter, ThreePhaseInverter } from '../src/inverter.js';
+import type { SinglePhaseSnapshot, ThreePhaseSnapshot } from '../src/model/snapshot.js';
+import type { SinglePhaseModel, ThreePhaseModel } from '../src/model/models.js';
+
+declare const single: SinglePhaseInverter;
+declare const three: ThreePhaseInverter;
+
+test('connect returns one of the layout classes', () => {
+  expectTypeOf(GivEnergyInverter.connect).returns.resolves.toEqualTypeOf<SinglePhaseInverter | ThreePhaseInverter>();
+});
+
+test('getData and model follow the layout', () => {
+  expectTypeOf(single.getData()).toEqualTypeOf<SinglePhaseSnapshot>();
+  expectTypeOf(three.getData()).toEqualTypeOf<ThreePhaseSnapshot>();
+  expectTypeOf(single.model).toEqualTypeOf<SinglePhaseModel>();
+  expectTypeOf(three.model).toEqualTypeOf<ThreePhaseModel>();
+});
+
+test('setSetting accepts writable settings of the layout with their write value types', () => {
+  void single.setSetting('batteryReserve', 20);
+  void single.setSetting('exportPriority', 'gridFirst');
+  void single.setSetting('batteryCalibration', 'discharge');
+  void three.setSetting('forceCharge', true);
+  // @ts-expect-error a number, not a string
+  void single.setSetting('batteryReserve', '20');
+});
+
+test('setSetting rejects calibration stages the inverter only reports', () => {
+  // @ts-expect-error 'balance' is decoded but never written
+  void single.setSetting('batteryCalibration', 'balance');
+});
+
+test('setSetting rejects unsafe and read-only settings', () => {
+  // @ts-expect-error unsafe: only unsafe_setSetting writes it
+  void single.setSetting('forceOffGrid', true);
+  // @ts-expect-error read only
+  void single.setSetting('exportLimit', 5000);
+  // @ts-expect-error read only
+  void three.setSetting('threePhaseExportLimit', 5000);
+});
+
+test('setSetting rejects settings of the other layout', () => {
+  // @ts-expect-error three-phase only
+  void single.setSetting('forceCharge', true);
+  // @ts-expect-error single-phase only
+  void three.setSetting('batteryChargeRate', 1000);
+});
+
+test('unsafe_setSetting accepts only unsafe settings', () => {
+  void single.unsafe_setSetting('forceOffGrid', true);
+  void single.unsafe_setSetting('inverterParallelMode', 0);
+  // @ts-expect-error safe settings go through setSetting
+  void single.unsafe_setSetting('batteryReserve', 20);
+  // @ts-expect-error no unsafe settings on three-phase
+  void three.unsafe_setSetting('forceOffGrid', true);
+});

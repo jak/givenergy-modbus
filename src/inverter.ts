@@ -1,12 +1,23 @@
 import { EventEmitter } from 'events';
-import { PollManager, type PollManagerOptions } from './poll-manager.js';
-import { encodeWriteHoldingRegisterRequest, encodeReadHoldingRegistersRequest } from './pdu/encode.js';
+import { PollManager, type PollTiming } from './poll-manager.js';
+import { encodeReadHoldingRegistersRequest } from './pdu/encode.js';
 import { Client } from './client.js';
 import { registersToString } from './model/converters.js';
-import { detectModel } from './model/device-types.js';
-import { detectGeneration, modelToGeneration, type InverterGeneration } from './generation.js';
-
-import type { InverterSnapshot } from './model/snapshot.js';
+import { isPlantController, layoutOf, resolveModel } from './model/models.js';
+import type { InverterModel, Layout, SinglePhaseModel, ThreePhaseModel } from './model/models.js';
+import type { Capabilities } from './model/capabilities.js';
+import type { InverterSnapshot, SinglePhaseSnapshot, ThreePhaseSnapshot } from './model/snapshot.js';
+import {
+  isSupported,
+  registerFor,
+  SETTINGS,
+  type SettingDefinition,
+  type SettingWriteValue,
+  type UnsafeSettingKey,
+  type WritableSettingKey,
+} from './catalogue/index.js';
+import { encodeSetting } from './catalogue/codec.js';
+import { UnsupportedDeviceError, UnsupportedSettingError } from './errors.js';
 
 export interface GivEnergyInverterOptions {
   host: string;
@@ -15,21 +26,43 @@ export interface GivEnergyInverterOptions {
   autoReconnect?: boolean;
   reconnectBackoffMs?: number;
   reconnectMaxBackoffMs?: number;
+  /** @internal Request timing, shortened by tests. */
+  timing?: Partial<PollTiming>;
 }
 
-export interface TimeSlotInput {
-  start: string;
-  end: string;
-  targetStateOfCharge?: number;
-}
-
+/** What `GivEnergyInverter.identify` reads from HR 0–59. */
 export interface InverterIdentity {
   serialNumber: string;
-  generation: InverterGeneration;
-  modelCode: number;
+  /** HR 0. */
+  deviceTypeCode: number;
+  model: InverterModel;
+  layout: Layout;
 }
 
-export abstract class GivEnergyInverter extends EventEmitter {
+/** The model type for layout `L`. */
+export type ModelOf<L extends Layout> = L extends 'three_phase' ? ThreePhaseModel : SinglePhaseModel;
+/** The snapshot type for layout `L`. */
+export type SnapshotOf<L extends Layout> = Extract<InverterSnapshot, { layout: L }>;
+
+const INVERTER_SLAVE = 0x11;
+/** HR 163: writing 100 restarts the inverter. */
+const REBOOT_REGISTER = 163;
+const REBOOT_VALUE = 100;
+/** HR 35–40: system clock, year as an offset from 2000. */
+const SYSTEM_TIME_REGISTER = 35;
+
+function trimSerial(raw: string): string {
+  return raw.replace(/\0/g, '').trim();
+}
+
+/**
+ * A GivEnergy inverter. Create one with `GivEnergyInverter.connect()`, which returns a
+ * `SinglePhaseInverter` or `ThreePhaseInverter` depending on the model.
+ *
+ * Events: `data` (snapshot), `lost` (error), `reconnecting` (attempt, nextRetryMs), `reconnected`, `debug` (message).
+ */
+export abstract class GivEnergyInverter<L extends Layout = Layout> extends EventEmitter {
+  abstract readonly layout: L;
   protected readonly pollManager: PollManager;
 
   protected constructor(pollManager: PollManager) {
@@ -44,7 +77,11 @@ export abstract class GivEnergyInverter extends EventEmitter {
     this.pollManager.on('reconnected', () => this.emit('reconnected'));
   }
 
-  static async connect(options: GivEnergyInverterOptions): Promise<GivEnergyInverter> {
+  /**
+   * Connect, run the first full poll and return the inverter. Rejects with
+   * `UnsupportedDeviceError` for a plant controller (EMS, Gateway) or an unknown device.
+   */
+  static async connect(options: GivEnergyInverterOptions): Promise<SinglePhaseInverter | ThreePhaseInverter> {
     const pollManager = new PollManager({
       host: options.host,
       port: options.port,
@@ -52,35 +89,25 @@ export abstract class GivEnergyInverter extends EventEmitter {
       autoReconnect: options.autoReconnect,
       reconnectBackoffMs: options.reconnectBackoffMs,
       reconnectMaxBackoffMs: options.reconnectMaxBackoffMs,
+      timing: options.timing,
     });
     await pollManager.start();
     const snapshot = pollManager.getData();
 
-    const { serialNumber } = snapshot.identity;
-    if (!serialNumber || serialNumber.replace(/[\x00\s]/g, '') === '') {
+    if (trimSerial(snapshot.identity.serialNumber) === '') {
       await pollManager.stop();
       throw new Error(`No valid inverter found at ${options.host} (empty serial number)`);
     }
 
-    // Interim, until Task 14 replaces these classes: pick the 2.x class the 2.x generation
-    // detection would have picked (modelToGeneration).
-    if (snapshot.layout === 'three_phase') {
-      const { ThreePhaseInverter } = await import('./inverters/three-phase.js');
-      return new ThreePhaseInverter(pollManager);
-    }
-    if (snapshot.model === 'hybrid_gen3' || snapshot.model === 'hybrid_hv_gen3') {
-      const { Gen3Inverter } = await import('./inverters/gen3.js');
-      return new Gen3Inverter(pollManager);
-    }
-    const { Gen2Inverter } = await import('./inverters/gen2.js');
-    return new Gen2Inverter(pollManager);
+    return snapshot.layout === 'three_phase'
+      ? new ThreePhaseInverter(pollManager)
+      : new SinglePhaseInverter(pollManager);
   }
 
   /**
-   * Lightweight identity probe — reads only HR 0-59 (one Modbus request)
-   * to extract serial number, model code, and generation without starting
-   * a full poll cycle. Use this during pairing/discovery when you only need
-   * to identify the inverter, not stream live data.
+   * Lightweight identity probe: reads only HR 0–59 (one request) to get the serial number and
+   * model without starting a poll. For pairing and discovery. Rejects with
+   * `UnsupportedDeviceError` for a plant controller or an unknown device type code.
    */
   static async identify(options: { host: string; port?: number; timeout?: number; retries?: number }): Promise<InverterIdentity> {
     const client = new Client({
@@ -93,113 +120,150 @@ export abstract class GivEnergyInverter extends EventEmitter {
       await client.connect();
       const frame = encodeReadHoldingRegistersRequest({
         dataAdapterSerial: client.dataAdapterSerial,
-        slaveAddress: 0x11,
+        slaveAddress: INVERTER_SLAVE,
         baseRegister: 0,
         registerCount: 60,
       });
       const values = await client.sendRequest(frame);
 
-      const serialRegs = [13, 14, 15, 16, 17].map(i => values[i] ?? 0);
-      const serialNumber = registersToString(serialRegs);
-
-      if (!serialNumber || serialNumber.replace(/[\x00\s]/g, '') === '') {
+      const serialNumber = trimSerial(registersToString([13, 14, 15, 16, 17].map(i => values[i] ?? 0)));
+      if (serialNumber === '') {
         throw new Error(`No valid inverter found at ${options.host} (empty serial number)`);
       }
 
-      const modelCode = values[0] ?? 0;
-      const armFirmwareVersion = values[21] ?? 0;
-      const generation = modelCode !== 0
-        ? modelToGeneration(detectModel(modelCode, armFirmwareVersion))
-        : detectGeneration(serialNumber);
-
-      return { serialNumber, generation, modelCode };
+      const deviceTypeCode = values[0] ?? 0;
+      const model = resolveModel(deviceTypeCode, values[21] ?? 0);
+      if (model === 'unknown' || isPlantController(model)) throw new UnsupportedDeviceError(model, deviceTypeCode);
+      return { serialNumber, deviceTypeCode, model, layout: layoutOf(model) };
     } finally {
       await client.close();
     }
   }
 
-  getData(): InverterSnapshot {
-    return this.pollManager.getData();
+  get model(): ModelOf<L> {
+    return this.pollManager.model as ModelOf<L>;
+  }
+
+  /** What this inverter supports: from the model and firmware, minus blocks it never answered. */
+  get capabilities(): Capabilities {
+    return this.pollManager.capabilities;
+  }
+
+  getData(): SnapshotOf<L> {
+    return this.pollManager.getData() as SnapshotOf<L>;
   }
 
   async stop(): Promise<void> {
     return this.pollManager.stop();
   }
 
-  // ── Shared control methods ──────────────────────────────────
-  // Inverter modes are independent toggles, each controlling a single register.
-  // See https://github.com/britkat1980/giv_tcp and issue #31.
-
-  async setEcoMode(enabled: boolean): Promise<void> {
-    await this.writeRegister(27, enabled ? 1 : 0);
+  /**
+   * Write a setting from the catalogue (`SETTINGS`). The snapshot reflects the new value as soon
+   * as the inverter accepts the write, without waiting for the next poll.
+   *
+   * @throws UnsupportedSettingError when the model or firmware doesn't support the setting.
+   * @throws RangeError or TypeError for a value the setting doesn't accept.
+   */
+  async setSetting<K extends WritableSettingKey<L>>(key: K, value: SettingWriteValue<K>): Promise<void> {
+    await this._write(key, value, false);
   }
 
-  async setTimedExport(enabled: boolean): Promise<void> {
-    await this.writeRegister(59, enabled ? 1 : 0);
+  /**
+   * Write a setting that no reference implementation has verified. Each one can leave the
+   * inverter in a state that's hard to recover remotely:
+   *
+   * - `batterySelfHeating`: Battery self-heating (HR 104). Undocumented: GivEnergy's v4.1.6
+   *   register document marks HR 104 reserved and read-only, on three-phase models the same
+   *   address is a grid power calibration value, and a write has been seen rejected with an error
+   *   on real hardware. GivEnergy says its batteries have no active heating. Only write this if
+   *   the official app offers and accepts it for your exact hardware.
+   * - `manualBatteryHeater`: Manual battery heater (HR 172). Undocumented: the v4.1.6 register
+   *   document marks HR 165–173 reserved and the installer app doesn't list it. On tested
+   *   hardware the write was accepted but read back off. No GivEnergy battery is known to have a
+   *   heater, and if one did, nothing documents an automatic cut-off. Don't write this register.
+   * - `inverterParallelMode`: Parallel output mode (HR 199; "ParaOutputMode", values 0–4,
+   *   although the app shows an on/off switch). A Gateway sets this when it commissions All in One
+   *   units in parallel, and reboots them. Writing it on a standalone inverter is untested and may
+   *   cause parallel faults or loss of output. This is not the "self-consumption logic" flag older
+   *   libraries called it.
+   * - `forceOffGrid`: Force off grid (HR 331; "GatewayOnOff", 0–255). Designed for All in One +
+   *   Gateway systems: it disconnects the site from the grid and keeps it islanded until cleared.
+   *   Off-grid output is limited (about 6 kW on an All in One), PV may be curtailed at high state
+   *   of charge, RCDs may trip if the earthing wasn't designed for islanding, and if the battery
+   *   reaches its cutoff the system can shut down with no way to recover it remotely. Behaviour on
+   *   hybrids without a Gateway is unverified. Always pair a write with a guaranteed clear.
+   *
+   * @remarks Writes registers no reference implementation has verified. See each setting's `risk`.
+   */
+  async unsafe_setSetting<K extends UnsafeSettingKey<L>>(key: K, value: SettingWriteValue<K>): Promise<void> {
+    await this._write(key, value, true);
   }
 
+  /** Set the inverter clock (HR 35–40). */
   async setDateTime(date: Date): Promise<void> {
-    await this.writeRegister(35, date.getFullYear() - 2000);
-    await this.writeRegister(36, date.getMonth() + 1);
-    await this.writeRegister(37, date.getDate());
-    await this.writeRegister(38, date.getHours());
-    await this.writeRegister(39, date.getMinutes());
-    await this.writeRegister(40, date.getSeconds());
+    const fields = [
+      date.getFullYear() - 2000,
+      date.getMonth() + 1,
+      date.getDate(),
+      date.getHours(),
+      date.getMinutes(),
+      date.getSeconds(),
+    ];
+    for (const [offset, value] of fields.entries()) {
+      await this.pollManager.writeHoldingRegister(SYSTEM_TIME_REGISTER + offset, value);
+    }
   }
 
+  /** Set the inverter clock to this machine's local time. */
   async syncDateTime(): Promise<void> {
     await this.setDateTime(new Date());
   }
 
+  /** Restart the inverter (HR 163 = 100). */
   async reboot(): Promise<void> {
-    await this.writeRegister(163, 100);
+    await this.pollManager.writeHoldingRegister(REBOOT_REGISTER, REBOOT_VALUE);
   }
 
+  /** Write any holding register, unchecked. The snapshot picks it up on the next poll. */
   async unsafe_writeRegister(register: number, value: number): Promise<void> {
-    return this.writeRegister(register, value);
+    await this.pollManager.writeHoldingRegister(register, value);
   }
 
-  // ── Abstract methods (generation-specific) ──────────────────
+  private async _write(key: string, value: unknown, allowUnsafe: boolean): Promise<void> {
+    const definition: SettingDefinition | undefined = (SETTINGS as Record<string, SettingDefinition>)[key];
+    if (!definition) throw new TypeError(`unknown setting "${key}"`);
+    // The types already rule these out; these checks catch callers that bypass them.
+    if (definition.writable === false) throw new TypeError(`${key} is read only`);
+    if (definition.unsafe && !allowUnsafe) throw new TypeError(`${key} is unsafe; write it with unsafe_setSetting`);
 
-  abstract setTimedCharge(enabled: boolean): Promise<void>;
-  abstract setChargeTarget(percent: number): Promise<void>;
-  abstract setChargeSlot(slot: number, config: TimeSlotInput): Promise<void>;
-  abstract setChargeSlots(configs: TimeSlotInput[]): Promise<void>;
-  abstract setDischargeSlot(slot: number, config: TimeSlotInput): Promise<void>;
-  abstract setDischargeSlots(configs: TimeSlotInput[]): Promise<void>;
-  abstract setChargeRate(watts: number): Promise<void>;
-  abstract setChargeRatePercent(percent: number): Promise<void>;
-  abstract setDischargeRate(watts: number): Promise<void>;
-  abstract setDischargeRatePercent(percent: number): Promise<void>;
-  abstract setBatteryReserve(percent: number): Promise<void>;
-  abstract setBatteryPowerReserve(percent: number): Promise<void>;
-
-  // ── Protected helpers ───────────────────────────────────────
-
-  protected async writeRegister(register: number, value: number): Promise<void> {
-    const client = (this.pollManager as any).client;
-    const frame = encodeWriteHoldingRegisterRequest({
-      dataAdapterSerial: client.dataAdapterSerial ?? '**********',
-      slaveAddress: 0x11,
-      register,
-      value,
-    });
-    await client.sendRequest(frame);
+    const settingKey = key as keyof typeof SETTINGS;
+    if (!isSupported(settingKey, this.layout, this.capabilities)) {
+      throw new UnsupportedSettingError(key, this.model, this.pollManager.armFirmwareVersion);
+    }
+    // isSupported checked that the setting has a register on this layout.
+    const register = registerFor(settingKey, this.layout)!;
+    const raw = encodeSetting(definition, value as never);
+    await this.pollManager.writeHoldingRegister(register, raw);
+    this.pollManager.applyWrite(register, raw);
   }
 }
 
-// ── Shared validation helpers (exported for subclasses) ────────
+/** A single-phase inverter: Hybrid Gen1–Gen4, AC, All in One, PV and others. */
+export class SinglePhaseInverter extends GivEnergyInverter<'single_phase'> {
+  readonly layout = 'single_phase' as const;
 
-export { timeToInt, validateTime } from './catalogue/codec.js';
-
-export function validateStateOfCharge(percent: number): void {
-  if (!Number.isInteger(percent) || percent < 4 || percent > 100) {
-    throw new RangeError(`state of charge must be an integer 4-100, got ${percent}`);
+  /** @internal Use `GivEnergyInverter.connect()`. */
+  constructor(pollManager: PollManager) {
+    super(pollManager);
   }
 }
 
-export function validateRatePercent(percent: number): void {
-  if (!Number.isInteger(percent) || percent < 0 || percent > 100) {
-    throw new RangeError(`rate percent must be an integer 0-100, got ${percent}`);
+/** A three-phase inverter: Hybrid 3-phase, AC 3-phase and the commercial All in One. */
+export class ThreePhaseInverter extends GivEnergyInverter<'three_phase'> {
+  readonly layout = 'three_phase' as const;
+
+  /** @internal Use `GivEnergyInverter.connect()`. */
+  constructor(pollManager: PollManager) {
+    super(pollManager);
   }
 }

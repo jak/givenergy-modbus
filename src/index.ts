@@ -1,8 +1,5 @@
-export { GivEnergyInverter } from './inverter.js';
-export type { GivEnergyInverterOptions, TimeSlotInput, InverterIdentity } from './inverter.js';
-export { Gen2Inverter } from './inverters/gen2.js';
-export { Gen3Inverter } from './inverters/gen3.js';
-export { ThreePhaseInverter } from './inverters/three-phase.js';
+export { GivEnergyInverter, SinglePhaseInverter, ThreePhaseInverter } from './inverter.js';
+export type { GivEnergyInverterOptions, InverterIdentity, ModelOf, SnapshotOf } from './inverter.js';
 export { detectGeneration, modelToGeneration } from './generation.js';
 export type { InverterGeneration } from './generation.js';
 export { UnsupportedDeviceError, UnsupportedSettingError } from './errors.js';

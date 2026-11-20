@@ -15,6 +15,8 @@
     "test/capture.test.ts",
     "test/converters.test.ts",
     "test/poll-blocks.test.ts",
-    "test/poll-manager.test.ts"
+    "test/poll-manager.test.ts",
+    "test/inverter.test.ts",
+    "test/inverter-controls.test.ts"
   ]
 }
