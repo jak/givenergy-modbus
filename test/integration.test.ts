@@ -272,8 +272,9 @@ describe('Mock inverter frame building', () => {
     const framer = new Framer();
     const results = framer.decode(frame);
     expect(results.length).toBe(1);
-    expect(results[0].type).toBe('frame');
-    const pdu = decodePdu(results[0].data);
+    const [result] = results;
+    if (result.type !== 'frame') throw new Error(`expected a frame, got ${result.type}`);
+    const pdu = decodePdu(result.data);
     expect(pdu.type).toBe('transparent');
     if (pdu.type === 'transparent') {
       expect(pdu.registerValues).toEqual([0x1234, 0x5678]);

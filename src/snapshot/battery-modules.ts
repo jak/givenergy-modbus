@@ -23,13 +23,14 @@ type Cache = Map<number, number>;
 const EMPTY_SLOT_TEMPERATURE = -273;
 
 /**
- * Whether an LV battery module slot holds a battery: it has a serial (IR 110–114 not all zero)
+ * Whether an LV battery module slot holds a battery: it has a serial (IR 110–114 not all zero or spaces, #3)
  * and none of its temperatures (IR 76–79, 81, 103, 104) reads −273.0 °C. Empty slots can still echo
  * the stack totals IR 105/106 (the AC capture's 0x34–0x36 do), so energy.ts uses this check too.
  */
 export function isPresentModule(cache: Cache): boolean {
-  const { get } = zeroFilledReader(cache);
-  const hasSerial = [110, 111, 112, 113, 114].some((address) => get(address) !== 0);
+  const { get, text } = zeroFilledReader(cache);
+  // All-space serials (0x2020 registers) are ghost batteries too (#3).
+  const hasSerial = text(110, 5) !== '';
   const emptyTemperature = [76, 77, 78, 79, 81, 103, 104].some((address) => cache.has(address) && toSignedDeci(get(address)) === EMPTY_SLOT_TEMPERATURE);
   return hasSerial && !emptyTemperature;
 }

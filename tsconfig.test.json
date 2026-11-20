@@ -4,21 +4,5 @@
     "rootDir": ".",
     "noEmit": true
   },
-  "include": [
-    "src",
-    "test/**/*.test-d.ts",
-    "test/snapshot/**/*.ts",
-    "test/helpers/**/*.ts",
-    "test/catalogue*.ts",
-    "test/models.test.ts",
-    "test/capabilities.test.ts",
-    "test/capture.test.ts",
-    "test/converters.test.ts",
-    "test/poll-blocks.test.ts",
-    "test/poll-manager.test.ts",
-    "test/inverter.test.ts",
-    "test/inverter-controls.test.ts",
-    "test/inverter-schedules.test.ts",
-    "test/exports.test.ts"
-  ]
+  "include": ["src", "test"]
 }

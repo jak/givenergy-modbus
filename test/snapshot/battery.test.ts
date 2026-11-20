@@ -93,6 +93,13 @@ describe('battery quirks', () => {
     expect(module.temperatureMin).toBe(-5);
   });
 
+  it('quirk: skips a ghost battery whose serial is all spaces (0x2020 registers, #3)', () => {
+    // Moved from the 2.x snapshot-builder tests. Owners with two batteries saw a third whose
+    // serial registers read 0x2020: not zero, but no serial either.
+    const ghost = lvModule({ 110: 0x2020, 111: 0x2020, 112: 0x2020, 113: 0x2020, 114: 0x2020 });
+    expect(isPresentModule(ghost)).toBe(false);
+  });
+
   it('skips an empty slot: no serial, or temperatures reading −273.0 °C', () => {
     expect(isPresentModule(lvModule())).toBe(true);
     expect(isPresentModule(lvModule({ 110: 0 }))).toBe(false);

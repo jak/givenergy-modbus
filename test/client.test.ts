@@ -57,7 +57,7 @@ function waitForServerSocket(serverSockets: Socket[], timeoutMs: number): Promis
 function waitForData(socket: Socket, timeoutMs: number): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('timeout waiting for data')), timeoutMs);
-    socket.once('data', (data) => {
+    socket.once('data', (data: Buffer) => {
       clearTimeout(timer);
       resolve(data);
     });
