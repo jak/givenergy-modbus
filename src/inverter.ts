@@ -364,9 +364,7 @@ export abstract class GivEnergyInverter<L extends Layout = Layout> extends Event
       date.getMinutes(),
       date.getSeconds(),
     ];
-    for (const [offset, value] of fields.entries()) {
-      await this.pollManager.writeHoldingRegister(SYSTEM_TIME_REGISTER + offset, value);
-    }
+    await this._writeAll(fields.map((value, offset) => [SYSTEM_TIME_REGISTER + offset, value] as const));
   }
 
   /** Set the inverter clock to this machine's local time. */
