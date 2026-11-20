@@ -72,8 +72,8 @@ and a Modbus read of HR 540–599 times out. They belong to the Gateway 2 used w
 | HR | App name | Type / range | App value | Raw | Match | Notes |
 |---:|---|---|---|---:|:-:|---|
 | 104 | Enable Battery Self-Heating | toggle | off | 0 | ✅ | Not in GivTCP map. |
-| 313 | Inverter Charge Power Percentage | 0–100 % | 100 % | 100 | ✅ | GivTCP: `battery_charge_limit_ac`. |
-| 314 | Inverter Discharge Power Percentage | 0–100 % | 100 % | 100 | ✅ | GivTCP: `battery_discharge_limit_ac`. |
+| 313 | Inverter Charge Power Percentage | 1–100 % | 100 % | 100 | ✅ | GivTCP: `battery_charge_limit_ac`. The inverter rejects 0 (GivTCP sends 1). |
+| 314 | Inverter Discharge Power Percentage | 1–100 % | 100 % | 100 | ✅ | GivTCP: `battery_discharge_limit_ac`. The inverter rejects 0 (GivTCP sends 1). |
 
 ### Grid
 
