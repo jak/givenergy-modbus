@@ -42,7 +42,7 @@ If you just need to know what's at a given IP — without starting a full pollin
 import { GivEnergyInverter } from 'givenergy-modbus';
 
 const identity = await GivEnergyInverter.identify({ host: '192.168.1.100' });
-console.log(identity.serialNumber);   // e.g. "SD2227G895"
+console.log(identity.serialNumber);   // e.g. "FD0000A000"
 console.log(identity.model);          // e.g. "hybrid_gen3", "ac", "hybrid_3ph"
 console.log(identity.layout);         // "single_phase" or "three_phase"
 console.log(identity.deviceTypeCode); // raw device type code from HR 0

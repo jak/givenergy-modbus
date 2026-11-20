@@ -312,7 +312,7 @@ const devices = await discover();
 Discovery sends a UDP broadcast and listens for responses. You can also specify a subnet:
 
 ```ts
-const devices = await discover('10.29.0.0/24');
+const devices = await discover('192.168.1.0/24');
 ```
 
 ## Connect

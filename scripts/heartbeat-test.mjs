@@ -14,7 +14,18 @@ if (!existsSync(new URL('../dist/client.js', import.meta.url))) {
 const { Client } = await import('../dist/client.js');
 const { encodeReadHoldingRegistersRequest } = await import('../dist/pdu/encode.js');
 
-const host = process.argv[2] || '10.29.0.197';
+let host = process.argv[2];
+if (!host) {
+  const { discover } = await import('../dist/index.js');
+  console.log('No host specified, auto-discovering...');
+  const devices = await discover();
+  if (devices.length === 0) {
+    console.error('No GivEnergy inverters found. Provide a host as the first argument.');
+    process.exit(1);
+  }
+  host = devices[0].host;
+  console.log(`Using ${host}`);
+}
 const port = 8899;
 const t0 = Date.now();
 

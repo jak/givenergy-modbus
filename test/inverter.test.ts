@@ -68,9 +68,9 @@ describe('GivEnergyInverter', () => {
       ['a Gen3 (20xx, ARM 3xx)', 0x2001, 301, 'hybrid_gen3', 'single_phase'],
       ['a three-phase Hybrid (40xx)', 0x4004, 0, 'hybrid_3ph', 'three_phase'],
     ])('reads %s from one HR 0–59 request', async (_name, deviceTypeCode, arm, model, layout) => {
-      const server = await identifyAgainst(identityRegisters('SD2227G895', deviceTypeCode, arm));
+      const server = await identifyAgainst(identityRegisters('FD0000A000', deviceTypeCode, arm));
       try {
-        expect(await server.identify()).toEqual({ serialNumber: 'SD2227G895', deviceTypeCode, model, layout });
+        expect(await server.identify()).toEqual({ serialNumber: 'FD0000A000', deviceTypeCode, model, layout });
       } finally {
         server.close();
       }
@@ -100,7 +100,7 @@ describe('GivEnergyInverter', () => {
     });
 
     it('closes the connection after reading identity', async () => {
-      const server = await identifyAgainst(identityRegisters('SD2227G895', 0x2001, 899));
+      const server = await identifyAgainst(identityRegisters('FD0000A000', 0x2001, 899));
       try {
         await server.identify();
         // The server sees the close shortly after identify() resolves.
