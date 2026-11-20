@@ -16,14 +16,7 @@
  */
 import type { BatteryPause, SinglePhaseSchedules, ThreePhaseSchedules, TimeSlotConfig } from '../model/snapshot.js';
 import { toTimeslot } from '../model/converters.js';
-import {
-  CHARGE_SLOT_REGISTERS,
-  DISCHARGE_SLOT_REGISTERS,
-  THREE_PHASE_CHARGE_SLOT_REGISTERS,
-  THREE_PHASE_DISCHARGE_SLOT_REGISTERS,
-  type SimpleTimeslotRegisters,
-  type TimeslotRegisters,
-} from '../timeslot-registers.js';
+import { slotRegistersFor, type SlotRegisters } from '../timeslot-registers.js';
 import {
   readHolding,
   type BuildContext,
@@ -32,32 +25,22 @@ import {
   type ThreePhaseBuildContext,
 } from './read.js';
 
-/** Legacy (pre-ten-slot) single-phase slot 2 for charging. */
-const LEGACY_CHARGE_SLOT_2: SimpleTimeslotRegisters = { start: 31, end: 32 };
-
 /** HR 318: 0 off, 1 pause charging, 2 pause discharging, 3 pause both. */
-const PAUSE_MODES: readonly BatteryPause['mode'][] = ['off', 'charge', 'discharge', 'both'];
-
-type SlotRegisters = SimpleTimeslotRegisters | TimeslotRegisters;
+export const PAUSE_MODES: readonly BatteryPause['mode'][] = ['off', 'charge', 'discharge', 'both'];
 
 /**
- * The slots in `table` whose start and end registers were read, numbered from `firstSlot`. A
- * target is included when `withTargets`, the slot has a target register, and that register was
- * read.
+ * The slots in `table` whose start and end registers were read, numbered from 1 by position. A
+ * target is included when the slot has a target register (`slotRegistersFor` gives one only with
+ * `perSlotTargets`) and that register was read.
  */
-function slots(
-  registers: RegisterCaches,
-  table: readonly SlotRegisters[],
-  withTargets: boolean,
-  firstSlot = 1,
-): TimeSlotConfig[] {
+function slots(registers: RegisterCaches, table: readonly SlotRegisters[]): TimeSlotConfig[] {
   return table.flatMap((slot, position) => {
     const start = readHolding(registers, slot.start);
     const end = readHolding(registers, slot.end);
     if (start === undefined || end === undefined) return [];
-    const target = withTargets && 'targetStateOfCharge' in slot ? readHolding(registers, slot.targetStateOfCharge) : undefined;
+    const target = slot.targetStateOfCharge === undefined ? undefined : readHolding(registers, slot.targetStateOfCharge);
     return [{
-      slot: firstSlot + position,
+      slot: position + 1,
       ...toTimeslot(start, end),
       ...(target !== undefined ? { targetStateOfCharge: target } : {}),
     }];
@@ -90,30 +73,9 @@ export function buildSchedules(
   registers: RegisterCaches,
   context: BuildContext,
 ): SinglePhaseSchedules | ThreePhaseSchedules {
-  const { tenSlots, perSlotTargets } = context.capabilities;
-
-  if (context.layout === 'three_phase') {
-    const extra = (table: TimeslotRegisters[]) => (tenSlots ? table.slice(2) : []);
-    return {
-      charge: [
-        ...slots(registers, THREE_PHASE_CHARGE_SLOT_REGISTERS, false),
-        ...slots(registers, extra(CHARGE_SLOT_REGISTERS), perSlotTargets, 3),
-      ],
-      discharge: [
-        ...slots(registers, THREE_PHASE_DISCHARGE_SLOT_REGISTERS, false),
-        ...slots(registers, extra(DISCHARGE_SLOT_REGISTERS), perSlotTargets, 3),
-      ],
-    };
-  }
-
-  const chargeTable: readonly SlotRegisters[] = tenSlots
-    ? CHARGE_SLOT_REGISTERS
-    : [CHARGE_SLOT_REGISTERS[0], LEGACY_CHARGE_SLOT_2];
-  const dischargeTable = tenSlots ? DISCHARGE_SLOT_REGISTERS : DISCHARGE_SLOT_REGISTERS.slice(0, 2);
+  const charge = slots(registers, slotRegistersFor(context.layout, context.capabilities, 'charge'));
+  const discharge = slots(registers, slotRegistersFor(context.layout, context.capabilities, 'discharge'));
+  if (context.layout === 'three_phase') return { charge, discharge };
   const pause = batteryPause(registers, context);
-  return {
-    charge: slots(registers, chargeTable, perSlotTargets),
-    discharge: slots(registers, dischargeTable, perSlotTargets),
-    ...(pause ? { batteryPause: pause } : {}),
-  };
+  return { charge, discharge, ...(pause ? { batteryPause: pause } : {}) };
 }
