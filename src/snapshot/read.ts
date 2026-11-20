@@ -10,10 +10,22 @@ import type { SinglePhaseModel, ThreePhaseModel } from '../model/models.js';
 import type { InverterSnapshot } from '../model/snapshot.js';
 import { registersToString } from '../model/converters.js';
 
-/** Register values of the inverter's main device address, keyed by register number. */
+/** Register values, keyed by register number. */
 export interface RegisterCaches {
+  /** Holding registers of the inverter's main device address. */
   holding: Map<number, number>;
+  /** Input registers of the inverter's main device address. */
   input: Map<number, number>;
+  /**
+   * Input registers of each low-voltage battery module (BMS at 0x32, 0x33, …), in address
+   * order. Only modules that answered are listed.
+   */
+  batteryModules?: Map<number, number>[];
+  /**
+   * Input registers of each high-voltage battery control unit (0x70, 0x71, …), in address order.
+   * Only stacks that answered are listed.
+   */
+  batteryStacks?: Map<number, number>[];
 }
 
 interface BuildContextBase {

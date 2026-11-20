@@ -30,17 +30,36 @@ function toMap(record: Record<string, number>): Map<number, number> {
   return new Map(Object.entries(record).map(([address, value]) => [Number(address), value]));
 }
 
-export function reference(): RegisterCaches & { battery: Map<number, number> } {
+/** The reference unit. Its one battery module (slave 0x32, IR 60–119) is `batteryModules[0]`. */
+export function reference(): RegisterCaches & { batteryModules: Map<number, number>[] } {
   const file = JSON.parse(
     readFileSync(new URL('../fixtures/gen3-reference.json', import.meta.url), 'utf8'),
   ) as ReferenceFile;
-  return { holding: toMap(file.hr), input: toMap(file.ir), battery: toMap(file.battery) };
+  return { holding: toMap(file.hr), input: toMap(file.ir), batteryModules: [toMap(file.battery)] };
 }
 
-/** The inverter slave's registers from a capture. `inject` adds holding registers the capture lacks. */
+/**
+ * The inverter slave's registers from a capture, with every battery module (0x32–0x37) and
+ * battery control unit (0x70–0x77) the capture holds input registers for, in address order.
+ * `inject` adds holding registers the capture lacks.
+ */
 export function capture(name: string, inject: Record<number, number> = {}): RegisterCaches {
-  const { holding, input } = loadCapture(name).slave(0x11);
-  const registers = { holding: new Map(holding), input: new Map(input) };
+  const plant = loadCapture(name);
+  const { holding, input } = plant.slave(0x11);
+  const inputsAt = (from: number, to: number) => {
+    const caches: Map<number, number>[] = [];
+    for (let address = from; address <= to; address++) {
+      const slave = plant.slaves.get(address);
+      if (slave && slave.input.size > 0) caches.push(new Map(slave.input));
+    }
+    return caches;
+  };
+  const registers: RegisterCaches = {
+    holding: new Map(holding),
+    input: new Map(input),
+    batteryModules: inputsAt(0x32, 0x37),
+    batteryStacks: inputsAt(0x70, 0x77),
+  };
   for (const [address, value] of Object.entries(inject)) registers.holding.set(Number(address), value);
   return registers;
 }
