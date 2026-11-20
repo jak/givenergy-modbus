@@ -118,8 +118,11 @@ export interface Identity<M extends InverterModel = InverterModel> {
   batteryMaxPower?: number;
   /** Number of solar inputs (MPPT trackers), HR 3 high byte. Absent when it reads 0. */
   solarInputCount?: number;
-  /** USB device inserted in the inverter. HR 22: 0 none, 1 Wi-Fi dongle, 8 disk. */
-  usbDevice: 'none' | 'wifi' | 'disk' | 'unknown';
+  /**
+   * USB device inserted in the inverter. HR 22: 0 none, 1 or 2 Wi-Fi dongle (a Gen3 with a Wi-Fi
+   * dongle reads 2). Any other value is 'unknown': the sources disagree on the disk value (GivTCP 8, the external library 2, which is Wi-Fi on the reference unit).
+   */
+  usbDevice: 'none' | 'wifi' | 'unknown';
   /** CT ammeter enabled, HR 7. */
   ammeterEnabled: boolean;
   /** Grid code certification, HR 2 first two hex digits: 8 G98, 12 G99, 16 G98 NI, 17 G99 NI. */

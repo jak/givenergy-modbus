@@ -69,11 +69,17 @@ function batteryMaxPower(code: string, armFirmwareVersion: number): number | und
   return BATTERY_MAX_POWER[code];
 }
 
+/**
+ * HR 22. 0 none and 1 Wi-Fi, where GivTCP and the external library agree; 2 Wi-Fi, from the
+ * reference unit, which has a Wi-Fi dongle and reads 2 (the external library's 2 = disk is
+ * wrong there). The sources disagree on the disk value (GivTCP 8, the external library 2), so 8
+ * and anything else is 'unknown'.
+ */
 function usbDevice(value: number | undefined): Identity['usbDevice'] {
   switch (value) {
     case 0: return 'none';
     case 1: return 'wifi';
-    case 8: return 'disk';
+    case 2: return 'wifi';
     default: return 'unknown';
   }
 }

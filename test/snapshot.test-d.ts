@@ -113,7 +113,7 @@ test('identity enums', () => {
   type Identity = SinglePhaseSnapshot['identity'];
   expectTypeOf<Identity['batteryType']>().toEqualTypeOf<'lithium' | 'lead_acid'>();
   expectTypeOf<Identity['meterType']>().toEqualTypeOf<'ct_or_em418' | 'em115'>();
-  expectTypeOf<Identity['usbDevice']>().toEqualTypeOf<'none' | 'wifi' | 'disk' | 'unknown'>();
+  expectTypeOf<Identity['usbDevice']>().toEqualTypeOf<'none' | 'wifi' | 'unknown'>();
   expectTypeOf<{}>().toExtend<Pick<Identity, 'ratedPower' | 'batteryMaxPower' | 'certification'>>();
 });
 

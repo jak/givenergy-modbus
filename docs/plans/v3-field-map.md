@@ -18,6 +18,7 @@ Input for `website/migration-v3.md` (Task 19). Every field of the 2.x `InverterS
 |---|---|---|
 | `serialNumber` | `s.identity.serialNumber` | |
 | `modelCode` | `s.identity.deviceTypeCode` | Renamed: HR 0 is the device type code. |
+| (none) | `s.identity.usbDevice` | New in 3.x, HR 22. 0 `none`; 1 and 2 `wifi`; anything else `unknown`. The reference Gen3 has a Wi-Fi dongle in its USB port and reads 2, as does every capture, which contradicts the external library's 2 = disk. GivTCP says 8 is a disk and the external library says 2, so the disk value isn't decoded. |
 
 ## Status
 
