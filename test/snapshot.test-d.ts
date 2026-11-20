@@ -67,9 +67,9 @@ test('system mode is raw on single-phase and labelled on three-phase', () => {
 test('three-phase groups carry per-phase values', () => {
   expectTypeOf<ThreePhase<number>>().toEqualTypeOf<readonly [number, number, number]>();
   expectTypeOf<ThreePhaseSnapshot['eps']['phases'][0]>().toEqualTypeOf<{ voltage: number; current: number; power: number }>();
-  expectTypeOf<ThreePhaseSnapshot['grid']['phases'][2]>().toHaveProperty('voltage');
+  expectTypeOf<ThreePhaseSnapshot['grid']['phases'][2]>().toEqualTypeOf<{ voltage: number; current: number; power: number }>();
   expectTypeOf<ThreePhaseSnapshot['inverter']['phases'][1]>().toHaveProperty('power');
-  // IR 1083–1085 are not exposed: on the three-phase capture they don't sum to the load total.
+  // IR 1083–1085 are per-phase grid power, not load (research C's name), so load has no phases.
   expectTypeOf<ThreePhaseSnapshot['load']>().not.toHaveProperty('phases');
   expectTypeOf<SinglePhaseSnapshot['grid']>().not.toHaveProperty('phases');
   expectTypeOf<ThreePhaseSnapshot['battery']['priority']>().toEqualTypeOf<'load' | 'battery' | 'grid'>();

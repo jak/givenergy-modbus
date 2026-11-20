@@ -144,7 +144,13 @@ export function buildGrid(
       // Meter export IR 1081–1082 minus import IR 1079–1080, each uint32 ÷10 (GivTCP's scaling).
       power: round1(toDeci(uint32(1081)) - toDeci(uint32(1079))),
       frequency: frequency(ir(1067)),
-      phases: phases((p) => ({ voltage: toDeci(ir(1061 + p)), current: toDeci(ir(1064 + p)) })),
+      // IR 1083–1085 are per-phase grid power (research C calls them per-phase load): on the
+      // three-phase capture they sum to `power` and negate meter 0x01's per-phase power.
+      phases: phases((p) => ({
+        voltage: toDeci(ir(1061 + p)),
+        current: toDeci(ir(1064 + p)),
+        power: toInt16(ir(1083 + p)),
+      })),
     };
   }
 
@@ -237,7 +243,7 @@ export function buildLoad(
   const { ir, uint32 } = reader(registers);
 
   if (context.layout === 'three_phase') {
-    // IR 1083–1085 (per-phase load in research C) are not exposed: they don't sum to this total.
+    // No per-phase load: IR 1083–1085, which research C names per-phase load, are grid power.
     return { power: toDeci(uint32(1089)) };
   }
 

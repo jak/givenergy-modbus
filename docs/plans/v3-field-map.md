@@ -145,10 +145,20 @@ Settings come from the catalogue. Names follow the official app.
 
 ## Design choices the migration guide should explain
 
-- **Per-phase values are exact per group.** Three-phase `grid.phases` is `{ voltage, current }`
-  (IR 1061–1066), `inverter.phases` is `{ voltage, power }` (IR 1091–1096), `eps.phases` is
-  `{ voltage, current, power }` (IR 1181–1192) and `load.phases` is `{ power }` (IR 1083–1085).
-  The inverter reports nothing else per phase, so no field is zero-filled. `ThreePhase<T>` is
+- **Per-phase values are exact per group.** Three-phase `grid.phases` is
+  `{ voltage, current, power }` (IR 1061–1066, IR 1083–1085), `inverter.phases` is
+  `{ voltage, power }` (IR 1091–1096) and `eps.phases` is `{ voltage, current, power }`
+  (IR 1181–1192). There is no `load.phases`. The inverter reports nothing else per phase, so no
+  field is zero-filled.
+- **IR 1083–1085 are per-phase grid power, not load.** Research C names them per-phase load.
+  An earlier Phase C decision dropped them because, on the three-phase capture, they read
+  0 / −536 / +533 W against a 1636 W load. New evidence reverses that: they sum exactly to
+  `grid.power` (−3 W), and each phase is the negation of meter 0x01's per-phase active power
+  (0 / 537 / −534 W). They are `grid.phases[n].power`, signed W, with `grid.power`'s sign
+  (positive is export).
+- **Meter sign is as the meter reports it.** On the three-phase capture meter 0x01's total is
+  +3 W while `grid.power` is −3 W; on Gen2 the meter (−4 W) and the grid CT are both negative.
+  Meter values are not normalised to the grid sign convention. `ThreePhase<T>` is
   `readonly [T, T, T]` (L1, L2, L3), the same shape as the meter's per-phase values.
 - **Battery modules are a union on `kind`.** `'low_voltage'` modules come from each BMS
   (0x32–0x37); `'high_voltage'` modules (BMUs) carry `stack`, `index`, 24 cell voltages and
@@ -172,7 +182,6 @@ Settings come from the catalogue. Names follow the official app.
 
 | Register | Why |
 |---|---|
-| Three-phase IR 1083–1085 (per-phase load in research C) | On the three-phase capture they read 0 / −536 / 533 W against a 1636 W total, so they can't be per-phase load. `ThreePhaseLoad` has no `phases`. |
 | Single-phase IR 16 (power factor) | No decoding fits the captures. GivTCP's raw ÷10000 − 1 gives 0.098 on Gen1 while IR 24 delivers 3371 W, and −0.9 on AC and the All in One (raw 1000), where the All in One's IR 24 / IR 43 = 371 W / 369 VA put it near unity. Raw 10000 is 0, not unity, so an unread register can't default to 1 either. Exposed as `inverter.powerFactor` earlier in Phase C; removed. The CT meter's `powerFactor` is exposed. |
 | Three-phase IR 1068 (power factor) | Scaling unknown. |
 | Three-phase IR 1240–1241 (export power), IR 1244–1245 (meter 2 power), IR 1400–1403 (export 2 energy) | Meaning unknown. |

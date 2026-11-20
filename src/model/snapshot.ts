@@ -527,7 +527,7 @@ export interface SinglePhaseGrid extends Grid {
 }
 
 export interface ThreePhaseGrid extends Grid {
-  /** Per-phase grid voltage and current. There is no per-phase grid power register. */
+  /** Per-phase grid voltage, current and power. */
   phases: ThreePhase<{
     /**
      * Phase voltage, V. IR 1061–1063 ÷10, as read. On the three-phase capture these read
@@ -537,6 +537,13 @@ export interface ThreePhaseGrid extends Grid {
     voltage: number;
     /** Phase current, A. IR 1064–1066 ÷10. */
     current: number;
+    /**
+     * Phase power, W. IR 1083–1085 signed, with the same sign as `power` (positive is export).
+     * Research C names these per-phase load, but on the three-phase capture they read
+     * 0 / −536 / +533 W, which sum exactly to `power` (−3 W) and negate meter 0x01's per-phase
+     * active power (0 / 537 / −534 W).
+     */
+    power: number;
   }>;
 }
 
@@ -659,8 +666,8 @@ export interface SinglePhaseLoad extends Load {
 }
 
 /**
- * Three-phase load. Per-phase load is not exposed: research C names IR 1083–1085 per-phase
- * load, but on the three-phase capture they read 0 / −536 / 533 W against a 1636 W total.
+ * Three-phase load. There is no per-phase load register: research C names IR 1083–1085
+ * per-phase load, but they are per-phase grid power (`grid.phases[n].power`).
  */
 export interface ThreePhaseLoad extends Load {
   /** Energy consumed today, kWh. IR 1396–1397 uint32 ÷10, read directly (on `ac_3ph` too). */
