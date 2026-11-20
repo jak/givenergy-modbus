@@ -38,7 +38,7 @@ describe('buildSnapshot on the Gen3 reference unit', () => {
     expect(s.eps).toMatchObject({ frequency: 50.13 });
     expect(s.load).toEqual({ power: 311, energyTodayKwh: 49.9, energyTotalKwh: 20729.9 });
     expect(s.settings).toMatchObject({ ecoMode: true, exportPriority: 'loadFirst', acChargeUpperLimit: 100, batteryReserve: 4 });
-    expect(s.schedules.charge[0]).toEqual({ start: '23:30', end: '05:30', targetStateOfCharge: 100 });
+    expect(s.schedules.charge[0]).toEqual({ slot: 1, start: '23:30', end: '05:30', targetStateOfCharge: 100 });
     expect(s.schedules.batteryPause).toEqual({ mode: 'off', start: '00:00', end: '00:00' });
     expect(s.meters).toEqual([]);
   });

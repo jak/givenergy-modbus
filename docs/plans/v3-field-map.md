@@ -121,12 +121,13 @@ Settings come from the catalogue. Names follow the official app.
 
 | 2.x | 3.x | Notes |
 |---|---|---|
-| `chargeSlots` | `s.schedules.charge` | Always `TimeSlotConfig[]`; `targetStateOfCharge` is optional and present when `capabilities.perSlotTargets` (never on three-phase slots 1/2). Slot counts follow `capabilities.tenSlots`, not generation: 10, or 2 on legacy firmware (2.x Gen2 had 1 charge slot; slot 2 is HR 31/32). Three-phase now has 10 slots when `tenSlots` (2.x had 2). **Changed:** a slot whose start or end register is unread is left out, and so is an unread target; 2.x zero-filled them into `00:00`–`00:00` slots with 0 % targets (three-phase slots 3–10 and AC charge slot 1 on the captures). The full poll reads every slot register, so this only happens with partial data, and then array position no longer matches the slot number. |
+| `chargeSlots` | `s.schedules.charge` | Always `TimeSlotConfig[]`; `targetStateOfCharge` is optional and present when `capabilities.perSlotTargets` (never on three-phase slots 1/2). Slot counts follow `capabilities.tenSlots`, not generation: 10, or 2 on legacy firmware (2.x Gen2 had 1 charge slot; slot 2 is HR 31/32). Three-phase now has 10 slots when `tenSlots` (2.x had 2). **Changed:** a slot whose start or end register is unread is left out, and so is an unread target; 2.x zero-filled them into `00:00`–`00:00` slots with 0 % targets (three-phase slots 3–10 and AC charge slot 1 on the captures). The full poll reads every slot register, so this only happens with partial data. |
 | `dischargeSlots` | `s.schedules.discharge` | As above. |
 | `batteryPauseMode` (Gen3) | `s.schedules.batteryPause.mode` | Single-phase only, optional (`capabilities.pauseMode`). Values renamed: `disabled` → `off`, `pause_charge` → `charge`, `pause_discharge` → `discharge`, `pause_both` → `both`. An unnamed HR 318 value is now `unknown` (2.x read it as `disabled`). |
 | `timedDischargeSlot` (Gen3) | `s.schedules.batteryPause.start` / `.end` | Optional (`capabilities.pauseWindow`). **Fixed:** 2.x had HR 319/320 swapped; 3.x reads HR 319 as start and HR 320 as end, as the app shows them. |
 | `TimeSlot` | `TimeSlotConfig` without `targetStateOfCharge` | `TimeSlot` is gone. |
 | `TimeSlotConfig.targetStateOfCharge: number` | `TimeSlotConfig.targetStateOfCharge?: number` | Now optional. |
+| — | `TimeSlotConfig.slot: number` | **New:** the slot number, from 1, taken from the slot's registers rather than its array position, so a left-out slot doesn't renumber the ones after it (as `stack`/`index` on HV batteries). On the captures AC charge lists only slot 2 and HV Gen3 discharge starts at slot 3. `setChargeSlot`/`setDischargeSlot` (Phase D) can take the number from it. |
 | `BatteryPauseMode` | `BatteryPause['mode']` | |
 
 ## Meters

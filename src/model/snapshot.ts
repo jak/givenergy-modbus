@@ -29,6 +29,11 @@ export type ThreePhase<T> = readonly [T, T, T];
 
 /** A charge or discharge slot. Times are `"HH:MM"`, stored on the inverter as HHMM decimal. */
 export interface TimeSlotConfig {
+  /**
+   * Slot number, from 1, as the app numbers them. Taken from the slot's registers, not its
+   * array position, so it stays right when an unread slot is left out.
+   */
+  slot: number;
   /** Slot start, `"HH:MM"`. */
   start: string;
   /** Slot end, `"HH:MM"`. */
@@ -700,8 +705,7 @@ export interface BatteryPause {
  *
  * A slot whose start or end register is unread is left out rather than shown as a fake
  * `00:00`–`00:00` slot. The full poll always reads every slot register, so a gap only appears
- * with partial data (such as a capture), and then array position no longer matches the slot
- * number.
+ * with partial data (such as a capture). Each slot carries its own `slot` number either way.
  */
 export interface Schedules {
   /**
