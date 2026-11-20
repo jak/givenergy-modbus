@@ -322,11 +322,6 @@ export interface LowVoltageBatteryModule {
   voltage: number;
   /** Module output voltage, V. IR 82–83 uint32 ÷1000. */
   outputVoltage: number;
-  /**
-   * Average pack current, A. Positive is discharging. IR 95 signed ÷100. Present only on
-   * Gen3/AC ARM ≥ 214 with BMS firmware 3020–3999 or ≥ 4009; other firmware reports noise.
-   */
-  current?: number;
   /** Charge/discharge cycles, IR 96. */
   cycleCount: number;
   /** Number of cells, IR 97. */
