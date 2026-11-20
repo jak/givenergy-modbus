@@ -193,18 +193,7 @@ export abstract class GivEnergyInverter extends EventEmitter {
 
 // ── Shared validation helpers (exported for subclasses) ────────
 
-export function timeToInt(time: string): number {
-  const [h, m] = time.split(':').map(Number);
-  return h * 100 + m;
-}
-
-export function validateTime(time: string): void {
-  const match = /^(\d{1,2}):(\d{2})$/.exec(time);
-  if (!match) throw new RangeError(`invalid time format "${time}", expected "HH:MM"`);
-  const h = Number(match[1]);
-  const m = Number(match[2]);
-  if (h > 23 || m > 59) throw new RangeError(`invalid time "${time}", hour must be 0-23 and minute 0-59`);
-}
+export { timeToInt, validateTime } from './catalogue/codec.js';
 
 export function validateStateOfCharge(percent: number): void {
   if (!Number.isInteger(percent) || percent < 4 || percent > 100) {
