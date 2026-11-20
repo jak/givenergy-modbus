@@ -143,9 +143,10 @@ export function toInt32(high: number, low: number): number {
 }
 
 /**
- * Inverter power factor, offset-unsigned: raw ÷10000 − 1, rounded to 4 decimal places, so 10000
- * is 0 and the range is −1 to 1 (single-phase IR 16 and HR 52). The meter's power factor is
- * plain signed instead; see `toPowerFactor`.
+ * Offset-unsigned power factor: raw ÷10000 − 1, rounded to 4 decimal places, so 10000 is 0 and
+ * the range is −1 to 1. The v3 CT meter decoding (IR 80–83). GivTCP also reads the inverter's
+ * IR 16 and HR 52 this way, but IR 16 doesn't fit the captures and is not exposed. 2.x read the
+ * meter plain signed; see `toPowerFactor`.
  */
 export function toOffsetPowerFactor(raw: number): number {
   return Math.round((raw / 10000 - 1) * 10000) / 10000;

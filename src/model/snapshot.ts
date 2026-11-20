@@ -575,12 +575,6 @@ export interface InverterOutput {
 export interface SinglePhaseInverterOutput extends InverterOutput {
   /** AC output current, A. IR 10 ÷10. */
   current: number;
-  /**
-   * Output power factor, −1 to 1. IR 16 as raw ÷10000 − 1 (offset-unsigned, like HR 52).
-   * The scaling comes from GivTCP and the external library and hasn't been checked against
-   * the app. Three-phase IR 1068 is not exposed: its scaling is unknown.
-   */
-  powerFactor: number;
   /** Current at the inverter's AC terminal (doc `i_grid_port`), A. IR 58 ÷100. */
   terminalCurrent: number;
   /** Positive DC bus voltage, V. IR 3 ÷10. */
@@ -763,9 +757,10 @@ export interface Meter {
   /** Total apparent power, VA. IR 79, raw and unsigned (phase 1 on a single-phase meter). */
   apparentPowerTotal: number;
   /**
-   * Phase power factor, −1 to 1. IR 80–82 as raw ÷10000 − 1 (offset-unsigned, like the
-   * inverter's IR 16). Signed ÷10000 gives values above 1 on every capture; this decoding
-   * matches |active power ÷ apparent power|.
+   * Phase power factor, −1 to 1. IR 80–82 as raw ÷10000 − 1 (offset-unsigned). Signed
+   * ÷10000 gives values above 1 on every capture; this decoding matches |active power ÷
+   * apparent power|. 0 on phases 2 and 3 of a single-phase meter, whose raw 0 would decode
+   * to −1.
    */
   powerFactor: ThreePhase<number>;
   /** Total power factor, −1 to 1. IR 83 as raw ÷10000 − 1 (phase 1 on a single-phase meter). */

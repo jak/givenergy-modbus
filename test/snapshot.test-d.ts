@@ -76,6 +76,11 @@ test('three-phase groups carry per-phase values', () => {
   expectTypeOf<SinglePhaseSnapshot['battery']>().not.toHaveProperty('priority');
 });
 
+test('the inverter has no power factor: IR 16 fits no decoding on the captures', () => {
+  expectTypeOf<SinglePhaseSnapshot['inverter']>().not.toHaveProperty('powerFactor');
+  expectTypeOf<ThreePhaseSnapshot['inverter']>().not.toHaveProperty('powerFactor');
+});
+
 test('energy fields end in Kwh', () => {
   expectTypeOf<SinglePhaseSnapshot['battery']['energy']>().toHaveProperty('throughputTotalKwh');
   expectTypeOf<SinglePhaseSnapshot['grid']['energy']>().toHaveProperty('importTodayKwh');

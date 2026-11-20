@@ -47,9 +47,9 @@ function meter({ slaveAddress, input, product }: MeterCaches): Meter | null {
   const activePower = phases(68, signed);
   const reactivePower = phases(72, signed);
   const apparentPower = phases(76, apparent);
-  // Offset-unsigned (raw ÷10000 − 1), like the inverter's IR 16. Signed ÷10000 (2.x) gives values
-  // above 1 on every capture; the offset decode matches |P / S|.
-  const powerFactor = phases(80, toOffsetPowerFactor);
+  // Offset-unsigned (raw ÷10000 − 1). Signed ÷10000 (2.x) gives values above 1 on every capture;
+  // the offset decode matches |P / S|.
+  let powerFactor = phases(80, toOffsetPowerFactor);
   let activePowerTotal = toInt16(get(71));
   let reactivePowerTotal = toInt16(get(75));
   let apparentPowerTotal = apparent(get(79));
@@ -57,6 +57,9 @@ function meter({ slaveAddress, input, product }: MeterCaches): Meter | null {
 
   // A single-phase meter leaves the total registers at 0, so use phase 1 (2.x).
   if (voltage[1] === 0 && voltage[2] === 0) {
+    // Its unused phases read raw 0, which offset decoding turns into −1: report 0 on a phase
+    // with no voltage, like every other value there.
+    powerFactor = [powerFactor[0], 0, 0];
     if (activePowerTotal === 0) activePowerTotal = activePower[0];
     if (reactivePowerTotal === 0) reactivePowerTotal = reactivePower[0];
     if (apparentPowerTotal === 0) apparentPowerTotal = apparentPower[0];

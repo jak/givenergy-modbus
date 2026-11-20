@@ -83,6 +83,13 @@ describe('meter scaling quirks', () => {
     expect(Math.abs(threePhase.activePower[1] / threePhase.apparentPower[1])).toBeCloseTo(Math.abs(threePhase.powerFactor[1]), 2);
   });
 
+  it('reports power factor 0 on the unused phases of a single-phase meter, where raw 0 would decode to −1', () => {
+    // Gen2 capture: IR 80–82 = 10050 / 0 / 0, with phase 2 and 3 voltage 0. Offset decoding
+    // turns raw 0 into −1, a full leading power factor on a phase with no voltage.
+    expect(gen2.voltage).toEqual([244.6, 0, 0]);
+    expect(gen2.powerFactor).toEqual([0.005, 0, 0]);
+  });
+
   it('reads current ÷100, although the three-phase meter 0x01 only fits V × I = S at ÷10', () => {
     // Quirk, not special-cased: phase 2 reads IR 64 = 32. At ÷100 that is 0.32 A, and
     // 231.2 V × 0.32 A = 74 VA against S = 741 VA; at ÷10 (3.2 A) it would be 740 VA.
