@@ -106,11 +106,7 @@ const MAX_BATTERY_STACKS = 8;
 const BATTERY_MODULE_BASE_SLAVE = 0x50;
 const BATTERY_MODULE_STACK_OFFSET = 120;
 const MAX_BATTERY_MODULES = 16;
-const HIGH_VOLTAGE_BATTERY_SLAVES = [
-  BATTERY_AGGREGATOR_SLAVE,
-  ...Array.from({ length: MAX_BATTERY_STACKS }, (_, n) => BATTERY_CONTROL_UNIT_BASE_SLAVE + n),
-  ...Array.from({ length: MAX_BATTERY_MODULES }, (_, k) => BATTERY_MODULE_BASE_SLAVE + k),
-];
+
 
 /**
  * A read (inverter block, battery slot, meter address) that goes unanswered this many live polls
@@ -193,6 +189,14 @@ export class PollManager extends EventEmitter {
   private _lastFullRefresh = 0;
   private _previousSnapshot: InverterSnapshot | null = null;
   private _polling = false;
+  /** The poll in progress, which `stop()` waits for. */
+  private _pollPromise: Promise<void> | null = null;
+  /** Set by `stop()`: pending and new delays end at once, so an in-flight poll unwinds quickly. */
+  private _stopped = false;
+  /** Pending `_delay` timers, ended early by `stop()`. */
+  private readonly _delays = new Set<() => void>();
+  /** Set once `start()`'s first poll has finished; later polls report problems through events. */
+  private _startPollDone = false;
   private _reconnecting = false;
   private _reconnectAbort = false;
   private _identified: Identified | null = null;
@@ -211,6 +215,10 @@ export class PollManager extends EventEmitter {
   private readonly _misses = new Map<string, number>();
   /** Reads no longer requested, by `requestKey`. */
   private readonly _unanswered = new Set<string>();
+  /** Reads answered at least once this session; these are never dropped as unanswered. */
+  private readonly _everAnswered = new Set<string>();
+  /** Consecutive full refreshes each device scan read went unanswered, for expiring stale data. */
+  private readonly _failedScans = new Map<string, number>();
   /** Meters whose product registers (static) have been read this session. */
   private readonly _meterProductRead = new Set<number>();
 
@@ -256,28 +264,60 @@ export class PollManager extends EventEmitter {
    * connection) when the device is a plant controller or an unknown device type.
    */
   async start(): Promise<void> {
+    this._stopped = false;
+    this._reconnectAbort = false;
+    this._startPollDone = false;
     this.emit('debug', `connecting to ${this.options.host}:${this.options.port}`);
     await this.client.connect();
     this.emit('debug', 'connected');
     this._started = true;
     await this._executePoll(true);
+    this._startPollDone = true;
     if (this._unsupported) {
       const error = this._unsupported;
       await this.stop();
       throw error;
     }
+    if (this._stopped) return;
     this._pollTimer = setInterval(() => this._executePoll(false), this.options.pollIntervalMs);
   }
 
+  /**
+   * Stop polling and close the connection. Waits for a poll in progress to finish; after this
+   * resolves, no more events are emitted and no timers are left running.
+   */
   async stop(): Promise<void> {
+    this._stopped = true;
     this._reconnectAbort = true;
+    this._started = false;
     if (this._pollTimer) {
       clearInterval(this._pollTimer);
       this._pollTimer = null;
     }
+    this._endDelays();
     await this.client.close();
-    this._started = false;
+    await this._pollPromise?.catch(() => {});
     this._reconnecting = false;
+  }
+
+  /**
+   * Emit an event without letting a throwing listener break polling, escape as an unhandled
+   * rejection, or replace a write error. The listener's error is reported as `debug`.
+   */
+  override emit(event: string | symbol, ...args: unknown[]): boolean {
+    try {
+      return super.emit(event, ...args);
+    } catch (err) {
+      if (event !== 'debug') {
+        const message = err instanceof Error ? err.message : String(err);
+        try {
+          super.emit('debug', `a '${String(event)}' listener threw: ${message}`);
+        } catch {
+          // A throwing debug listener has nowhere left to report to.
+        }
+      }
+      return true;
+    }
   }
 
   /** The resolved model. Throws before the first snapshot. */
@@ -554,17 +594,22 @@ export class PollManager extends EventEmitter {
    * Count the reads that weren't answered this poll, and stop requesting one once it misses
    * `UNANSWERED_AFTER_MISSES` live polls in a row. Only called for a live poll, so a dead link
    * doesn't mark every read unanswered. `essential` reads (the sanity registers' blocks) are
-   * never dropped: without them no snapshot can be built.
+   * never dropped, because without them no snapshot can be built, and neither is a read that has
+   * answered before this session.
    */
   private _recordMisses(requested: readonly ReadRequest[], essential: ReadonlySet<string> = new Set()): void {
+    // A poll cut short by stop() says nothing about what the inverter answers.
+    if (this._stopped) return;
     const before = this._context()?.capabilities;
     for (const request of requested) {
       const key = requestKey(request);
       if (this._answeredThisPoll(request)) {
         this._misses.delete(key);
+        this._everAnswered.add(key);
         continue;
       }
-      if (essential.has(key)) continue;
+      // A read that has answered before is having a bad moment, not unsupported.
+      if (essential.has(key) || this._everAnswered.has(key)) continue;
       const misses = (this._misses.get(key) ?? 0) + 1;
       this._misses.set(key, misses);
       if (misses >= UNANSWERED_AFTER_MISSES) {
@@ -610,9 +655,18 @@ export class PollManager extends EventEmitter {
     return requested;
   }
 
-  private async _executePoll(fullRefresh = false): Promise<void> {
-    if (this._polling) return;
+  /** Run a poll, unless one is already running (then wait for that one). */
+  private _executePoll(fullRefresh = false): Promise<void> {
+    if (this._polling) return this._pollPromise ?? Promise.resolve();
     this._polling = true;
+    const poll = this._runPoll(fullRefresh).finally(() => {
+      this._polling = false;
+    });
+    this._pollPromise = poll;
+    return poll;
+  }
+
+  private async _runPoll(fullRefresh: boolean): Promise<void> {
     this._receivedThisPoll = [];
     const now = Date.now();
     const doFull = fullRefresh || (now - this._lastFullRefresh >= this.options.fullRefreshIntervalMs);
@@ -684,21 +738,36 @@ export class PollManager extends EventEmitter {
           clearInterval(this._pollTimer);
           this._pollTimer = null;
         }
+        // During start() the error is thrown from start(); later, it can only be reported.
+        if (this._startPollDone && this._started) this.emit('lost', error);
         return;
       }
       this.emit('debug', `poll failed: ${error.message}`);
       this._handlePollResult(null, error);
-    } finally {
-      this._polling = false;
     }
   }
 
   /**
-   * Forget a device's input registers before a scan, so a device that stops answering drops out.
-   * Meter product registers are static and read once, so they are kept.
+   * Expire a scanned device's data after it went unanswered on two full refreshes in a row, so
+   * a device that stops answering drops out of the snapshot while one failed scan keeps the last
+   * good data. Meter product registers are static and read once, so they are kept.
    */
-  private _forget(slaves: Iterable<number>): void {
-    for (const slave of slaves) this._devices.get(slave)?.input.clear();
+  private _expireStale(reads: readonly ReadRequest[]): void {
+    if (this._stopped) return;
+    for (const read of reads) {
+      const key = requestKey(read);
+      if (this._answeredThisPoll(read)) {
+        this._failedScans.delete(key);
+        continue;
+      }
+      const failures = (this._failedScans.get(key) ?? 0) + 1;
+      this._failedScans.set(key, failures);
+      const device = this._devices.get(read.slave);
+      if (failures >= 2 && device && device.input.size > 0) {
+        this.emit('debug', `${requestLabel(read)} unanswered on ${failures} full refreshes; dropping its last data`);
+        device.input.clear();
+      }
+    }
   }
 
   /**
@@ -721,11 +790,10 @@ export class PollManager extends EventEmitter {
       : LOW_VOLTAGE_BATTERY_SLAVES.map((slave) => input(slave, DEVICE_REGISTER_START, DEVICE_REGISTER_COUNT));
     const meterReads = METER_SLAVES.map((slave) => input(slave, DEVICE_REGISTER_START, METER_DATA_REGISTER_COUNT));
 
-    this._forget(highVoltageBattery ? HIGH_VOLTAGE_BATTERY_SLAVES : LOW_VOLTAGE_BATTERY_SLAVES);
-    this._forget(METER_SLAVES);
-    this._recordMisses(await this._requestBatch([...batteryReads, ...meterReads], this.timing.scanRetries));
-
-    if (highVoltageBattery) await this._scanBatteryStacks();
+    const firstLevel = [...batteryReads, ...meterReads];
+    this._recordMisses(await this._requestBatch(firstLevel, this.timing.scanRetries));
+    const stackReads = highVoltageBattery ? await this._scanBatteryStacks() : [];
+    this._expireStale([...firstLevel, ...stackReads]);
 
     const productReads = meterReads
       .filter((read) => this._answeredThisPoll(read) && !this._meterProductRead.has(read.slave))
@@ -737,12 +805,12 @@ export class PollManager extends EventEmitter {
     }
   }
 
-  /** Step 2 of `_scanDevices`: the high-voltage control units and their modules. */
-  private async _scanBatteryStacks(): Promise<void> {
+  /** Step 2 of `_scanDevices`: the high-voltage control units and their modules. Returns their reads. */
+  private async _scanBatteryStacks(): Promise<ReadRequest[]> {
     const reportedStacks = this._devices.get(BATTERY_AGGREGATOR_SLAVE)?.input.get(BATTERY_AGGREGATOR_STACK_COUNT_REGISTER);
     if (reportedStacks === undefined) {
       this.emit('debug', 'battery aggregator did not answer; skipping the high-voltage battery scan');
-      return;
+      return [];
     }
     const stackCount = Math.min(reportedStacks, MAX_BATTERY_STACKS);
     this.emit('debug', `battery aggregator reports ${stackCount} stack(s)`);
@@ -761,13 +829,30 @@ export class PollManager extends EventEmitter {
         input(BATTERY_MODULE_BASE_SLAVE + module, DEVICE_REGISTER_START + BATTERY_MODULE_STACK_OFFSET * stack));
     });
     this._recordMisses(await this._requestBatch(moduleReads, this.timing.scanRetries));
+    return [...controlUnitReads, ...moduleReads];
   }
 
+  /** Wait `ms`, or less if `stop()` is called meanwhile. */
   private _delay(ms: number): Promise<void> {
-    return new Promise(r => setTimeout(r, ms));
+    if (this._stopped) return Promise.resolve();
+    return new Promise((resolve) => {
+      const end = () => {
+        clearTimeout(timer);
+        this._delays.delete(end);
+        resolve();
+      };
+      const timer = setTimeout(end, ms);
+      this._delays.add(end);
+    });
   }
 
-  _handlePollResult(snapshot: InverterSnapshot | null, err: Error | null): void {
+  private _endDelays(): void {
+    for (const end of [...this._delays]) end();
+  }
+
+  private _handlePollResult(snapshot: InverterSnapshot | null, err: Error | null): void {
+    // A poll that finishes after stop() reports nothing.
+    if (!this._started) return;
     if (snapshot) {
       this._failCount = 0;
       this._previousSnapshot = snapshot;
@@ -804,8 +889,10 @@ export class PollManager extends EventEmitter {
       try {
         await this.client.close();
         await this.client.connect();
+        if (this._reconnectAbort) break;
         // Try a full poll to confirm the connection works
         await this._executePoll(true);
+        if (this._reconnectAbort || !this._started) break;
 
         if (this._cache && this._failCount === 0) {
           this.emit('debug', 'reconnected successfully');
