@@ -159,8 +159,11 @@ export interface SinglePhaseStatus extends Status {
    * high, 15 meter communication. Not IR 56, which old GivTCP read by mistake.
    */
   batteryWarnings: string[];
-  /** Total hours of operation, IR 47–48 uint32. */
-  hoursOfOperation: number;
+  /**
+   * Total hours of operation, IR 47–48 uint32. Absent when the value is over 100 years
+   * (876,000 h), which marks a bad read: the HV Gen3 capture reads IR 47 = 11034, IR 48 = 0.
+   */
+  hoursOfOperation?: number;
   /** Inverter start-up countdown, s, IR 38. */
   countdownSeconds: number;
 }

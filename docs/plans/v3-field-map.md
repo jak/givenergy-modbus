@@ -24,7 +24,7 @@ Input for `website/migration-v3.md` (Task 19). Every field of the 2.x `InverterS
 | 2.x | 3.x | Notes |
 |---|---|---|
 | `systemTime` | `s.status.systemTime` | |
-| `hoursOfOperation` | `s.status.hoursOfOperation` | Single-phase only (IR 47–48). |
+| `hoursOfOperation` | `s.status.hoursOfOperation` | Single-phase only (IR 47–48). Optional: absent when over 100 years, which marks a bad read (the HV Gen3 capture reads 723 million hours). |
 
 ## Solar
 
