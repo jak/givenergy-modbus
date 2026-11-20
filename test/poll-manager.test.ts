@@ -362,6 +362,59 @@ describe('PollManager against a mock inverter', { timeout: 20_000 }, () => {
     });
   });
 
+  describe('model resolution', () => {
+    /**
+     * Answer the first HR 0 read with `corrupt` patched over the real block; later reads are good.
+     * The corrupt reply has the request's shape, so it resolves the request like a real reply.
+     */
+    async function withCorruptFirstHoldingBlock(corrupt: Record<number, number>) {
+      const devices = referenceDevices();
+      let first = true;
+      const setup = await setUp(devices, {
+        silent: (request) => {
+          // A single-phase unit doesn't answer the three-phase input blocks.
+          if (request.slaveAddress === 0x11 && request.functionCode === 0x04 && request.baseRegister >= 1000) return true;
+          if (!first || !isInverterRead(request, 0x03, 0)) return false;
+          first = false;
+          const values = setup.mock.valuesOf(devices.get(0x11)!, 0x03, 0, 60)!;
+          for (const [address, value] of Object.entries(corrupt)) values[Number(address)] = value;
+          setImmediate(() => setup.mock.push(0x11, 0x03, 0, values));
+          return true;
+        },
+      });
+      return setup;
+    }
+
+    it('re-resolves the model until a snapshot passes the sanity check, so a wrong first HR 0 does not stick', async () => {
+      // A plausible-looking first block claiming a three-phase Hybrid: this single-phase unit
+      // doesn't answer the three-phase sanity register (IR 1128), so no snapshot passes with it.
+      const { pm, poll } = await withCorruptFirstHoldingBlock({ 0: 0x4004 });
+      await pm.start();
+      expect(() => pm.getData()).toThrow('not started');
+      await poll();
+      expect(pm.getData().model).toBe('hybrid_gen3');
+      expect(pm.getData().layout).toBe('single_phase');
+    });
+
+    it('does not refuse the device on an HR 0 block whose own sanity registers are corrupt', async () => {
+      // Modbus version 99.99 (HR 34) marks the block corrupt; its 0x5101 would otherwise read as an EMS.
+      const { pm, poll, debug } = await withCorruptFirstHoldingBlock({ 0: 0x5101, 34: 9999 });
+      await pm.start();
+      expect(debug).toContain('HR 0 block fails its sanity registers; not resolving the model from it');
+      await poll();
+      expect(pm.getData().model).toBe('hybrid_gen3');
+    });
+
+    it('keeps the model once a snapshot built with it has passed the sanity check', async () => {
+      const devices = referenceDevices();
+      const { pm, poll } = await setUp(devices);
+      await pm.start();
+      devices.get(0x11)!.holding!.set(0, 0x4004);
+      await poll();
+      expect(pm.getData().model).toBe('hybrid_gen3');
+    });
+  });
+
   describe('unanswered blocks', () => {
     it('stops requesting HR 300 after three polls without an answer, and turns acSettingsBlock off', async () => {
       const { mock, pm, debug, poll } = await setUp(referenceDevices(), {
