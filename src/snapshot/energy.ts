@@ -14,6 +14,7 @@ import {
   type SinglePhaseBuildContext,
   type ThreePhaseBuildContext,
 } from './read.js';
+import { isPresentModule } from './battery-modules.js';
 
 interface LoadEnergy {
   energyTodayKwh: number;
@@ -50,11 +51,6 @@ function deciUint32(cache: Map<number, number>, high: number): number {
   return toDeci(toUint32(cache.get(high) ?? 0, cache.get(high + 1) ?? 0));
 }
 
-/** A module slot is present when its serial number (IR 110–114) is not all zero. */
-function hasSerial(module: Map<number, number>): boolean {
-  return [110, 111, 112, 113, 114].some((address) => (module.get(address) ?? 0) !== 0);
-}
-
 interface Totals {
   charge: number;
   discharge: number;
@@ -80,12 +76,12 @@ function batteryTotals(registers: RegisterCaches): Totals | undefined {
       const stacks = registers.batteryStacks ?? [];
       if (stacks.length === 0) return undefined;
       return {
-        charge: round2(stacks.reduce((sum, stack) => sum + deciUint32(stack, 82), 0)),
-        discharge: round2(stacks.reduce((sum, stack) => sum + deciUint32(stack, 84), 0)),
+        charge: round2(stacks.reduce((sum, stack) => sum + deciUint32(stack.controlUnit, 82), 0)),
+        discharge: round2(stacks.reduce((sum, stack) => sum + deciUint32(stack.controlUnit, 84), 0)),
       };
     },
     () => {
-      const module = (registers.batteryModules ?? []).find(hasSerial);
+      const module = (registers.batteryModules ?? []).find(isPresentModule);
       if (!module) return undefined;
       return { charge: toDeci(module.get(106) ?? 0), discharge: toDeci(module.get(105) ?? 0) };
     },

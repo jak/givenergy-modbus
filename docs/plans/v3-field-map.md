@@ -64,8 +64,8 @@ Input for `website/migration-v3.md` (Task 19). Every field of the 2.x `InverterS
 | `voltage` | `voltage` | `s.battery.stacks[stack].voltage` | 2.x copied the stack voltage onto every HV module. |
 | `dischargeEnergyTotalKwh` | `dischargeTotalKwh` | `s.battery.stacks[stack].energy.dischargeTotalKwh` | 2.x reported 0 on HV modules. |
 | `chargeEnergyTotalKwh` | `chargeTotalKwh` | `s.battery.stacks[stack].energy.chargeTotalKwh` | 2.x reported 0 on HV modules. |
-| `temperatureMax` | `temperatureMax` | `temperatureMax` | Now signed. |
-| `temperatureMin` | `temperatureMin` | `temperatureMin` | Now signed. |
+| `temperatureMax` | `temperatureMax` | `temperatureMax` | Now signed. HV: over the module's sensor count from the BCU (IR 68 ÷ IR 64, 12 on every capture); 2.x took 24 values, including IR 102–113. |
+| `temperatureMin` | `temperatureMin` | `temperatureMin` | Now signed. HV: as `temperatureMax`. |
 | `cycleCount` | `cycleCount` | `s.battery.stacks[stack].cycleCount` | 2.x copied the stack's count onto every HV module. |
 | `cellVoltages` | `cellVoltages` | `cellVoltages` | |
 | `stack?` | — | `stack` | Required on HV modules, absent on LV. |
@@ -173,6 +173,7 @@ Settings come from the catalogue. Names follow the official app.
 | Three-phase IR 1068 (power factor) | Scaling unknown. |
 | Three-phase IR 1240–1241 (export power), IR 1244–1245 (meter 2 power), IR 1400–1403 (export 2 energy) | Meaning unknown. |
 | LV battery IR 115 | Meaning unknown. |
+| HV battery control unit IR 79 (stack power) | Unit unknown: GivTCP shows it ÷1000 as kW, but the captures read −3 and −16 while voltage × current is about −380 W and −1750 W. `voltage` and `current` are exposed. |
 | HR 4141–4142 (inverter export total) | Not in any polled block. |
 
 ## Dropped

@@ -347,9 +347,12 @@ export interface LowVoltageBatteryModule {
   remainingCapacityAh: number;
   /** Second design capacity field, Ah. IR 101–102 uint32 ÷100. Meaning beyond the name is unknown. */
   designCapacity2Ah: number;
-  /** BMS status bytes, raw: IR 90 low, IR 90 high, IR 91 low, IR 91 high, IR 92 low, IR 92 high, IR 93 low. */
+  /**
+   * BMS status bytes, raw, in GivTCP's `status_1`–`status_7` order: IR 90 high, IR 90 low,
+   * IR 91 high, IR 91 low, IR 92 high, IR 92 low, IR 93 high.
+   */
   statusBytes: number[];
-  /** BMS warning bytes, raw: IR 94 low, IR 94 high. */
+  /** BMS warning bytes, raw: IR 94 high, IR 94 low (GivTCP `warning_1`, `warning_2`). */
   warningBytes: number[];
   /** Force-discharge flag, IR 107, raw. Only 0 has been seen. */
   forceDischargeFlag: number;
@@ -372,11 +375,21 @@ export interface HighVoltageBatteryModule {
   stack: number;
   /** Index of the module within its stack, from 0. */
   index: number;
-  /** Module serial number, IR 114–118 (10 ASCII characters). */
+  /**
+   * Module serial number, IR 114–118 (10 ASCII characters). On the All in One capture IR 114
+   * reads 0 (with "HX" at IR 110), so only the last eight characters come through.
+   */
   serialNumber: string;
-  /** Cell voltages, V, cell 1 first. IR 60–83 ÷1000 (24 cells). */
+  /**
+   * Cell voltages, V, cell 1 first. IR 60 onward ÷1000: the stack's cell voltage count (BCU
+   * IR 67) ÷ module count (BCU IR 64) cells, 24 on every capture.
+   */
   cellVoltages: number[];
-  /** Cell temperatures, °C, cell 1 first. IR 90–113 signed ÷10 (24 cells). */
+  /**
+   * Temperature sensor readings, °C. IR 90 onward signed ÷10: the stack's temperature sensor
+   * count (BCU IR 68) ÷ module count (BCU IR 64) values, 12 on every capture. Some modules
+   * also fill IR 102–113 with temperature-like values; they are not read.
+   */
   cellTemperatures: number[];
   /** Highest of `cellTemperatures`, °C. */
   temperatureMax: number;
@@ -407,7 +420,7 @@ export interface BatteryStack {
   status: BatteryStackStatus;
   /** Number of modules, IR 64. */
   moduleCount: number;
-  /** Cells per module, IR 65. */
+  /** Cells per module, IR 65. Reads 0 on every capture; `cellVoltageCount ÷ moduleCount` is reliable. */
   cellsPerModule: number;
   /** Cell voltage sensor count, IR 67 (a count, not a voltage). */
   cellVoltageCount: number;
@@ -417,10 +430,8 @@ export interface BatteryStack {
   voltage: number;
   /** Load-side voltage, V. IR 74 ÷10. */
   loadVoltage: number;
-  /** Stack current, A. IR 76 signed ÷10. */
+  /** Stack current, A. IR 76 signed ÷10. Negative while discharging on every capture. */
   current: number;
-  /** Stack power, W. IR 79 (GivTCP shows it ÷1000 as kW). */
-  power: number;
   /** Highest module state of charge, %. IR 80 high byte. */
   stateOfChargeMax: number;
   /** Lowest module state of charge, %. IR 80 low byte. */

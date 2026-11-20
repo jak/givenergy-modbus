@@ -21,11 +21,19 @@ export interface RegisterCaches {
    * order. Only modules that answered are listed.
    */
   batteryModules?: Map<number, number>[];
+  /** Each high-voltage battery stack that answered, in address order (stack n at 0x70 + n). */
+  batteryStacks?: BatteryStackCaches[];
+}
+
+/** Input registers of one high-voltage battery stack. */
+export interface BatteryStackCaches {
+  /** The battery control unit (BCU) at 0x70 + n, IR 60–119. */
+  controlUnit: Map<number, number>;
   /**
-   * Input registers of each high-voltage battery control unit (0x70, 0x71, …), in address order.
-   * Only stacks that answered are listed.
+   * Its battery modules (BMUs) at 0x50 + k, in address order. Stack n's registers are read at
+   * IR 60 + 120 × n but stored here from IR 60, as the 2.x poll manager stores them.
    */
-  batteryStacks?: Map<number, number>[];
+  modules: Map<number, number>[];
 }
 
 interface BuildContextBase {

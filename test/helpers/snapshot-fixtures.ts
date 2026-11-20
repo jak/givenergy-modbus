@@ -54,11 +54,14 @@ export function capture(name: string, inject: Record<number, number> = {}): Regi
     }
     return caches;
   };
+  const controlUnits = inputsAt(0x70, 0x77);
+  // Every capture has at most one stack, whose modules are read from IR 60.
+  if (controlUnits.length > 1) throw new Error(`${name}: more than one battery stack is not supported here`);
   const registers: RegisterCaches = {
     holding: new Map(holding),
     input: new Map(input),
     batteryModules: inputsAt(0x32, 0x37),
-    batteryStacks: inputsAt(0x70, 0x77),
+    batteryStacks: controlUnits.map((controlUnit) => ({ controlUnit, modules: inputsAt(0x50, 0x5f) })),
   };
   for (const [address, value] of Object.entries(inject)) registers.holding.set(Number(address), value);
   return registers;
