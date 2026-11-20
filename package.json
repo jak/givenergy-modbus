@@ -22,8 +22,9 @@
     "script:dump-registers": "node scripts/dump-registers.mjs",
     "script:full-scan": "node scripts/full-scan.mjs",
     "script:identify": "node scripts/identify.mjs",
-    "docs": "typedoc && vitepress build website",
-    "docs:dev": "typedoc && vitepress dev website"
+    "docs": "npm run docs:settings && typedoc && vitepress build website",
+    "docs:dev": "npm run docs:settings && typedoc && vitepress dev website",
+    "docs:settings": "npm run build && node scripts/generate-settings-doc.mjs"
   },
   "keywords": [
     "givenergy",
