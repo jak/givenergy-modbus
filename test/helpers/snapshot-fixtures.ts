@@ -47,11 +47,12 @@ export function reference(): RegisterCaches & { batteryModules: Map<number, numb
 export function capture(name: string, inject: Record<number, number> = {}): RegisterCaches {
   const plant = loadCapture(name);
   const { holding, input } = plant.slave(0x11);
+  /** Each device in `from`–`to` the capture holds input registers for, with its address. */
   const inputsAt = (from: number, to: number) => {
-    const caches: Map<number, number>[] = [];
+    const caches: Array<{ address: number; input: Map<number, number> }> = [];
     for (let address = from; address <= to; address++) {
       const slave = plant.slaves.get(address);
-      if (slave && slave.input.size > 0) caches.push(new Map(slave.input));
+      if (slave && slave.input.size > 0) caches.push({ address, input: new Map(slave.input) });
     }
     return caches;
   };
@@ -61,11 +62,15 @@ export function capture(name: string, inject: Record<number, number> = {}): Regi
   const registers: RegisterCaches = {
     holding: new Map(holding),
     input: new Map(input),
-    batteryModules: inputsAt(0x32, 0x37),
-    batteryStacks: controlUnits.map((controlUnit) => ({ controlUnit, modules: inputsAt(0x50, 0x5f) })),
-    meters: [1, 2, 3, 4, 5, 6, 7, 8].flatMap((address) => {
-      const slave = plant.slaves.get(address);
-      return slave ? [{ address, input: new Map(slave.input), product: new Map(slave.meterProduct) }] : [];
+    batteryModules: inputsAt(0x32, 0x37).map((device) => device.input),
+    batteryStacks: controlUnits.map((controlUnit) => ({
+      index: controlUnit.address - 0x70,
+      controlUnit: controlUnit.input,
+      modules: inputsAt(0x50, 0x5f).map((module) => ({ index: module.address - 0x50, input: module.input })),
+    })),
+    meters: [1, 2, 3, 4, 5, 6, 7, 8].flatMap((slaveAddress) => {
+      const slave = plant.slaves.get(slaveAddress);
+      return slave ? [{ slaveAddress, input: new Map(slave.input), product: new Map(slave.meterProduct) }] : [];
     }),
   };
   for (const [address, value] of Object.entries(inject)) registers.holding.set(Number(address), value);

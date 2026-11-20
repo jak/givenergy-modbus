@@ -192,6 +192,20 @@ describe('HV captures', () => {
     expect(modules[0].temperatureMin).toBe(24.1);
   });
 
+  it('keeps each device\'s own index when an earlier module or stack did not answer', () => {
+    // Indexes come from the device address (stack 0x70 + n, module 0x50 + k), not the position
+    // in the cache list: if 0x50 is silent, 0x51 is still module 1.
+    const registers = capture('all_in_one_arm620.log');
+    const [stack] = registers.batteryStacks!;
+    const gapped: RegisterCaches = {
+      ...registers,
+      batteryStacks: [{ ...stack, index: 1, modules: stack.modules.slice(1) }],
+    };
+    const { stacks, modules } = buildBatteryStacks(gapped);
+    expect(stacks.map((s) => s.index)).toEqual([1]);
+    expect(modules.map((m) => [m.stack, m.index])).toEqual([[1, 1], [1, 2], [1, 3]]);
+  });
+
   it('All in One: the module serial at IR 114–118 has a blank first register', () => {
     // Quirk: the All in One's BMUs read IR 110 = "HX" and IR 111–114 = 0, so IR 114–118 give
     // only the last eight characters. Decoded as read.
