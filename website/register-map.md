@@ -48,7 +48,7 @@ Times are encoded as `HHMM` decimal (e.g. `2330` = 23:30).
 |---:|---|---|---|---:|:-:|---|
 | 50 | Inverter Max Output Active Power Percent | 0–100 % | 100 % | 100 | ✅ | GivTCP: `active_power_rate`. |
 | 199 | Enable Inverter Parallel Mode | toggle | off | 0 | ✅ | **GivTCP labels this `enable_standard_self_consumption_logic`; the official app says parallel mode**, for All in One units running in parallel with a Gateway. |
-| 311 | Export Power Priority | number | 0 | 0 | ✅ | Not in GivTCP map. Value semantics unknown. |
+| 311 | Export Power Priority | number | 0 | 0 | ✅ | Not in GivTCP map. 0 = Load First, 1 = Battery First, 2 = Grid First (see [section 4](#export-power-priority-hr-311)). |
 | 317 | Enable EPS | toggle | on | 1 | ✅ | Not in GivTCP map. |
 | 479 | DC Wind CVT Voltage | number | 0 | 0 | ✅ | Not in GivTCP map. |
 | 540 | Enable Smart Load | toggle | — | — | ❌ | Greyed out in app. |
@@ -182,13 +182,13 @@ Takeaways:
 
 ## 3. Other observations from the dump (not shown in the app)
 
-- **HR 480–516 mirrors other values**: 486/487 = charge slot 1 times (2330/530),
+- **HR 480–516 mirrors other values** (HR 480–498 is explained in [section 4](#hr-480–498-the-inverter-s-copy-of-its-ems-settings)): 486/487 = charge slot 1 times (2330/530),
   489 = 100, 507 ≈ IR 3 (P-bus V), 508 ≈ IR 15, 511 ≈ IR 50 (battery V),
   493 ≈ IR 58 (grid port current), 497 = int16 −59 ≈ IR 24 (inverter output power),
   512 = 186 (= HR 55 capacity), 513 = 4 (= HR 110), 514/515 = 100 (= HR 313/314), 516 = 50 (= HR 111).
-- **HR 300–328 contain non-zero values that haven't been identified** (e.g. 302 = 5000, 303/312 = 15000, 306 = 6000,
+- **HR 300–328 contain non-zero values** the app doesn't show (e.g. 302 = 5000, 303/312 = 15000, 306 = 6000,
   307 = 2300, 308 = 3600, 315 = 1150, 316 = 2760, 321 = 5040, 326 = 4980, 327 = 40, 328 = 5010).
-  Some look like voltage/frequency protection limits. Of these, the app exposes only 311, 313, 314, 317, 318–320.
+  Most are grid-code protection settings; [section 4](#hr-300–359-block-unverified) names each one.
 - **The battery BMS (IR fc=4, slave 0x32, base 60)** responds. IR 60–75 are 16 cell voltages in mV (3.104–3.144 V),
   IR 76–79 are temperatures ÷10 (18.5–19.5 °C), and IR 110–114 hold the battery serial in ASCII.
 
@@ -262,6 +262,93 @@ On the reference unit both are 4 %, so the dump can't tell them apart.
   house load before exporting. Another owner's setting showed blank.<sup>[7]</sup>
   The full list of options and how they map to register values is unknown. The reference unit reads 0,
   and the app shows it as a plain number.
+
+- **[manual] [library]** GivEnergy's v4.1.6 Modbus document calls HR 311 `LocalCtrlMode`, range 0–2.
+  A tester cycled the portal setting and read the register back: **0 = Load First, 1 = Battery First,
+  2 = Grid First**.<sup>[10]</sup> The reference unit is on Load First.
+
+### HR 300–359 block (unverified)
+
+Only HR 311, 313, 314, 317, 318–320 and 331 appear in the app. The rest of the block is listed here
+so the dump values have names, but **none of it is verified on this inverter, and this library does
+not write to any of it**. Names come from two sources that don't always agree:
+
+- *Doc name*: GivEnergy's v4.1.6 Modbus register document, as inventoried by the external
+  `givenergy-modbus` library.<sup>[11]</sup> Where the doc marks a register read-only, that is noted.
+- *Library name*: the external library's decode, taken mostly from the GivEnergy app v4.0.7 tables.<sup>[12]</sup>
+
+The **Fits?** column says whether the reference unit's value is plausible for the doc's definition.
+Where the two sources differ (HR 300–303), the doc fits the values better.
+
+| HR | Doc name | Doc range / unit | Library name | Raw | Decoded | Fits? |
+|---:|---|---|---|---:|---|:-:|
+| 300 | OverF_DerateDelay | 0–30000 | enable_plant_mode (bool) | 10 | 10 | doc ✅, library ❌ |
+| 301 | QVRPDelay | 0–30000 | plant_role | 150 | 150 | doc ✅ |
+| 302 | wPowerRestartSlope | 10–30000 | plant_meters | 5000 | 5000 | doc ✅, library ❌ |
+| 303 | OverF_DerateRecDelay | 0–30000 | overfrequency_load_drop_recovery_delay | 15000 | 15000 | ✅ |
+| 304 | Reserve (read-only) | – | – | 0 | – | ✅ |
+| 305 | PVModelSelect | 0–1 | mppt_operating_mode | 0 | 0 | ✅ |
+| 306 | PowerStartSlope | 10–30000 | connection_loading_slope | 6000 | 6000 | ✅ |
+| 307 | fNominalACVolt_EPS | 2000–2400, 0.1 V | eps_nominal_voltage | 2300 | 230.0 V | ✅ |
+| 308 | fNominalPower_BAT | 500–6000 W | battery_nominal_power | 3600 | 3600 W | ✅ matches GivTCP's 3600 W Gen3 battery max power |
+| 309 | fMaxChargeCurr_BAT | 10–130 A | battery_nominal_current | 65 | 65 A | ✅ |
+| 310 | ChargeSOClimit | 20–100 % | battery_max_charge_pct | 100 | 100 % | ✅ |
+| 312 | UnderFreqOpDelayTime | 0–30000 | underfrequency_add_load_delay | 15000 | 15000 | ✅ |
+| 315 | uwZeroCurrStaticLV | 0–3200, 0.1 V | en50549_zero_current_lower_voltage_limit | 1150 | 115.0 V | ✅ |
+| 316 | uwZeroCurrStaticHV | 0–3200, 0.1 V | en50549_zero_current_upper_voltage_limit | 2760 | 276.0 V | ✅ |
+| 321 | OverFLoadDeratePonit | 5020–5200, 0.01 Hz | overfrequency_derating_start_point | 5040 | 50.40 Hz | ✅ |
+| 322 | ImExPrice_Enable | 0–1 | enable_tariff_pricing_battery_logic | 0 | off | ✅ |
+| 323 | ImPrice_Hig | 0–20000 | import_price_battery_discharge_threshold | 0 | 0 | ✅ |
+| 324 | (not in doc) | – | import_price_battery_charge_threshold | 0 | 0 | – |
+| 325 | ExPrice_Hig | 0–20000 | export_price_battery_discharge_threshold | 0 | 0 | ✅ |
+| 326 | UnderFLoadDeratePonit | 4600–5000, 0.01 Hz | underfrequency_derating_start_point | 4980 | 49.80 Hz | ✅ |
+| 327 | FreUnderRateEE | 17–100 | underfrequency_loading_slope | 40 | 40 | ✅ |
+| 328 | uwOverF_DerateStopPoint | 5000–5200, 0.01 Hz | overfrequency_derating_stop_point | 5010 | 50.10 Hz | ✅ |
+| 329 | BMS OCV calibration | 0–1 | enable_bms_ocv_calibration | 0 | off | ✅ |
+| 330 | ubGatewayComand | 0–255 | gateway_power_off_setting | 0 | 0 | ✅ |
+| 331 | GatewayOnOff | 0–255 | force_off_grid (bool) | 0 | off | ✅ (app: Force Off Grid) |
+| 332 | Micro grid Enable / AIO bAgingCommand | 0–1 | enable_micro_grid | 0 | off | ✅ |
+| 333 | bEV_Charger_Ctrl (read-only) | 0–1 | enable_ev_charger | 0 | off | ✅ |
+| 334 | Current_Max (read-only) | 32–100 A, default 100 | ev_charger_import_limit | 0 | 0 | ⚠️ below doc range |
+| 335 | uwWaitTime_cnt (read-only) | 60–300 s, default 300 | ev_charger_reconnection_wait_time | 0 | 0 | ⚠️ below doc range |
+| 336 | ubChgSocLim_EV (read-only) | 30–100 %, default 100 | ev_charger_soc_limit | 0 | 0 | ⚠️ below doc range |
+| 337 | bFanEnable (read-only) | 0–1 | enable_fan | 0 | off | ✅ |
+| 338 | bFanSpeedControl (read-only) | 0–100 | fan_speed | 0 | 0 | ✅ |
+| 339 | bGWenable (read-only) | 0–1 | enable_gateway | 0 | off | ✅ |
+| 340 | BMSCOMMODE (read-only) | 0–1 | bms_communication_mode | 0 | 0 | ✅ |
+| 341 | N-PE relay control (read-only) | 0–1 | n_pe_relay_toggle | 0 | 0 | ✅ |
+| 342 | bAFCI_Enable (read-only) | 0–2 | afci_setting | 0 | 0 | ✅ |
+| 343 | GeneratorEnable (read-only) | 0–1 | enable_generator | 0 | off | ✅ |
+| 344 | bGeneratorStartSOC (read-only) | 5–20 % | generator_start_soc | 0 | 0 | ⚠️ below doc range |
+| 345 | bGeneratorStopSOC (read-only) | 20–100 % | generator_stop_soc | 0 | 0 | ⚠️ below doc range |
+| 346 | uwGeneratorChargePower (read-only) | 0–100 | generator_charge_power | 0 | 0 | ✅ |
+| 347 | bLEDoff (read-only) | 0–1 | disable_leds | 0 | LEDs on | ✅ |
+| 348 | bLCDoffTime (read-only) | 0–5 min | lcd_screen_idle_timeout | 0 | 0 | ✅ |
+| 349 | wLeadBatCalibratCV (read-only) | 0–65500, 0.01 V | lead_acid_battery_calibration_upper_limit | 0 | 0 | ✅ (lithium battery) |
+| 350 | wLeadBatCalibratLV (read-only) | 0–65500, 0.01 V | lead_acid_battery_calibration_lower_limit | 0 | 0 | ✅ (lithium battery) |
+| 351 | mode_switch | 0–1 | inverter_operating_mode | 0 | 0 | ✅ |
+| 352 | UbDO1Flag (read-only) | 0–1 | – | 0 | 0 | ✅ |
+| 353 | UbDO2Flag (read-only) | 0–1 | – | 12000 | 12000 | ❌ out of range |
+| 354 | stFuncEnable | – | – | 0 | – | – |
+| 355 | uwAFCICheckTime | 100–3000 ms | – | 0 | 0 | ⚠️ below doc range |
+
+The EV charger, fan, gateway, generator and display registers (HR 333–350) read 0 on this inverter,
+which has none of that hardware; several zeros are below the doc's minimum, so the block is probably
+unused on a Gen3 Hybrid. HR 300–303, 306, 312, 315/316, 321 and 326–328 look like grid-code
+protection settings (G98/G99, EN50549) that an installer sets, and they should not be changed.
+
+### HR 480–498: the inverter's copy of its EMS settings
+
+- **[manual]** The v4.1.6 document defines HR 480–498 as an EMS block:<sup>[11]</sup>
+  480 EMS Status (read-only), 481 BatPowerMode (0–1), 482 SOC_ForceAdjust (0–7), 483/484 discharge
+  time 1 start/end, 485 discharge enable, 486/487 charge time start/end, 488 charge enable,
+  489 active power rate (0–100 %), 490 on/off, 491 battery SOC, 492 battery power, 493 system total
+  load power (read-only), 494 EMS parallel enable, 495 grid port power (write-only), 496 reserved,
+  497 inverter power (signed W, read-only), 498 system fault message word 0 (read-only).
+- This explains the section 3 observations. With a discharge set for 17:00–17:30, HR 483/484/485
+  read 1700/1730/1 (the same as HR 56/57/59), and 486 = 2330 matches charge slot 1's start.
+  HR 497 tracks IR 24 and HR 493 tracks the grid port. HR 499–516 are outside this block and remain
+  unexplained.
 
 ### Force Off Grid (HR 331)
 
@@ -337,6 +424,13 @@ of them either.
    <https://web.archive.org/web/20260412201928/https://community-beta.givenergy.cloud/t/force-off-grid/2188>
 9. GivEnergy Community Forum, *AIO-2 and Gateway-2 question* (Wayback Machine snapshot):
    <https://web.archive.org/web/20260412201924/https://community-beta.givenergy.cloud/t/aio-2-and-gateway-2-question/5012>
+10. `givenergy-modbus` (Python library used by GivTCP), `ExportPriority`, recording the tester's
+    portal round-trip (hass#218, #303):
+    <https://github.com/britkat1980/givenergy-modbus/blob/a556333bb7ac1589d7c266ed9cdf5cdfafba44e8/givenergy_modbus/model/battery.py#L171-L183>
+11. GivEnergy Modbus register document v4.1.6, as inventoried by `givenergy-modbus`:
+    <https://github.com/britkat1980/givenergy-modbus/blob/a556333bb7ac1589d7c266ed9cdf5cdfafba44e8/docs/reference/registers/v4.1.6_inventory.json>
+12. `givenergy-modbus`, holding register block 300–359 decode:
+    <https://github.com/britkat1980/givenergy-modbus/blob/a556333bb7ac1589d7c266ed9cdf5cdfafba44e8/givenergy_modbus/model/inverter.py#L747-L823>
 
 ---
 
@@ -344,17 +438,15 @@ of them either.
 
 These are recorded rather than guessed at. Corrections from other Gen3 owners are welcome.
 
-- **What do the values in HR 300–328 mean?** Apart from 311, 313, 314, 317 and 318–320, the app
-  doesn't expose them. Some of the values in section 3 look like voltage or frequency protection
-  limits, but none has been confirmed.
-- **Why do HR 480–516 mirror other registers?** Several values repeat holding registers (charge
-  slot 1 times, HR 55, HR 110, HR 111, HR 313/314) or track live input registers (IR 3, 15, 24, 50, 58).
-  It is not known whether this block is a read-only status copy, a second register map used by newer
-  firmware, or something else, nor whether writing to it has any effect.
+- **Are the HR 300–359 names right for a Gen3?** Section 4 names them from GivEnergy's v4.1.6 document,
+  and most values fit, but HR 353 = 12000 is outside its documented 0–1 range and several EV charger and
+  generator registers read below their documented minimum.
+- **What are HR 499–516?** HR 480–498 is the inverter's copy of its EMS settings (section 4), but
+  499–516 also repeat other registers (HR 55, 110, 111, 313/314; IR 3, 15, 50) and aren't in the v4.1.6
+  document's EMS block. Whether writing to either block has any effect is unknown.
 - **Why are "PV generation today" and "Consumption today" 0.01 kWh off?** The app shows 3.31 kWh and
   49.81 kWh, but the registers have a resolution of 0.1 kWh (IR 17 + IR 19 = 3.3; the derived consumption is
   ≈ 49.8–49.9). No register read so far holds the extra digit. The app might accumulate its own value,
   or read it from the cloud, or from a register outside the scanned ranges (HR 0–599, IR 0–299).
 - **What do 273 / 274 do?** They sit inside the Gen3 discharge slot block but the app doesn't show them.
-- **What does HR 311 "Export Power Priority" accept?** The app shows a plain number (0 here) with no
-  range or option list. The portal offers "Load first" among other options (section 4), but not how they map to values.
+
