@@ -3,6 +3,8 @@ export { GivEnergyInverter, SinglePhaseInverter, ThreePhaseInverter } from './in
 export type {
   BatteryPauseInput,
   GivEnergyInverterOptions,
+  InverterEventName,
+  InverterEvents,
   InverterIdentity,
   ModelOf,
   NumberedTimeSlotInput,
@@ -24,17 +26,27 @@ export type {
   SettingDefinition,
   SettingKey,
   Settings,
+  SettingsCatalogue,
   SettingWriteValue,
   SinglePhaseSettings,
   ThreePhaseSettings,
   TimeSetting,
   UnsafeSettingKey,
+  ValueOf,
   WritableSettingKey,
+  WriteValueOf,
 } from './catalogue/index.js';
 
 // Models and capabilities
 export type { Capabilities } from './model/capabilities.js';
-export type { DeviceModel, InverterModel, Layout, SinglePhaseModel, ThreePhaseModel } from './model/models.js';
+export type {
+  DeviceModel,
+  InverterModel,
+  Layout,
+  PlantControllerModel,
+  SinglePhaseModel,
+  ThreePhaseModel,
+} from './model/models.js';
 export type { PowerFlows } from './power-flow.js';
 
 // Errors

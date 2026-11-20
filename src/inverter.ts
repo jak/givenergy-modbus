@@ -68,6 +68,32 @@ export interface BatteryPauseInput {
 /** Settings `setSetting` accepts on either layout, so on an inverter not yet narrowed by `layout`. */
 export type WritableOnBothLayouts = WritableSettingKey<'single_phase'> & WritableSettingKey<'three_phase'>;
 
+/**
+ * The events a `GivEnergyInverter<L>` emits, with their arguments:
+ * - `data`: a new snapshot, after each successful poll and each accepted write.
+ * - `lost`: the connection was lost after repeated failed polls (and reconnecting starts, if
+ *   `autoReconnect`), or a later poll found an unsupported device.
+ * - `reconnecting`: a reconnect attempt is about to start, after `nextRetryMs`.
+ * - `reconnected`: a reconnect succeeded and polling resumed.
+ * - `debug`: a diagnostic message.
+ */
+export interface InverterEvents<L extends Layout = Layout> {
+  data: [snapshot: SnapshotOf<L>];
+  lost: [error: Error];
+  reconnecting: [attempt: number, nextRetryMs: number];
+  reconnected: [];
+  debug: [message: string];
+}
+
+/** The names of the events in `InverterEvents`. */
+export type InverterEventName = keyof InverterEvents;
+/** @internal */
+type HasLayout = { readonly layout: Layout };
+/** A listener for event `E` on an inverter of type `Self`. @internal */
+type InverterListener<Self extends HasLayout, E extends InverterEventName> = (...args: InverterEvents<Self['layout']>[E]) => void;
+/** Any event name outside `InverterEvents`. @internal */
+type OtherEvent<E> = E extends InverterEventName ? never : E;
+
 /** The model type for layout `L`. */
 export type ModelOf<L extends Layout> = L extends 'three_phase' ? ThreePhaseModel : SinglePhaseModel;
 /** The snapshot type for layout `L`. */
@@ -99,8 +125,10 @@ function trimSerial(raw: string): string {
  */
 export abstract class GivEnergyInverter<L extends Layout = Layout> extends EventEmitter {
   abstract readonly layout: L;
+  /** @internal */
   protected readonly pollManager: PollManager;
 
+  /** @internal Use `GivEnergyInverter.connect()`. */
   protected constructor(pollManager: PollManager) {
     super();
     this.pollManager = pollManager;
@@ -111,6 +139,31 @@ export abstract class GivEnergyInverter<L extends Layout = Layout> extends Event
       this.emit('reconnecting', attempt, nextRetryMs),
     );
     this.pollManager.on('reconnected', () => this.emit('reconnected'));
+  }
+
+  // The event methods take the layout from `this` rather than from `L`, so their signatures are
+  // the same on both subclasses and they can be called on the un-narrowed result of connect():
+  // `data` listeners then get either snapshot. Other events fall back to EventEmitter's signature.
+
+  /** Listen for an event; see `InverterEvents` for each one's arguments. */
+  override on<E extends InverterEventName, Self extends HasLayout>(this: Self, event: E, listener: InverterListener<Self, E>): Self;
+  override on<E extends string | symbol, Self>(this: Self, event: OtherEvent<E>, listener: (...args: any[]) => void): Self;
+  override on(event: string | symbol, listener: (...args: any[]) => void): this {
+    return super.on(event, listener);
+  }
+
+  /** Listen for the next occurrence of an event; see `InverterEvents`. */
+  override once<E extends InverterEventName, Self extends HasLayout>(this: Self, event: E, listener: InverterListener<Self, E>): Self;
+  override once<E extends string | symbol, Self>(this: Self, event: OtherEvent<E>, listener: (...args: any[]) => void): Self;
+  override once(event: string | symbol, listener: (...args: any[]) => void): this {
+    return super.once(event, listener);
+  }
+
+  /** Stop listening; see `InverterEvents`. */
+  override off<E extends InverterEventName, Self extends HasLayout>(this: Self, event: E, listener: InverterListener<Self, E>): Self;
+  override off<E extends string | symbol, Self>(this: Self, event: OtherEvent<E>, listener: (...args: any[]) => void): Self;
+  override off(event: string | symbol, listener: (...args: any[]) => void): this {
+    return super.off(event, listener);
   }
 
   /**
