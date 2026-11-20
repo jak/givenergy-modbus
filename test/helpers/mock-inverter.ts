@@ -8,6 +8,7 @@
  * - `silent(request)` leaves chosen reads unanswered, for blocks a model never answers.
  * - `push()` sends register data unsolicited, as the inverter does in push mode. A push only
  *   resolves a pending request when it has the request's exact base and count.
+ * - `heartbeat()` sends a heartbeat, as the data adapter does; clients' replies are recorded.
  * - Writes (function 6) are recorded in `writes` and echoed, unless `silent` leaves them
  *   unanswered (then they are in `requests` only).
  *
@@ -32,6 +33,8 @@ export interface MockRequest {
   registerCount: number;
   /** When the mock received it, `Date.now()`. */
   receivedAt?: number;
+  /** The data adapter serial the client put in the frame. */
+  dataAdapterSerial?: string;
 }
 
 export interface MockInverterOptions {
@@ -55,6 +58,13 @@ export interface MockInverter {
   valuesOf(device: MockDevice, functionCode: number, base: number, count: number): number[] | undefined;
   /** Open client connections. */
   connections(): number;
+  /**
+   * Send a heartbeat to every client, as the data adapter does every ~3 minutes, carrying
+   * `dataAdapterSerial` (default the mock's). The client must answer within 5 s.
+   */
+  heartbeat(dataAdapterSerial?: string): void;
+  /** The serial in each heartbeat reply received from a client. */
+  heartbeatReplies: string[];
   /** Simulate a transport drop (an inverter reboot or Wi-Fi blip) without closing the server. */
   dropConnections(): void;
   close(): Promise<void>;
@@ -71,6 +81,7 @@ function parseRequest(frame: Buffer): ({ type: 'heartbeat'; dataAdapterSerial: s
   if (fid === 0x02 && frame.length >= 32) {
     return {
       type: 'transparent',
+      dataAdapterSerial: frame.subarray(8, 18).toString('latin1'),
       slaveAddress: frame[26],
       functionCode: frame[27],
       baseRegister: frame.readUInt16BE(28),
@@ -125,6 +136,12 @@ export async function startMockInverter(options: MockInverterOptions): Promise<M
       return Array.from({ length: count }, (_, i) => table.get(base + i) ?? 0);
     },
     connections: () => sockets.length,
+    heartbeat(dataAdapterSerial = ADAPTER_SERIAL) {
+      // A heartbeat request has the same layout as the reply: fid 1, serial, adapter type.
+      const frame = encodeHeartbeatResponse(dataAdapterSerial);
+      for (const socket of sockets) socket.write(frame);
+    },
+    heartbeatReplies: [],
     dropConnections() {
       for (const socket of sockets.splice(0)) socket.destroy();
     },
@@ -147,7 +164,8 @@ export async function startMockInverter(options: MockInverterOptions): Promise<M
         const request = parseRequest(result.data);
         if (!request) continue;
         if (request.type === 'heartbeat') {
-          socket.write(encodeHeartbeatResponse(request.dataAdapterSerial));
+          // A heartbeat from a client is its reply to ours.
+          mock.heartbeatReplies.push(request.dataAdapterSerial);
           continue;
         }
         const { type: _type, ...read } = request;

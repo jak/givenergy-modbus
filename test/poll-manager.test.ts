@@ -62,6 +62,7 @@ describe('PollManager', () => {
     // buildSnapshot returns null when sanity check fails.
     // PollManager should track consecutive failures.
     const pm = new PollManager({ host: '127.0.0.1' });
+    (pm as any)._started = true; // _handlePollResult ignores results after stop()
     (pm as any)._failCount = 0;
     (pm as any)._handlePollResult(null, null);
     expect((pm as any)._failCount).toBe(1);
@@ -69,6 +70,7 @@ describe('PollManager', () => {
 
   it('resets failure count after a successful poll', () => {
     const pm = new PollManager({ host: '127.0.0.1' });
+    (pm as any)._started = true; // _handlePollResult ignores results after stop()
     (pm as any)._failCount = 5;
     (pm as any)._handlePollResult(mockSnapshot, null);
     expect((pm as any)._failCount).toBe(0);
@@ -79,6 +81,8 @@ describe('PollManager', () => {
     const pm = new PollManager({ host: '127.0.0.1', autoReconnect: false });
     const lostEvents: Error[] = [];
     pm.on('lost', (err: Error) => lostEvents.push(err));
+
+    (pm as any)._started = true; // _handlePollResult ignores results after stop()
 
     (pm as any)._failCount = 9;
     (pm as any)._handlePollResult(null, new Error('connection lost'));
@@ -105,6 +109,8 @@ describe('PollManager', () => {
       pm.on('lost', (err: Error) => lostEvents.push(err));
       pm.on('reconnecting', (attempt: number) => reconnectingEvents.push(attempt));
 
+      (pm as any)._started = true; // _handlePollResult ignores results after stop()
+
       (pm as any)._failCount = 9;
       (pm as any)._handlePollResult(null, new Error('connection lost'));
 
@@ -128,6 +134,8 @@ describe('PollManager', () => {
 
       (pm as any).client.connect = vi.fn().mockRejectedValue(new Error('refused'));
       (pm as any).client.close = vi.fn().mockResolvedValue(undefined);
+
+      (pm as any)._started = true; // _handlePollResult ignores results after stop()
 
       (pm as any)._failCount = 9;
       (pm as any)._handlePollResult(null, new Error('connection lost'));
@@ -162,9 +170,12 @@ describe('PollManager', () => {
       // Mock _executePoll to succeed on reconnect
       (pm as any)._executePoll = vi.fn().mockImplementation(async () => {
         (pm as any)._cache = mockSnapshot;
+        (pm as any)._started = true; // _handlePollResult ignores results after stop()
         (pm as any)._failCount = 0;
         (pm as any)._started = true;
       });
+
+      (pm as any)._started = true; // _handlePollResult ignores results after stop()
 
       (pm as any)._failCount = 9;
       (pm as any)._handlePollResult(null, new Error('connection lost'));
@@ -188,6 +199,8 @@ describe('PollManager', () => {
 
       (pm as any).client.connect = vi.fn().mockRejectedValue(new Error('refused'));
       (pm as any).client.close = vi.fn().mockResolvedValue(undefined);
+
+      (pm as any)._started = true; // _handlePollResult ignores results after stop()
 
       (pm as any)._failCount = 9;
       (pm as any)._handlePollResult(null, new Error('connection lost'));
@@ -223,9 +236,12 @@ describe('PollManager', () => {
       (pm as any).client.close = vi.fn().mockResolvedValue(undefined);
       (pm as any)._executePoll = vi.fn().mockImplementation(async () => {
         (pm as any)._cache = mockSnapshot;
+        (pm as any)._started = true; // _handlePollResult ignores results after stop()
         (pm as any)._failCount = 0;
         (pm as any)._started = true;
       });
+
+      (pm as any)._started = true; // _handlePollResult ignores results after stop()
 
       (pm as any)._failCount = 9;
       (pm as any)._handlePollResult(null, new Error('lost'));
@@ -676,6 +692,111 @@ describe('PollManager against a mock inverter', { timeout: 20_000 }, () => {
       expect(count(mock, 0x01, 0x16, 60)).toBe(1);
       expect(mock.requests.filter((request) => request.functionCode === 0x16 && request.slaveAddress !== 0x01)).toEqual([]);
       expect(pm.getData().meters[0]).toMatchObject({ serialNumber: 0x10002, factoryCode: 'AB' });
+    });
+  });
+
+  describe('lifecycle and robustness', () => {
+    const isRead = (request: MockRequest, slave: number, functionCode: number, base: number) =>
+      request.slaveAddress === slave && request.functionCode === functionCode && request.baseRegister === base;
+
+    it('stop() during a reconnect poll leaves no timer running and emits no more data', async () => {
+      const mock = await startMockInverter({ devices: referenceDevices() });
+      cleanup.push(() => mock.close());
+      const pm = new PollManager({
+        host: '127.0.0.1', port: mock.port, pollIntervalMs: 50, fullRefreshIntervalMs: 0,
+        reconnectBackoffMs: 10, reconnectMaxBackoffMs: 10,
+        timing: { ...FAST, pushSoakMs: 300 },
+      });
+      cleanup.push(() => pm.stop());
+      await pm.start();
+      const data: unknown[] = [];
+      pm.on('data', (snapshot: unknown) => data.push(snapshot));
+      let reconnectPoll = false;
+      pm.on('reconnecting', () => { reconnectPoll = true; });
+
+      // Drop the link and fail polls until the reconnect loop starts and reconnects.
+      (pm as unknown as { _failCount: number })._failCount = 9;
+      mock.dropConnections();
+      await vi.waitFor(() => expect(reconnectPoll && mock.connections()).toBe(1), { timeout: 5000 });
+      // The reconnect's own poll is in its push soak now: stop during it.
+      await pm.stop();
+      const eventsAtStop = data.length;
+      const requestsAtStop = mock.requests.length;
+
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      expect(data).toHaveLength(eventsAtStop);
+      expect(mock.requests).toHaveLength(requestsAtStop);
+      expect((pm as unknown as { _pollTimer: unknown })._pollTimer).toBeNull();
+      expect((pm as unknown as { _delays: Set<unknown> })._delays.size).toBe(0);
+    });
+
+    it('never drops a block that has answered this session (HR 240 answers once, then goes silent)', async () => {
+      const { mock, pm, poll } = await setUp(referenceDevices());
+      await pm.start();
+      mock.silent = (request) => isRead(request, 0x11, 0x03, 240);
+      for (let i = 0; i < 4; i++) await poll();
+      expect(mock.requests.filter((request) => isRead(request, 0x11, 0x03, 240))).toHaveLength(5);
+      expect(pm.getData().capabilities).toMatchObject({ tenSlots: true, perSlotTargets: true });
+    });
+
+    it('keeps a device\'s last good data across one failed scan, and drops it after two', async () => {
+      const devices = referenceDevices();
+      const [meter] = capture('hybrid_gen2_arm920.log').meters!;
+      devices.set(0x01, { input: meter.input, product: new Map() });
+      const { mock, pm, poll } = await setUp(devices);
+      await pm.start();
+      expect(pm.getData().meters).toHaveLength(1);
+      mock.silent = (request) => request.slaveAddress === 0x01;
+      await poll();
+      expect(pm.getData().meters).toHaveLength(1);
+      await poll();
+      expect(pm.getData().meters).toHaveLength(0);
+    });
+
+    it('does not let a throwing listener fail a poll', async () => {
+      const { pm, poll, debug } = await setUp(referenceDevices());
+      await pm.start();
+      let calls = 0;
+      pm.on('data', () => {
+        calls++;
+        throw new Error('listener bug');
+      });
+      await poll();
+      await poll();
+      expect(calls).toBe(2);
+      expect(debug).toContain("a 'data' listener threw: listener bug");
+      expect((pm as unknown as { _failCount: number })._failCount).toBe(0);
+    });
+
+    it('emits lost when a later poll finds an unsupported device', async () => {
+      // HR 0 doesn't answer during start(), so nothing is resolved; it later reads as an EMS.
+      const devices = referenceDevices();
+      const { mock, pm, poll } = await setUp(devices, { silent: (request) => isRead(request, 0x11, 0x03, 0) });
+      await pm.start();
+      const lost: Error[] = [];
+      pm.on('lost', (err: Error) => lost.push(err));
+      devices.get(0x11)!.holding!.set(0, 0x5101);
+      mock.silent = () => false;
+      await poll();
+      expect(lost).toHaveLength(1);
+      expect(lost[0]).toBeInstanceOf(UnsupportedDeviceError);
+    });
+
+    it('answers a heartbeat in the middle of a poll and uses the data adapter serial it carries', async () => {
+      const { mock, pm } = await setUp(referenceDevices(), {
+        silent: (request) => {
+          // The data adapter's heartbeat arrives while the poll waits for HR 60.
+          if (isRead(request, 0x11, 0x03, 60)) mock.heartbeat('WF9876G543');
+          return false;
+        },
+      });
+      await pm.start();
+      expect(mock.heartbeatReplies).toEqual(['WF9876G543']);
+      const serials = mock.requests.map((request) => request.dataAdapterSerial);
+      // Requests before the heartbeat carry the client's placeholder, later ones the real serial.
+      expect(serials[0]).toBe('**********');
+      expect(serials.at(-1)).toBe('WF9876G543');
+      expect(pm.getData().identity.serialNumber).toBeTruthy();
     });
   });
 
