@@ -123,7 +123,7 @@ Settings come from the catalogue. Names follow the official app.
 |---|---|---|
 | `chargeSlots` | `s.schedules.charge` | Always `TimeSlotConfig[]`; `targetStateOfCharge` is optional and present when `capabilities.perSlotTargets` (never on three-phase slots 1/2). Slot counts follow `capabilities.tenSlots`, not generation: 10, or 2 on legacy firmware (2.x Gen2 had 1 charge slot; slot 2 is HR 31/32). Three-phase now has 10 slots when `tenSlots` (2.x had 2). |
 | `dischargeSlots` | `s.schedules.discharge` | As above. |
-| `batteryPauseMode` (Gen3) | `s.schedules.batteryPause.mode` | Single-phase only, optional (`capabilities.pauseMode`). Values renamed: `disabled` → `off`, `pause_charge` → `charge`, `pause_discharge` → `discharge`, `pause_both` → `both`. |
+| `batteryPauseMode` (Gen3) | `s.schedules.batteryPause.mode` | Single-phase only, optional (`capabilities.pauseMode`). Values renamed: `disabled` → `off`, `pause_charge` → `charge`, `pause_discharge` → `discharge`, `pause_both` → `both`. An unnamed HR 318 value is now `unknown` (2.x read it as `disabled`). |
 | `timedDischargeSlot` (Gen3) | `s.schedules.batteryPause.start` / `.end` | Optional (`capabilities.pauseWindow`). **Fixed:** 2.x had HR 319/320 swapped; 3.x reads HR 319 as start and HR 320 as end, as the app shows them. |
 | `TimeSlot` | `TimeSlotConfig` without `targetStateOfCharge` | `TimeSlot` is gone. |
 | `TimeSlotConfig.targetStateOfCharge: number` | `TimeSlotConfig.targetStateOfCharge?: number` | Now optional. |
@@ -137,7 +137,9 @@ Settings come from the catalogue. Names follow the official app.
 |---|---|---|
 | `importReactiveEnergy` | `importReactiveEnergyKvarh` | Unit suffix added. |
 | `exportReactiveEnergy` | `exportReactiveEnergyKvarh` | Unit suffix added. |
-| `apparentPower`, `apparentPowerTotal` | same | **Fixed:** now ÷10 (2.x read them raw). |
+| `apparentPower`, `apparentPowerTotal` | same | Still raw VA, as in 2.x, but now unsigned (2.x read them signed, which wraps above 32767 VA). "Apparent power ÷10" (research C, the external library) was considered and rejected: on every capture single-phase V × I matches the raw value, and ÷10 would put three-phase apparent power below the active power. |
+| `powerFactor`, `powerFactorTotal` | same | **Fixed (2.x bug, contradicts research C):** now raw ÷10000 − 1 (offset-unsigned). Research C and 2.x read signed ÷10000, which gives values above 1 on every capture (e.g. 1.998); the offset decoding matches \|active ÷ apparent\|. |
+| `current` | same | Unchanged (÷100). Quirk: the three-phase capture's meter 0x01 only fits ÷10; not special-cased. |
 | `ThreePhase<T>` (mutable tuple) | `ThreePhase<T>` (readonly tuple) | |
 
 ## Design choices the migration guide should explain

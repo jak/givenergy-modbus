@@ -86,6 +86,10 @@ describe('schedule quirks', () => {
     expect(gen3({ 94: 0, 95: 2400 }).charge[0]).toMatchObject({ start: '00:00', end: '00:00' });
   });
 
+  it('decodes an unnamed HR 318 value as "unknown", like the catalogue enums (2.x read it as off)', () => {
+    expect(gen3({ 318: 4 }).batteryPause?.mode).toBe('unknown');
+  });
+
   it('gives Gen1 the pause mode only: it rejects any access touching HR 319/320', () => {
     const registers = registersOf({ 0: 0x2001, 21: 449, 318: 2, 319: 1730, 320: 1800 });
     expect(buildSchedules(registers, singlePhaseContextFor(registers)).batteryPause).toEqual({ mode: 'discharge' });

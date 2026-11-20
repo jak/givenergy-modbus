@@ -23,6 +23,18 @@ export interface RegisterCaches {
   batteryModules?: Map<number, number>[];
   /** Each high-voltage battery stack that answered, in address order (stack n at 0x70 + n). */
   batteryStacks?: BatteryStackCaches[];
+  /** Each CT meter that answered (0x01–0x08), in address order. */
+  meters?: MeterCaches[];
+}
+
+/** Registers of one CT meter. */
+export interface MeterCaches {
+  /** Device address, 1–8. */
+  address: number;
+  /** Input registers IR 60–88 (function 4). */
+  input: Map<number, number>;
+  /** Product registers 60–68 (function 22); empty when the meter didn't answer them. */
+  product: Map<number, number>;
 }
 
 /** Input registers of one high-voltage battery stack. */

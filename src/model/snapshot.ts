@@ -660,8 +660,11 @@ export type ThreePhaseLoad = Load;
 
 /** Battery pause (single-phase HR 318–320). */
 export interface BatteryPause {
-  /** HR 318: 0 off, 1 pause charging, 2 pause discharging, 3 pause both. */
-  mode: 'off' | 'charge' | 'discharge' | 'both';
+  /**
+   * HR 318: 0 off, 1 pause charging, 2 pause discharging, 3 pause both. Any other value reads
+   * as `'unknown'`, which `setBatteryPause` does not accept.
+   */
+  mode: 'off' | 'charge' | 'discharge' | 'both' | 'unknown';
   /**
    * Pause start, `"HH:MM"`. HR 319 (no swap). Present only when `capabilities.pauseWindow`:
    * Gen1 rejects any access touching HR 319/320. Setting a window in the app also sets
@@ -719,7 +722,10 @@ export interface Meter {
   softwareVersion: number;
   /** Phase voltage, V. IR 60–62 ÷10. */
   voltage: ThreePhase<number>;
-  /** Phase current, A. IR 63–65 ÷100. */
+  /**
+   * Phase current, A. IR 63–65 ÷100. Quirk: on the three-phase capture's meter 0x01 only ÷10
+   * makes V × I match the apparent power; it is not special-cased.
+   */
   current: ThreePhase<number>;
   /** Phase active power, W, signed (negative is import). IR 68–70. */
   activePower: ThreePhase<number>;
@@ -729,13 +735,20 @@ export interface Meter {
   reactivePower: ThreePhase<number>;
   /** Total reactive power, var, signed. IR 75. */
   reactivePowerTotal: number;
-  /** Phase apparent power, VA. IR 76–78 signed ÷10. */
+  /**
+   * Phase apparent power, VA. IR 76–78, raw and unsigned. Not ÷10: every capture fits raw VA
+   * (single-phase V × I matches it, and ÷10 would put three-phase values below |active power|).
+   */
   apparentPower: ThreePhase<number>;
-  /** Total apparent power, VA. IR 79 signed ÷10. */
+  /** Total apparent power, VA. IR 79, raw and unsigned (phase 1 on a single-phase meter). */
   apparentPowerTotal: number;
-  /** Phase power factor, −1 to 1. IR 80–82 signed ÷10000. */
+  /**
+   * Phase power factor, −1 to 1. IR 80–82 as raw ÷10000 − 1 (offset-unsigned, like the
+   * inverter's IR 16). Signed ÷10000 gives values above 1 on every capture; this decoding
+   * matches |active power ÷ apparent power|.
+   */
   powerFactor: ThreePhase<number>;
-  /** Total power factor, −1 to 1. IR 83 signed ÷10000. */
+  /** Total power factor, −1 to 1. IR 83 as raw ÷10000 − 1 (phase 1 on a single-phase meter). */
   powerFactorTotal: number;
   /** Frequency, Hz. IR 84 ÷100. */
   frequency: number;

@@ -52,8 +52,8 @@ function batteryPause(registers: RegisterCaches, context: SinglePhaseBuildContex
   if (!context.capabilities.pauseMode) return undefined;
   const mode = readHolding(registers, 318);
   if (mode === undefined) return undefined;
-  // 2.x read an unnamed HR 318 value as off ('disabled'); kept.
-  const pause: BatteryPause = { mode: PAUSE_MODES[mode] ?? 'off' };
+  // An unnamed value is 'unknown', as the catalogue enums decode them (2.x read it as off).
+  const pause: BatteryPause = { mode: PAUSE_MODES[mode] ?? 'unknown' };
   const start = readHolding(registers, 319);
   const end = readHolding(registers, 320);
   // Gen1 accepts the mode but rejects any access touching HR 319/320 (capabilities.pauseWindow).
