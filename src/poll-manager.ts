@@ -780,7 +780,7 @@ export class PollManager extends EventEmitter {
    *    module (0x50 + k) at IR 60 + 120 × n. An aggregator dropped as unanswered ends the
    *    high-voltage scan for the session.
    * 3. Meter product registers (function 22): static, so read once per session, for meters whose
-   *    data answered.
+   *    data answered with a phase 1 voltage (a fitted meter).
    */
   private async _scanDevices(highVoltageBattery: boolean): Promise<void> {
     const input = (slave: number, base: number, count: number): ReadRequest =>
@@ -795,8 +795,12 @@ export class PollManager extends EventEmitter {
     const stackReads = highVoltageBattery ? await this._scanBatteryStacks() : [];
     this._expireStale([...firstLevel, ...stackReads]);
 
+    // Quirk: with no meter fitted, an address can still answer IR 60–88 (phase 1 voltage 0) and
+    // the product registers, as every empty address did on a Gen3. Only fitted meters are worth
+    // a product read.
+    const meterFitted = (slave: number) => (this._devices.get(slave)?.input.get(DEVICE_REGISTER_START) ?? 0) !== 0;
     const productReads = meterReads
-      .filter((read) => this._answeredThisPoll(read) && !this._meterProductRead.has(read.slave))
+      .filter((read) => this._answeredThisPoll(read) && meterFitted(read.slave) && !this._meterProductRead.has(read.slave))
       .map((read): ReadRequest => ({ ...read, functionCode: FUNCTION_READ_METER_PRODUCT, count: METER_PRODUCT_REGISTER_COUNT }));
     const requested = await this._requestBatch(productReads, this.timing.scanRetries);
     this._recordMisses(requested);
