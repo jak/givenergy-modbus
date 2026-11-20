@@ -684,6 +684,37 @@ describe('PollManager against a mock inverter', { timeout: 20_000 }, () => {
       expect(Math.min(...await scanGaps(1))).toBeGreaterThanOrEqual(590);
     }, 60_000);
 
+    it('keeps a meter whose data arrived as push data before the scan (missing from the first v3 device run)', async () => {
+      // The dongle relays its own cloud polls, which read the meters as IR 60–119. When that
+      // push arrived before the meter scan, 902610c skipped the request as "filled from push
+      // data" after clearing the meter's registers for the scan, so the meter vanished.
+      const devices = referenceDevices();
+      const meterInput = new Map([2412, 0, 0, 433, 0, 0, 0, 0, 65492, 0, 0].map((value, i) => [60 + i, value]));
+      devices.set(0x01, { input: meterInput, product: new Map() });
+      const { mock, pm } = await setUp(devices, {
+        silent: (request) => {
+          if (isRead(request, 0x11, 0x03, 0)) mock.push(0x01, 0x04, 60, mock.valuesOf(devices.get(0x01)!, 0x04, 60, 60)!);
+          // The real meter at 0x01 didn't answer its product registers.
+          return isRead(request, 0x01, 0x16, 60);
+        },
+      });
+      await pm.start();
+      expect(count(mock, 0x01, 0x04, 60)).toBe(0); // filled from push data
+      expect(pm.getData().meters).toMatchObject([{ slaveAddress: 1, voltage: [241.2, 0, 0], current: [4.33, 0, 0], activePower: [-44, 0, 0] }]);
+    });
+
+    it('quirk: does not read product registers for an address that answers with no meter (IR 60 = 0)', async () => {
+      // On the real Gen3 every meter address 0x02–0x08 answered IR 60–88 and the product
+      // registers, with no meter fitted. Phase 1 voltage 0 means no meter (2.x), so their
+      // product registers aren't worth a read.
+      const devices = devicesWithMeter();
+      for (let slave = 2; slave <= 8; slave++) devices.set(slave, { input: new Map(), product: new Map() });
+      const { mock, pm } = await setUp(devices);
+      await pm.start();
+      expect(pm.getData().meters.map((meter) => meter.slaveAddress)).toEqual([1]);
+      expect(mock.requests.filter((request) => request.functionCode === 0x16).map((request) => request.slaveAddress)).toEqual([1]);
+    });
+
     it('reads meter product registers once per session, and only for meters that answered', async () => {
       const { mock, pm, poll } = await setUp(devicesWithMeter());
       await pm.start();
