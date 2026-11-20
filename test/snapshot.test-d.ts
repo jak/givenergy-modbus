@@ -9,9 +9,20 @@ import type {
 } from '../src/model/snapshot.js';
 import type { SinglePhaseSettings, ThreePhaseSettings } from '../src/catalogue/index.js';
 import type { SinglePhaseModel, ThreePhaseModel } from '../src/model/models.js';
+import { buildSnapshot } from '../src/snapshot/index.js';
+import type {
+  BuildContext,
+  RegisterCaches,
+  SinglePhaseBuildContext,
+  ThreePhaseBuildContext,
+} from '../src/snapshot/index.js';
 
 declare const snapshot: InverterSnapshot;
 declare const batteryModule: BatteryModule;
+declare const registers: RegisterCaches;
+declare const singlePhaseContext: SinglePhaseBuildContext;
+declare const threePhaseContext: ThreePhaseBuildContext;
+declare const anyContext: BuildContext;
 
 test('layout narrows settings to the layout catalogue', () => {
   if (snapshot.layout === 'three_phase') {
@@ -29,7 +40,8 @@ test('battery pause exists only on single-phase schedules', () => {
   // Optional: absent when the model has no pause mode (capabilities.pauseMode).
   expectTypeOf<{}>().toExtend<Pick<SinglePhaseSnapshot['schedules'], 'batteryPause'>>();
   type Pause = NonNullable<SinglePhaseSnapshot['schedules']['batteryPause']>;
-  expectTypeOf<Pause['mode']>().toEqualTypeOf<'off' | 'charge' | 'discharge' | 'both'>();
+  // 'unknown' for an unnamed HR 318 value, as the catalogue enums decode them.
+  expectTypeOf<Pause['mode']>().toEqualTypeOf<'off' | 'charge' | 'discharge' | 'both' | 'unknown'>();
   // Gen1 accepts HR 318 but rejects HR 319/320, so the window is optional.
   expectTypeOf<{ mode: 'off' }>().toExtend<Pause>();
 });
@@ -89,4 +101,11 @@ test('identity enums', () => {
   expectTypeOf<Identity['meterType']>().toEqualTypeOf<'ct_or_em418' | 'em115'>();
   expectTypeOf<Identity['usbDevice']>().toEqualTypeOf<'none' | 'wifi' | 'disk' | 'unknown'>();
   expectTypeOf<{}>().toExtend<Pick<Identity, 'ratedPower' | 'batteryMaxPower' | 'certification'>>();
+});
+
+test('buildSnapshot narrows its return type to the context layout', () => {
+  expectTypeOf(buildSnapshot).parameter(0).toEqualTypeOf<RegisterCaches>();
+  expectTypeOf(buildSnapshot(registers, singlePhaseContext)).toEqualTypeOf<SinglePhaseSnapshot | null>();
+  expectTypeOf(buildSnapshot(registers, threePhaseContext)).toEqualTypeOf<ThreePhaseSnapshot | null>();
+  expectTypeOf(buildSnapshot(registers, anyContext)).toEqualTypeOf<InverterSnapshot | null>();
 });

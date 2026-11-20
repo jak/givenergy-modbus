@@ -40,7 +40,8 @@ export function reference(): RegisterCaches & { batteryModules: Map<number, numb
 
 /**
  * The inverter slave's registers from a capture, with every battery module (0x32–0x37) and
- * battery control unit (0x70–0x77) the capture holds input registers for, in address order.
+ * battery control unit (0x70–0x77) the capture holds input registers for, in address order,
+ * and every meter (0x01–0x08) it holds any registers for.
  * `inject` adds holding registers the capture lacks.
  */
 export function capture(name: string, inject: Record<number, number> = {}): RegisterCaches {
@@ -62,6 +63,10 @@ export function capture(name: string, inject: Record<number, number> = {}): Regi
     input: new Map(input),
     batteryModules: inputsAt(0x32, 0x37),
     batteryStacks: controlUnits.map((controlUnit) => ({ controlUnit, modules: inputsAt(0x50, 0x5f) })),
+    meters: [1, 2, 3, 4, 5, 6, 7, 8].flatMap((address) => {
+      const slave = plant.slaves.get(address);
+      return slave ? [{ address, input: new Map(slave.input), product: new Map(slave.meterProduct) }] : [];
+    }),
   };
   for (const [address, value] of Object.entries(inject)) registers.holding.set(Number(address), value);
   return registers;
