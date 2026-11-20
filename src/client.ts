@@ -13,12 +13,15 @@ export interface ClientOptions {
   onDebug?: (msg: string) => void;
   /** Called for every transparent response with register data (fc=3 or fc=4), matched or not */
   onRegisterData?: (slave: number, fc: number, base: number, values: number[]) => void;
+  /** Minimum time between frames sent, ms. Default 250, GivTCP's inter-frame delay. */
+  frameSpacingMs?: number;
 }
 
 interface PendingRequest {
   resolve: (values: number[]) => void;
   reject: (err: Error) => void;
-  timer: ReturnType<typeof setTimeout>;
+  /** Set once the frame has been sent. */
+  timer?: ReturnType<typeof setTimeout>;
 }
 
 export class Client {
@@ -32,8 +35,10 @@ export class Client {
   private socket: Socket | null = null;
   private framer = new Framer();
   private pending = new Map<string, PendingRequest>();
-  private txQueue: Buffer[] = [];
+  private txQueue: Array<{ frame: Buffer; onSent: () => void }> = [];
   private txDraining = false;
+  private lastSentAt = 0;
+  private readonly frameSpacingMs: number;
   private _dataAdapterSerial = '**********';
 
   /** The data adapter serial, learned from the first heartbeat */
@@ -46,6 +51,7 @@ export class Client {
     this.port = options.port ?? 8899;
     this.timeout = options.timeout ?? 4000;
     this.retries = options.retries ?? 5;
+    this.frameSpacingMs = options.frameSpacingMs ?? 250;
     this.onDebug = options.onDebug ?? (() => {});
     this.onRegisterData = options.onRegisterData ?? (() => {});
   }
@@ -94,7 +100,12 @@ export class Client {
     });
   }
 
-  async sendRequest(frame: Buffer): Promise<number[]> {
+  /**
+   * Send a request and resolve with the matched reply's register values. A timed-out attempt is
+   * retried `options.retries` times (default: the client's `retries`), 500 ms apart.
+   */
+  async sendRequest(frame: Buffer, options: { retries?: number } = {}): Promise<number[]> {
+    const retries = options.retries ?? this.retries;
     if (!this.socket) throw new Error('not connected');
 
     // Frame layout: header(8) + serial(10) + padding(8) + slave(1) + fc(1) + base(2) + count/value(2) + crc(2)
@@ -109,12 +120,12 @@ export class Client {
       : shapeHash(slave, fc, base, count);
 
     let lastError: Error = new Error('timeout');
-    for (let attempt = 0; attempt <= this.retries; attempt++) {
+    for (let attempt = 0; attempt <= retries; attempt++) {
       // Re-check on every attempt: the socket can die mid-cycle (a 'close'/'error'
       // handler nulls it), and there's no point retrying writes into a dead socket.
       if (!this.socket) throw new Error('not connected');
       if (attempt > 0) {
-        this.onDebug(`retry ${attempt}/${this.retries} for ${key}`);
+        this.onDebug(`retry ${attempt}/${retries} for ${key}`);
         await new Promise(r => setTimeout(r, 500)); // inter-retry delay
       }
       try {
@@ -136,18 +147,22 @@ export class Client {
         existing.reject(new Error('superseded by new request'));
       }
 
-      const timer = setTimeout(() => {
-        this.pending.delete(key);
-        reject(new Error(`timeout waiting for response to ${key}`));
-      }, this.timeout);
-
-      this.pending.set(key, { resolve, reject, timer });
-      this._enqueue(frame);
+      const entry: PendingRequest = { resolve, reject };
+      this.pending.set(key, entry);
+      // The timeout runs from when the frame is sent, not queued, so a request waiting behind
+      // others in the queue gets its full time.
+      this._enqueue(frame, () => {
+        if (this.pending.get(key) !== entry) return; // answered or superseded while queued
+        entry.timer = setTimeout(() => {
+          if (this.pending.get(key) === entry) this.pending.delete(key);
+          reject(new Error(`timeout waiting for response to ${key}`));
+        }, this.timeout);
+      });
     });
   }
 
-  private _enqueue(frame: Buffer): void {
-    this.txQueue.push(frame);
+  private _enqueue(frame: Buffer, onSent: () => void = () => {}): void {
+    this.txQueue.push({ frame, onSent });
     if (!this.txDraining) {
       this._drain();
     }
@@ -156,11 +171,14 @@ export class Client {
   private async _drain(): Promise<void> {
     this.txDraining = true;
     while (this.txQueue.length > 0) {
-      const frame = this.txQueue.shift()!;
+      // At least `frameSpacingMs` between frames, whether they were queued together or one after
+      // another.
+      const wait = this.lastSentAt + this.frameSpacingMs - Date.now();
+      if (wait > 0) await new Promise(r => setTimeout(r, wait));
+      const { frame, onSent } = this.txQueue.shift()!;
       this.socket?.write(frame);
-      if (this.txQueue.length > 0) {
-        await new Promise(r => setTimeout(r, 250)); // 250ms throttle between frames
-      }
+      this.lastSentAt = Date.now();
+      onSent();
     }
     this.txDraining = false;
   }

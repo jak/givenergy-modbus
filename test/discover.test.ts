@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import { parseSubnet, discover, type DiscoveredDevice } from '../src/discover.js';
-import { detectBatteries } from '../src/model/plant.js';
 import * as net from 'net';
 import { buildMockResponse, stringToRegisters } from './helpers/mock-frame.js';
 
@@ -83,8 +82,9 @@ describe('discover verification', () => {
       expect(results).toEqual([{
         host: '127.0.0.1',
         serialNumber: 'CE1234G567',
-        generation: 'gen2',
-        modelCode: 0x2001,
+        deviceTypeCode: 0x2001,
+        model: 'hybrid_gen2',
+        layout: 'single_phase',
       }]);
     } finally {
       server.close();
@@ -193,7 +193,7 @@ describe('discover verification', () => {
       expect(found).toHaveLength(1);
       expect(found[0].host).toBe('127.0.0.1');
       expect(found[0].serialNumber).toBe('CE1234G567');
-      expect(found[0].generation).toBe('gen2');
+      expect(found[0].model).toBe('hybrid_gen2');
     } finally {
       server.close();
     }
@@ -261,21 +261,4 @@ describe('discover verification', () => {
       server.close();
     }
   }, 15000);
-});
-
-describe('detectBatteries', () => {
-  it('returns BCU count for HV devices from BAMS data', () => {
-    // HV systems report battery count via BAMS, not by scanning LV slave addresses.
-    const registerCache = new Map<number, Map<number, number>>();
-    // BAMS slave 0xA0 with 2 BCUs at IR(61)
-    const bamsCache = new Map<number, number>();
-    bamsCache.set(61, 2);
-    registerCache.set(0xa0, bamsCache);
-    expect(detectBatteries(registerCache, true)).toBe(2);
-  });
-
-  it('returns 0 for HV devices when BAMS data is missing', () => {
-    const registerCache = new Map<number, Map<number, number>>();
-    expect(detectBatteries(registerCache, true)).toBe(0);
-  });
 });

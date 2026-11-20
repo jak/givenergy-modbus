@@ -27,6 +27,13 @@ npm install givenergy-modbus
 
 Requires **Node.js 22+**. TypeScript is optional — full type definitions are included.
 
+## Upgrading from 2.x
+
+3.0 is a breaking release: the snapshot is nested, settings are written with `setSetting`, and
+`generation` is replaced by `layout`, `model` and `capabilities`. The
+**[migration guide](https://jak.github.io/givenergy-modbus/migration-v3)** maps every 2.x field and
+method to its 3.0 equivalent.
+
 ## Identify an inverter
 
 If you just need to know what's at a given IP — without starting a full polling session — use `identify()`. It reads a single register block and closes the connection immediately:
@@ -35,12 +42,13 @@ If you just need to know what's at a given IP — without starting a full pollin
 import { GivEnergyInverter } from 'givenergy-modbus';
 
 const identity = await GivEnergyInverter.identify({ host: '192.168.1.100' });
-console.log(identity.serialNumber); // e.g. "SD2227G895"
-console.log(identity.generation);   // "gen2", "gen3", or "three_phase"
-console.log(identity.modelCode);    // raw device type code from HR(0)
+console.log(identity.serialNumber);   // e.g. "FD0000A000"
+console.log(identity.model);          // e.g. "hybrid_gen3", "ac", "hybrid_3ph"
+console.log(identity.layout);         // "single_phase" or "three_phase"
+console.log(identity.deviceTypeCode); // raw device type code from HR 0
 ```
 
-This is useful during pairing or discovery when you don't need live data.
+This is useful during pairing or discovery when you don't need live data. It rejects with `UnsupportedDeviceError` for an Energy Management System, a Gateway or an unknown device.
 
 ## Quick start
 
@@ -56,14 +64,15 @@ if (devices.length === 0) {
   process.exit(1);
 }
 
-// Connect and auto-detect inverter generation (gen2, gen3, three-phase)
+// Connect: resolves after the first full poll, with the model already identified
 const inverter = await GivEnergyInverter.connect({ host: devices[0].host });
+console.log(inverter.model, inverter.layout);
 
 // Listen for data updates (every ~15 seconds)
 inverter.on('data', (snapshot) => {
-  console.log(`Solar: ${snapshot.solarPower}W`);
-  console.log(`Battery: ${snapshot.stateOfCharge}%`);
-  console.log(`Grid: ${snapshot.gridPower}W (+ = export)`);
+  console.log(`Solar: ${snapshot.solar.power}W`);
+  console.log(`Battery: ${snapshot.battery.stateOfCharge}%`);
+  console.log(`Grid: ${snapshot.grid.power}W (+ = export)`);
 });
 
 // Listen for connection loss
@@ -73,18 +82,39 @@ inverter.on('lost', (err) => {
 
 // Read the latest snapshot at any time
 const snapshot = inverter.getData();
+console.log(snapshot.settings.ecoMode, snapshot.schedules.charge);
 
-// Control the inverter — modes are independent toggles
-await inverter.setEcoMode(true);
-await inverter.setTimedCharge(true);
-await inverter.setChargeSlot(1, { start: '00:30', end: '04:30', targetStateOfCharge: 100 });
-await inverter.setChargeRate(2600);
+// Control the inverter: settings are independent registers
+await inverter.setSetting('ecoMode', true);
+await inverter.setSetting('acCharge', true);
+await inverter.setChargeSlot(1, { start: '00:30', end: '04:30' });
 await inverter.syncDateTime();
 ```
 
+Every setting `setSetting` accepts, with its registers and the models that support it, is in the **[settings reference](https://jak.github.io/givenergy-modbus/settings)**.
+
+### Layouts and capabilities
+
+`connect()` returns a `SinglePhaseInverter` or a `ThreePhaseInverter`. Settings that exist on both layouts can be written straight away; layout-specific settings and battery pause need narrowing on `layout`, and model- or firmware-specific features are checked with `capabilities`:
+
+```ts
+if (inverter.layout === 'single_phase') {
+  await inverter.setSetting('batteryChargeRate', 50); // HR 111, single-phase only
+
+  if (inverter.capabilities.perSlotTargets) {
+    await inverter.setChargeSlot(1, { start: '00:30', end: '04:30', targetStateOfCharge: 100 });
+  }
+  if (inverter.capabilities.pauseMode) {
+    await inverter.setBatteryPause({ mode: 'off' });
+  }
+}
+```
+
+A write the model or firmware doesn't support throws `UnsupportedSettingError`; `inverter.supports(key)` checks a setting first.
+
 ## Library scope
 
-This library is **stateless** — it reads the current inverter state and sends individual register writes, but does not track what it has changed or automatically revert anything. Each method call is a single Modbus transaction: read registers, write a register, or poll for updates.
+This library is **stateless** — it reads the current inverter state and sends individual register writes, but does not track what it has changed or automatically revert anything. Each method call writes one register, or a short run of registers for a slot or battery pause.
 
 This means higher-level workflows like "force charge for 2 hours then revert to normal" need to be orchestrated by **your application**, not by this library. The library gives you the building blocks; you decide when and how to use them.
 
@@ -101,15 +131,16 @@ const inverter = await GivEnergyInverter.connect({ host: '192.168.1.100' });
 
 // 1. Save the current state so you can restore it later
 const before = inverter.getData();
+const [slot1] = before.schedules.charge;
 
-// 2. Enable timed charge and set a charge slot covering "now"
-await inverter.setTimedCharge(true);
-await inverter.setChargeSlot(1, { start: '00:00', end: '23:59', targetStateOfCharge: 100 });
+// 2. Enable AC charge and set a charge slot covering "now"
+await inverter.setSetting('acCharge', true);
+await inverter.setChargeSlot(1, { start: '00:00', end: '23:59' });
 
 // 3. Your app is responsible for reverting when done — use a timer, cron, etc.
 setTimeout(async () => {
-  await inverter.setTimedCharge(before.timedCharge);
-  // Restore original charge slot, rate, etc.
+  await inverter.setSetting('acCharge', before.settings.acCharge);
+  if (slot1) await inverter.setChargeSlot(slot1); // the slot entry carries its own number
   await inverter.stop();
 }, 2 * 60 * 60 * 1000); // 2 hours
 ```
@@ -120,19 +151,20 @@ setTimeout(async () => {
 // 1. Save current state
 const before = inverter.getData();
 
-// 2. Enable timed export with a discharge slot covering "now"
-await inverter.setTimedExport(true);
+// 2. Enable DC discharge with a discharge slot covering "now"
+await inverter.setSetting('dcDischarge', true);
 await inverter.setDischargeSlot(1, { start: '00:00', end: '23:59' });
 
 // 3. Revert when done (your app's responsibility)
+await inverter.setSetting('dcDischarge', before.settings.dcDischarge);
 ```
 
 #### Key points
 
-- **Always save state before changing it.** The library doesn't track previous values — snapshot fields like `ecoMode`, `timedExport`, `timedCharge`, `chargeRatePercent`, `batteryReservePercent`, and `chargeSlots` tell you the current config so you can restore it.
+- **Always save state before changing it.** The library doesn't track previous values — `snapshot.settings` (`ecoMode`, `dcDischarge`, `acCharge`, `batteryReserve`, …) and `snapshot.schedules` tell you the current config so you can restore it.
 - **Your app owns the timer/revert logic.** Whether that's `setTimeout`, a cron job, or a home automation trigger is up to you.
-- **Modes are independent toggles**, not mutually exclusive states. Eco mode (HR 27), timed export (HR 59), and timed charge (HR 96) can each be toggled independently without affecting each other. Gen3 inverters also have a battery pause mode (HR 318) and timed discharge slot (HR 319-320).
-- **The inverter may take a few seconds to act on register writes.** Poll with `getData()` or listen for `'data'` events to confirm changes took effect.
+- **Settings are independent toggles**, not mutually exclusive modes. Eco mode (HR 27), DC discharge (HR 59) and AC charge (HR 96) can each be toggled without affecting the others. Single-phase models with `capabilities.pauseMode` also have a battery pause (HR 318–320).
+- **The inverter may take a few seconds to act on register writes.** The snapshot shows a written setting as soon as the inverter accepts it; listen for `'data'` events to see the inverter's live values respond.
 
 ## API documentation
 

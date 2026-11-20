@@ -1,7 +1,6 @@
 import * as net from 'net';
 import * as os from 'os';
-import { GivEnergyInverter } from './inverter.js';
-import type { InverterGeneration } from './generation.js';
+import { GivEnergyInverter, type InverterIdentity } from './inverter.js';
 
 /** GivEnergy inverters always listen on this port */
 const INVERTER_PORT = 8899;
@@ -9,11 +8,9 @@ const SCAN_TIMEOUT_MS = 1000;
 const IDENTIFY_TIMEOUT_MS = 3000;
 const CONCURRENCY = 20;
 
-export interface DiscoveredDevice {
+/** An inverter found on the network: its address and what `GivEnergyInverter.identify` read. */
+export interface DiscoveredDevice extends InverterIdentity {
   host: string;
-  serialNumber: string;
-  generation: InverterGeneration;
-  modelCode: number;
 }
 
 /**

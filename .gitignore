@@ -5,3 +5,4 @@ dumps/
 website/api/
 website/.vitepress/cache/
 website/.vitepress/dist/
+.claude/settings.local.json

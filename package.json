@@ -6,12 +6,20 @@
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
   "files": [
     "dist"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true })\" && tsc",
     "test": "vitest run",
+    "test:types": "vitest run --typecheck.only",
     "test:watch": "vitest",
     "prepublishOnly": "npm test && npm run build",
     "script:discover": "node scripts/discover.mjs",
@@ -21,8 +29,9 @@
     "script:dump-registers": "node scripts/dump-registers.mjs",
     "script:full-scan": "node scripts/full-scan.mjs",
     "script:identify": "node scripts/identify.mjs",
-    "docs": "typedoc && vitepress build website",
-    "docs:dev": "typedoc && vitepress dev website"
+    "docs": "npm run docs:settings && typedoc && vitepress build website",
+    "docs:dev": "npm run docs:settings && typedoc && vitepress dev website",
+    "docs:settings": "npm run build && node scripts/generate-settings-doc.mjs"
   },
   "keywords": [
     "givenergy",

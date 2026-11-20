@@ -140,8 +140,8 @@ function makeHoldingRegisters(): number[] {
 }
 
 function makeInputRegisters(): number[] {
-  // 240 registers to cover IR 0-59 and 180-239 ranges
-  const regs = new Array(240).fill(0);
+  // 300 registers to cover the IR 0-59, 180-239 and 240-299 blocks
+  const regs = new Array(300).fill(0);
 
   // IR(41) = 350 (heatsink temp → toDeci = 35°C, passes sanity check)
   regs[41] = 350;
@@ -272,8 +272,9 @@ describe('Mock inverter frame building', () => {
     const framer = new Framer();
     const results = framer.decode(frame);
     expect(results.length).toBe(1);
-    expect(results[0].type).toBe('frame');
-    const pdu = decodePdu(results[0].data);
+    const [result] = results;
+    if (result.type !== 'frame') throw new Error(`expected a frame, got ${result.type}`);
+    const pdu = decodePdu(result.data);
     expect(pdu.type).toBe('transparent');
     if (pdu.type === 'transparent') {
       expect(pdu.registerValues).toEqual([0x1234, 0x5678]);
@@ -309,8 +310,8 @@ describe('Integration: GivEnergyInverter with mock inverter', () => {
     try {
       const snapshot = inv.getData();
       expect(snapshot).toBeDefined();
-      expect(snapshot.serialNumber).toBe('SA1234B567');
-      expect(snapshot.stateOfCharge).toBe(75);
+      expect(snapshot.identity.serialNumber).toBe('SA1234B567');
+      expect(snapshot.battery.stateOfCharge).toBe(75);
     } finally {
       await inv.stop();
       await mock.close();
@@ -338,10 +339,9 @@ describe('Integration: GivEnergyInverter with mock inverter', () => {
     inv.on('data', (s: any) => snapshots.push(s));
 
     try {
-      // connect() already completed one poll. The next poll fires 100ms later
-      // and takes ~4s to complete (inter-read delays + push soak). Wait 6s.
-      await new Promise(r => setTimeout(r, 6000));
-      expect(snapshots.length).toBeGreaterThanOrEqual(1);
+      // connect() already completed one poll. The next poll fires 100ms later and takes a few
+      // seconds (inter-read delays + push soak).
+      await vi.waitFor(() => expect(snapshots.length).toBeGreaterThanOrEqual(1), { timeout: 20000, interval: 100 });
     } finally {
       await inv.stop();
       await mock.close();
@@ -385,7 +385,7 @@ describe('Integration: GivEnergyInverter with mock inverter', () => {
 
     try {
       // Baseline: live data.
-      expect(inv.getData().serialNumber).toBe('SA1234B567');
+      expect(inv.getData().identity.serialNumber).toBe('SA1234B567');
 
       // Inverter reboots — the TCP connection drops. The server stays listening so the
       // reconnect can succeed once the client detects the dead transport and retries.
@@ -402,7 +402,7 @@ describe('Integration: GivEnergyInverter with mock inverter', () => {
         expect(events.reconnected).toBeGreaterThanOrEqual(1);
       }, { timeout: 20000, interval: 50 });
 
-      expect(inv.getData().serialNumber).toBe('SA1234B567');
+      expect(inv.getData().identity.serialNumber).toBe('SA1234B567');
     } finally {
       clearInterval(pin);
       await inv.stop();

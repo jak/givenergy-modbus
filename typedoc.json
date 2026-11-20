@@ -1,10 +1,22 @@
 {
   "$schema": "https://typedoc.org/schema.json",
-  "entryPoints": ["src/index.ts"],
+  "entryPoints": [
+    "src/index.ts"
+  ],
   "out": "website/api",
-  "plugin": ["typedoc-plugin-markdown", "typedoc-vitepress-theme"],
+  "plugin": [
+    "typedoc-plugin-markdown",
+    "typedoc-vitepress-theme"
+  ],
   "docsRoot": "./website",
   "excludePrivate": true,
   "excludeInternal": true,
-  "gitRemote": "origin"
+  "gitRemote": "origin",
+  "intentionallyNotExported": [
+    "InLayout",
+    "GatedKey",
+    "HasLayout",
+    "InverterListener",
+    "OtherEvent"
+  ]
 }

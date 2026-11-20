@@ -61,3 +61,41 @@ export const THREE_PHASE_DISCHARGE_SLOT_REGISTERS: SimpleTimeslotRegisters[] = [
   { start: 1118, end: 1119 }, // Slot 1
   { start: 1120, end: 1121 }, // Slot 2
 ];
+
+/**
+ * Legacy charge slot 2, on single-phase firmware without ten slots. On ten-slot firmware slot 2
+ * is HR 243/244, and writes to HR 31/32 return an error.
+ */
+export const LEGACY_CHARGE_SLOT_2: SimpleTimeslotRegisters = { start: 31, end: 32 };
+
+/** A slot's registers; `targetStateOfCharge` only where the slot's target can be read and written. */
+export interface SlotRegisters extends SimpleTimeslotRegisters {
+  targetStateOfCharge?: number;
+}
+
+/**
+ * The charge or discharge slots a model has, slot 1 first (research B):
+ * - Single-phase with ten slots: CHARGE/DISCHARGE_SLOT_REGISTERS. Otherwise two slots: charge
+ *   HR 94/95 and HR 31/32, discharge HR 56/57 and HR 44/45.
+ * - Three-phase: slots 1/2 at HR 1113–1116 (charge) and HR 1118–1121 (discharge), with no target
+ *   register; with ten slots, slots 3–10 as single-phase.
+ * Targets are included only with `perSlotTargets`.
+ */
+export function slotRegistersFor(
+  layout: 'single_phase' | 'three_phase',
+  capabilities: { tenSlots: boolean; perSlotTargets: boolean },
+  kind: 'charge' | 'discharge',
+): SlotRegisters[] {
+  const tenSlotTable = kind === 'charge' ? CHARGE_SLOT_REGISTERS : DISCHARGE_SLOT_REGISTERS;
+  const withTargets = (table: readonly SlotRegisters[]) =>
+    table.map(({ start, end, targetStateOfCharge }) =>
+      capabilities.perSlotTargets && targetStateOfCharge !== undefined ? { start, end, targetStateOfCharge } : { start, end });
+  if (layout === 'three_phase') {
+    const firstTwo = kind === 'charge' ? THREE_PHASE_CHARGE_SLOT_REGISTERS : THREE_PHASE_DISCHARGE_SLOT_REGISTERS;
+    return [...firstTwo.map(({ start, end }) => ({ start, end })), ...(capabilities.tenSlots ? withTargets(tenSlotTable.slice(2)) : [])];
+  }
+  if (capabilities.tenSlots) return withTargets(tenSlotTable);
+  // Two-slot firmware has no per-slot targets.
+  const twoSlots = kind === 'charge' ? [CHARGE_SLOT_REGISTERS[0], LEGACY_CHARGE_SLOT_2] : DISCHARGE_SLOT_REGISTERS.slice(0, 2);
+  return twoSlots.map(({ start, end }) => ({ start, end }));
+}

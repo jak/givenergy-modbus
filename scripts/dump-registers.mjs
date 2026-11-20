@@ -226,8 +226,10 @@ if (debug) {
 
 // Access the raw register caches from the poll manager
 const pm = inverter.pollManager ?? inverter._pollManager ?? null;
-const hrCache = pm?._holdingRegisters;
-const irCache = pm?._inputRegisters;
+// Every register the poll manager received, matched or pushed, by device address.
+const inverterRegisters = pm?._devices?.get(0x11);
+const hrCache = inverterRegisters?.holding;
+const irCache = inverterRegisters?.input;
 
 if (!hrCache) {
   console.error('Could not access raw register caches');

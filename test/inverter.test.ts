@@ -1,313 +1,116 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { createServer, type Server, type Socket } from 'net';
-import { GivEnergyInverter } from '../src/inverter.js';
-import { Gen2Inverter } from '../src/inverters/gen2.js';
-import { Gen3Inverter } from '../src/inverters/gen3.js';
-import { ThreePhaseInverter } from '../src/inverters/three-phase.js';
+import { GivEnergyInverter, SinglePhaseInverter, ThreePhaseInverter } from '../src/inverter.js';
+import { UnsupportedDeviceError } from '../src/errors.js';
 import { PollManager } from '../src/poll-manager.js';
 import { buildMockResponse as buildIdentifyResponse, stringToRegisters } from './helpers/mock-frame.js';
 
+/** Serve one HR 0–59 response to the first request, as `identify()` expects. */
+async function identifyAgainst(registers: number[]) {
+  const sockets: Socket[] = [];
+  const response = buildIdentifyResponse(registers);
+  const server: Server = createServer((socket) => {
+    sockets.push(socket);
+    socket.once('data', () => socket.write(response));
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const port = (server.address() as { port: number }).port;
+  return {
+    sockets,
+    identify: () => GivEnergyInverter.identify({ host: '127.0.0.1', port }),
+    close: () => {
+      for (const s of sockets) s.destroy();
+      server.close();
+    },
+  };
+}
+
+function identityRegisters(serial: string, deviceTypeCode: number, armFirmwareVersion: number): number[] {
+  const registers = new Array(60).fill(0);
+  registers[0] = deviceTypeCode;
+  const serialRegs = stringToRegisters(serial);
+  for (let i = 0; i < 5; i++) registers[13 + i] = serialRegs[i];
+  registers[21] = armFirmwareVersion;
+  return registers;
+}
+
 describe('GivEnergyInverter', () => {
-  it('exposes a static connect() factory method', () => {
-    expect(typeof GivEnergyInverter.connect).toBe('function');
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
-  it('exposes shared control methods on prototype', () => {
-    // Verify method signatures exist on the abstract class prototype
-    // (subclasses inherit these shared methods)
-    expect(typeof GivEnergyInverter.prototype.setEcoMode).toBe('function');
-    expect(typeof GivEnergyInverter.prototype.setTimedExport).toBe('function');
-    expect(typeof GivEnergyInverter.prototype.setDateTime).toBe('function');
-    expect(typeof GivEnergyInverter.prototype.syncDateTime).toBe('function');
-    expect(typeof GivEnergyInverter.prototype.reboot).toBe('function');
-    expect(typeof GivEnergyInverter.prototype.stop).toBe('function');
-    expect(typeof GivEnergyInverter.prototype.getData).toBe('function');
-    expect(typeof GivEnergyInverter.prototype.unsafe_writeRegister).toBe('function');
-  });
-
-  it('Gen2Inverter exposes generation-specific methods', () => {
-    expect(typeof Gen2Inverter.prototype.setTimedCharge).toBe('function');
-    expect(typeof Gen2Inverter.prototype.setChargeTarget).toBe('function');
-    expect(typeof Gen2Inverter.prototype.setChargeSlot).toBe('function');
-    expect(typeof Gen2Inverter.prototype.setChargeSlots).toBe('function');
-    expect(typeof Gen2Inverter.prototype.setDischargeSlot).toBe('function');
-    expect(typeof Gen2Inverter.prototype.setDischargeSlots).toBe('function');
-    expect(typeof Gen2Inverter.prototype.setChargeRate).toBe('function');
-    expect(typeof Gen2Inverter.prototype.setChargeRatePercent).toBe('function');
-    expect(typeof Gen2Inverter.prototype.setDischargeRate).toBe('function');
-    expect(typeof Gen2Inverter.prototype.setDischargeRatePercent).toBe('function');
-    expect(typeof Gen2Inverter.prototype.setBatteryReserve).toBe('function');
-    expect(typeof Gen2Inverter.prototype.setBatteryPowerReserve).toBe('function');
-  });
-
-  it('Gen3Inverter exposes generation-specific methods including Gen3-only', () => {
-    expect(typeof Gen3Inverter.prototype.setTimedCharge).toBe('function');
-    expect(typeof Gen3Inverter.prototype.setBatteryPauseMode).toBe('function');
-    expect(typeof Gen3Inverter.prototype.setChargeSlot).toBe('function');
-    expect(typeof Gen3Inverter.prototype.setExportLimit).toBe('function');
-    expect(typeof Gen3Inverter.prototype.setTimedDischargeSlot).toBe('function');
-  });
-
-  it('ThreePhaseInverter exposes generation-specific methods', () => {
-    expect(typeof ThreePhaseInverter.prototype.setTimedCharge).toBe('function');
-    expect(typeof ThreePhaseInverter.prototype.setChargeSlot).toBe('function');
-    expect(typeof ThreePhaseInverter.prototype.setDischargeSlot).toBe('function');
-  });
-
-  it('connect() throws when initial poll produces empty serial number (#23)', async () => {
-    // When connecting to a host that has port 8899 open but is not a GivEnergy
-    // inverter, the poll completes with all-zero registers producing an empty
-    // serial number. connect() should reject rather than returning a bogus inverter.
-    const origStart = vi.spyOn(PollManager.prototype, 'start').mockResolvedValue(undefined);
-    const origGetData = vi.spyOn(PollManager.prototype, 'getData').mockReturnValue({
-      generation: 'gen2',
-      serialNumber: '',
-      modelCode: 0,
-      solarPower: 0,
-      pvString1Power: 0,
-      pvString2Power: 0,
-      batteryPower: 0,
-      gridPower: 0,
-      loadPower: 0,
-      inverterOutputPower: 0,
-      gridApparentPower: 0,
-      epsBackupPower: 0,
-      pvString1Voltage: 0,
-      pvString2Voltage: 0,
-      pvString1Current: 0,
-      pvString2Current: 0,
-      stateOfCharge: 0,
-      batteryVoltage: 0,
-      batteryCurrent: 0,
-      gridVoltage: 0,
-      gridFrequency: 0,
-      inverterCurrent: 0,
-      epsBackupVoltage: 0,
-      epsBackupFrequency: 0,
-      inverterHeatsinkTemp: 0,
-      chargerTemperature: 0,
-      batteryTemperature: 0,
-      pvEnergyTotalKwh: 0,
-      batteryChargeEnergyTotalKwh: 0,
-      batteryDischargeEnergyTotalKwh: 0,
-      gridImportEnergyTotalKwh: 0,
-      gridExportEnergyTotalKwh: 0,
-      consumptionEnergyTotalKwh: 0,
-      batteryThroughputTotalKwh: 0,
-      hoursOfOperation: 0,
-      pvEnergyTodayKwh: 0,
-      batteryChargeEnergyTodayKwh: 0,
-      batteryDischargeEnergyTodayKwh: 0,
-      gridImportEnergyTodayKwh: 0,
-      gridExportEnergyTodayKwh: 0,
-      consumptionEnergyTodayKwh: 0,
-      chargeSlots: [],
-      dischargeSlots: [],
-      ecoMode: false,
-      timedExport: false,
-      timedCharge: false,
-      chargeTargetStateOfCharge: 0,
-      systemTime: new Date(),
-      powerFlows: {
-        solarToHouse: 0, solarToBattery: 0, solarToGrid: 0,
-        batteryToHouse: 0, batteryToGrid: 0, gridToHouse: 0, gridToBattery: 0,
-      },
-      batteries: [],
-      meters: [],
-    } as any);
-    const origStop = vi.spyOn(PollManager.prototype, 'stop').mockResolvedValue(undefined);
-
-    try {
-      await expect(GivEnergyInverter.connect({ host: '192.168.50.118' }))
-        .rejects.toThrow('No valid inverter found');
-    } finally {
-      origStart.mockRestore();
-      origGetData.mockRestore();
-      origStop.mockRestore();
-    }
-  });
-
-  it('connect() throws when serial is NUL-filled from all-zero registers', async () => {
-    // registersToString converts all-zero registers to NUL bytes (\x00),
-    // which trim() does NOT strip. This is the common case when a non-inverter
-    // device has port 8899 open — registers read as zeros, producing NUL-filled serial.
-    const origStart = vi.spyOn(PollManager.prototype, 'start').mockResolvedValue(undefined);
-    const origGetData = vi.spyOn(PollManager.prototype, 'getData').mockReturnValue({
-      generation: 'gen2',
-      serialNumber: '\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00',
-      modelCode: 0,
-      solarPower: 0, pvString1Power: 0, pvString2Power: 0,
-      batteryPower: 0, gridPower: 0, loadPower: 0,
-      inverterOutputPower: 0, gridApparentPower: 0, epsBackupPower: 0,
-      pvString1Voltage: 0, pvString2Voltage: 0,
-      pvString1Current: 0, pvString2Current: 0,
-      stateOfCharge: 0, batteryVoltage: 0, batteryCurrent: 0,
-      gridVoltage: 0, gridFrequency: 0, inverterCurrent: 0,
-      epsBackupVoltage: 0, epsBackupFrequency: 0,
-      inverterHeatsinkTemp: 0, chargerTemperature: 0, batteryTemperature: 0,
-      pvEnergyTotalKwh: 0, batteryChargeEnergyTotalKwh: 0,
-      batteryDischargeEnergyTotalKwh: 0, gridImportEnergyTotalKwh: 0,
-      gridExportEnergyTotalKwh: 0, consumptionEnergyTotalKwh: 0,
-      batteryThroughputTotalKwh: 0, hoursOfOperation: 0,
-      pvEnergyTodayKwh: 0, batteryChargeEnergyTodayKwh: 0,
-      batteryDischargeEnergyTodayKwh: 0, gridImportEnergyTodayKwh: 0,
-      gridExportEnergyTodayKwh: 0, consumptionEnergyTodayKwh: 0,
-      chargeSlots: [], dischargeSlots: [],
-      ecoMode: false, timedExport: false, timedCharge: false, chargeTargetStateOfCharge: 0,
-      systemTime: new Date(),
-      powerFlows: {
-        solarToHouse: 0, solarToBattery: 0, solarToGrid: 0,
-        batteryToHouse: 0, batteryToGrid: 0, gridToHouse: 0, gridToBattery: 0,
-      },
-      batteries: [], meters: [],
-    } as any);
-    const origStop = vi.spyOn(PollManager.prototype, 'stop').mockResolvedValue(undefined);
-
-    try {
-      await expect(GivEnergyInverter.connect({ host: '192.168.50.118' }))
-        .rejects.toThrow('No valid inverter found');
-    } finally {
-      origStart.mockRestore();
-      origGetData.mockRestore();
-      origStop.mockRestore();
-    }
-  });
-
-  it('all subclasses extend GivEnergyInverter', () => {
-    expect(Gen2Inverter.prototype).toBeInstanceOf(GivEnergyInverter);
-    expect(Gen3Inverter.prototype).toBeInstanceOf(GivEnergyInverter);
+  it('has a concrete class per layout', () => {
+    expect(SinglePhaseInverter.prototype).toBeInstanceOf(GivEnergyInverter);
     expect(ThreePhaseInverter.prototype).toBeInstanceOf(GivEnergyInverter);
   });
 
-  it('identify() returns serial number and generation from a single register read', async () => {
-    const sockets: Socket[] = [];
-    const registers = new Array(60).fill(0);
-    // HR(0) = device type code 0x2001 (Gen2 hybrid)
-    registers[0] = 0x2001;
-    // HR(13..17) = serial "SD2227G895" encoded as 5 registers
-    const serialRegs = stringToRegisters('SD2227G895');
-    for (let i = 0; i < 5; i++) registers[13 + i] = serialRegs[i];
-    // HR(21) = firmware version 899
-    registers[21] = 899;
+  it.each([
+    ['empty', ''],
+    // registersToString turns all-zero registers into NUL bytes, which trim() doesn't strip.
+    ['NUL-filled', '\x00'.repeat(10)],
+  ])('connect() rejects a %s serial number (#23)', async (_name, serialNumber) => {
+    vi.spyOn(PollManager.prototype, 'start').mockResolvedValue(undefined);
+    vi.spyOn(PollManager.prototype, 'getData').mockReturnValue({
+      layout: 'single_phase',
+      model: 'hybrid_gen2',
+      identity: { serialNumber },
+    } as never);
+    const stop = vi.spyOn(PollManager.prototype, 'stop').mockResolvedValue(undefined);
 
-    const response = buildIdentifyResponse(registers);
-    const server: Server = createServer((socket) => {
-      sockets.push(socket);
-      socket.once('data', () => socket.write(response));
-    });
-
-    try {
-      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-      const port = (server.address() as any).port;
-      const result = await GivEnergyInverter.identify({ host: '127.0.0.1', port });
-      expect(result.serialNumber).toBe('SD2227G895');
-      expect(result.generation).toBe('gen2');
-    } finally {
-      for (const s of sockets) s.destroy();
-      server.close();
-    }
+    await expect(GivEnergyInverter.connect({ host: '192.168.50.118' })).rejects.toThrow('No valid inverter found');
+    expect(stop).toHaveBeenCalled();
   });
 
-  it('identify() detects gen3 from device type code and firmware version', async () => {
-    const sockets: Socket[] = [];
-    const registers = new Array(60).fill(0);
-    registers[0] = 0x2001;
-    const serialRegs = stringToRegisters('EE1234G567');
-    for (let i = 0; i < 5; i++) registers[13 + i] = serialRegs[i];
-    registers[21] = 301;
-
-    const response = buildIdentifyResponse(registers);
-    const server: Server = createServer((socket) => {
-      sockets.push(socket);
-      socket.once('data', () => socket.write(response));
-    });
-
-    try {
-      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-      const port = (server.address() as any).port;
-      const result = await GivEnergyInverter.identify({ host: '127.0.0.1', port });
-      expect(result.serialNumber).toBe('EE1234G567');
-      expect(result.generation).toBe('gen3');
-    } finally {
-      for (const s of sockets) s.destroy();
-      server.close();
-    }
-  });
-
-  it('identify() falls back to serial prefix detection when model code is zero', async () => {
-    const sockets: Socket[] = [];
-    const registers = new Array(60).fill(0);
-    const serialRegs = stringToRegisters('SA9999X123');
-    for (let i = 0; i < 5; i++) registers[13 + i] = serialRegs[i];
-
-    const response = buildIdentifyResponse(registers);
-    const server: Server = createServer((socket) => {
-      sockets.push(socket);
-      socket.once('data', () => socket.write(response));
-    });
-
-    try {
-      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-      const port = (server.address() as any).port;
-      const result = await GivEnergyInverter.identify({ host: '127.0.0.1', port });
-      expect(result.serialNumber).toBe('SA9999X123');
-      expect(result.generation).toBe('three_phase');
-    } finally {
-      for (const s of sockets) s.destroy();
-      server.close();
-    }
-  });
-
-  it('identify() throws when serial number is empty (not a GivEnergy inverter)', async () => {
-    const sockets: Socket[] = [];
-    const registers = new Array(60).fill(0);
-
-    const response = buildIdentifyResponse(registers);
-    const server: Server = createServer((socket) => {
-      sockets.push(socket);
-      socket.once('data', () => socket.write(response));
-    });
-
-    try {
-      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-      const port = (server.address() as any).port;
-      await expect(GivEnergyInverter.identify({ host: '127.0.0.1', port }))
-        .rejects.toThrow('No valid inverter found');
-    } finally {
-      for (const s of sockets) s.destroy();
-      server.close();
-    }
-  });
-
-  it('identify() closes the connection after reading identity', async () => {
-    const sockets: Socket[] = [];
-    const registers = new Array(60).fill(0);
-    registers[0] = 0x2001;
-    const serialRegs = stringToRegisters('SD2227G895');
-    for (let i = 0; i < 5; i++) registers[13 + i] = serialRegs[i];
-    registers[21] = 899;
-
-    const response = buildIdentifyResponse(registers);
-    const server: Server = createServer((socket) => {
-      sockets.push(socket);
-      socket.once('data', () => socket.write(response));
-    });
-
-    try {
-      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-      const port = (server.address() as any).port;
-      await GivEnergyInverter.identify({ host: '127.0.0.1', port });
-
-      // Give a tick for cleanup
-      await new Promise((resolve) => setTimeout(resolve, 50));
-
-      // All sockets should be destroyed after identify completes
-      for (const s of sockets) {
-        expect(s.destroyed).toBe(true);
+  describe('identify()', () => {
+    it.each([
+      // 20xx is shared by Gen1, Gen2 and Gen3: the ARM firmware century tells them apart.
+      ['a Gen2 (20xx, ARM 8xx)', 0x2001, 899, 'hybrid_gen2', 'single_phase'],
+      ['a Gen3 (20xx, ARM 3xx)', 0x2001, 301, 'hybrid_gen3', 'single_phase'],
+      ['a three-phase Hybrid (40xx)', 0x4004, 0, 'hybrid_3ph', 'three_phase'],
+    ])('reads %s from one HR 0–59 request', async (_name, deviceTypeCode, arm, model, layout) => {
+      const server = await identifyAgainst(identityRegisters('FD0000A000', deviceTypeCode, arm));
+      try {
+        expect(await server.identify()).toEqual({ serialNumber: 'FD0000A000', deviceTypeCode, model, layout });
+      } finally {
+        server.close();
       }
-    } finally {
-      for (const s of sockets) s.destroy();
-      server.close();
-    }
+    });
+
+    it('rejects a device with no serial number (not a GivEnergy inverter)', async () => {
+      const server = await identifyAgainst(new Array(60).fill(0));
+      try {
+        await expect(server.identify()).rejects.toThrow('No valid inverter found');
+      } finally {
+        server.close();
+      }
+    });
+
+    it.each([
+      ['a plant controller', 0x5101, 'ems'],
+      // 2.x fell back to the serial prefix when HR 0 read 0; v3 has no model to fall back to.
+      ['a device type code of 0, even with a serial number', 0x0000, 'unknown'],
+    ])('rejects %s with UnsupportedDeviceError', async (_name, deviceTypeCode, model) => {
+      const server = await identifyAgainst(identityRegisters('SA9999X123', deviceTypeCode, 0));
+      try {
+        await expect(server.identify()).rejects.toMatchObject({ name: 'UnsupportedDeviceError', model });
+        await expect(server.identify()).rejects.toBeInstanceOf(UnsupportedDeviceError);
+      } finally {
+        server.close();
+      }
+    });
+
+    it('closes the connection after reading identity', async () => {
+      const server = await identifyAgainst(identityRegisters('FD0000A000', 0x2001, 899));
+      try {
+        await server.identify();
+        // The server sees the close shortly after identify() resolves.
+        await vi.waitFor(() => {
+          expect(server.sockets.length).toBeGreaterThan(0);
+          for (const s of server.sockets) expect(s.destroyed || s.readableEnded).toBe(true);
+        });
+      } finally {
+        server.close();
+      }
+    });
   });
 });

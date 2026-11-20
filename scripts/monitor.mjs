@@ -1,4 +1,5 @@
 import { existsSync } from 'fs';
+import { parseArgs } from 'util';
 
 if (!existsSync(new URL('../dist/index.js', import.meta.url))) {
   console.error('Error: dist/index.js not found. Run `npm run build` first.');
@@ -7,9 +8,14 @@ if (!existsSync(new URL('../dist/index.js', import.meta.url))) {
 
 const { GivEnergyInverter, discover } = await import('../dist/index.js');
 
-const args = process.argv.slice(2);
-const debug = args.includes('--debug');
-let host = args.find(a => a !== '--debug');
+// Usage: node scripts/monitor.mjs [host] [--port 8899] [--debug]
+const { values: flags, positionals } = parseArgs({
+  options: { port: { type: 'string' }, debug: { type: 'boolean' } },
+  allowPositionals: true,
+});
+const debug = flags.debug ?? false;
+const port = flags.port === undefined ? undefined : Number(flags.port);
+let host = positionals[0];
 
 if (!host) {
   console.log('No host specified, auto-discovering...');
@@ -22,16 +28,17 @@ if (!host) {
   console.log(`Using ${host}`);
 }
 
+const signed = (watts) => (watts >= 0 ? `+${watts}` : `${watts}`);
+
+// Battery: positive is discharging. Grid: positive is export.
 function formatLine(s) {
-  const now = new Date();
-  const time = now.toTimeString().slice(0, 8);
-  const bat = s.batteryPower >= 0 ? `+${s.batteryPower}` : `${s.batteryPower}`;
-  const grid = s.gridPower >= 0 ? `+${s.gridPower}` : `${s.gridPower}`;
-  return `[${time}] solar=${s.solarPower}W  battery=${bat}W (${s.stateOfCharge}%)  grid=${grid}W  load=${s.loadPower}W`;
+  const time = new Date().toTimeString().slice(0, 8);
+  return `[${time}] solar=${s.solar.power}W  battery=${signed(s.battery.power)}W (${s.battery.stateOfCharge}%)  `
+    + `grid=${signed(s.grid.power)}W  load=${s.load.power}W`;
 }
 
 console.log(`Connecting to ${host}...`);
-const inverter = await GivEnergyInverter.connect({ host });
+const inverter = await GivEnergyInverter.connect({ host, port });
 
 if (debug) {
   inverter.on('debug', (msg) => console.log(`  [debug] ${msg}`));

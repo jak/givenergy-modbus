@@ -7,7 +7,11 @@
  * Reference: GivTCP/givenergy_modbus_async/model/register.py Converter class
  */
 
-import type { TimeSlot } from './register-types.js';
+/** A start and end time of day, `"HH:MM"`. */
+export interface TimeSlot {
+  start: string;
+  end: string;
+}
 
 /** Divide by 1000 — millivolt, milliamp registers (e.g. battery cell voltages IR 60-75) */
 export function toMilli(raw: number): number {
@@ -78,7 +82,7 @@ export function toDuint8(raw: number): [number, number] {
 }
 
 /**
- * Convert a pair of raw register values to a TimeSlot.
+ * Convert a pair of raw register values to a start and end time.
  *
  * Register format: integer HHMM (e.g. 0 = 00:00, 30 = 00:30, 1630 = 16:30, 2359 = 23:59).
  * Used for charge/discharge time slots (e.g. HR 94-95, 56-57).
@@ -125,4 +129,29 @@ export function frequencyScale(raw: number): number {
  */
 export function hvCapacityUsable(nominalCapacityKwh: number, moduleCount: number): number {
   return Math.round(nominalCapacityKwh * moduleCount * 0.9 * 100) / 100;
+}
+
+/**
+ * Signed int16 ÷10. Temperatures are signed (v4.1.6 register document): IR 41, 55, 56 on the
+ * inverter, IR 76–81, 103, 104 on LV batteries, IR 1128–1130 on three-phase. An empty battery
+ * slot reads −273.0 °C.
+ */
+export function toSignedDeci(raw: number): number {
+  return toInt16(raw) / 10;
+}
+
+/** Combine two registers, high word first, into a signed 32-bit value (e.g. three-phase IR 1069–1070). */
+export function toInt32(high: number, low: number): number {
+  const value = toUint32(high, low);
+  return value > 0x7fffffff ? value - 0x100000000 : value;
+}
+
+/**
+ * Offset-unsigned power factor: raw ÷10000 − 1, rounded to 4 decimal places, so 10000 is 0 and
+ * the range is −1 to 1. The v3 CT meter decoding (IR 80–83). GivTCP also reads the inverter's
+ * IR 16 and HR 52 this way, but IR 16 doesn't fit the captures and is not exposed. 2.x read the
+ * meter plain signed; see `toPowerFactor`.
+ */
+export function toOffsetPowerFactor(raw: number): number {
+  return Math.round((raw / 10000 - 1) * 10000) / 10000;
 }
