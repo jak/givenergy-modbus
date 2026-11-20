@@ -66,7 +66,9 @@ export function buildStatus(
   }
 
   const chargeStatusRaw = ir(14);
-  const hours = toUint32(ir(47) ?? 0, ir(48) ?? 0);
+  const hoursHigh = ir(47);
+  const hoursLow = ir(48);
+  const hours = hoursHigh !== undefined && hoursLow !== undefined ? toUint32(hoursHigh, hoursLow) : undefined;
   return {
     inverterStatus: inverterStatus(ir(0)),
     faults: decodeInverterFaults(readHolding(registers, 223), readHolding(registers, 224)),
@@ -78,7 +80,7 @@ export function buildStatus(
     faultCode: hex4(ir(39)),
     warningCode: hex4(ir(40)),
     batteryWarnings: decodeBatteryWarnings(ir(57)),
-    ...(hours <= MAX_HOURS_OF_OPERATION ? { hoursOfOperation: hours } : {}),
+    ...(hours !== undefined && hours <= MAX_HOURS_OF_OPERATION ? { hoursOfOperation: hours } : {}),
     countdownSeconds: ir(38) ?? 0,
   };
 }

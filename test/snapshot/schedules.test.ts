@@ -64,8 +64,8 @@ describe('schedule quirks', () => {
   });
 
   it('reads charge slot 2 from HR 243/244 on ten-slot firmware and HR 31/32 before it', () => {
-    expect(gen3({ 31: 100, 32: 200, 243: 300, 244: 400 }).charge[1]).toMatchObject({ start: '03:00', end: '04:00' });
-    const legacy = registersOf({ 0: 0x2001, 21: 302, 31: 100, 32: 200, 243: 300, 244: 400 });
+    expect(gen3({ 94: 0, 95: 0, 31: 100, 32: 200, 243: 300, 244: 400 }).charge[1]).toMatchObject({ start: '03:00', end: '04:00' });
+    const legacy = registersOf({ 0: 0x2001, 21: 302, 94: 0, 95: 0, 31: 100, 32: 200, 243: 300, 244: 400 });
     const context = singlePhaseContextFor(legacy);
     expect(context.capabilities.tenSlots).toBe(false);
     expect(buildSchedules(legacy, context).charge).toEqual([
@@ -75,7 +75,7 @@ describe('schedule quirks', () => {
   });
 
   it('uses two charge and two discharge slots without targets on legacy firmware (Gen2)', () => {
-    const registers = registersOf({ 0: 0x2001, 21: 920, 94: 2330, 95: 530, 56: 1600, 57: 1900, 44: 0, 45: 0 });
+    const registers = registersOf({ 0: 0x2001, 21: 920, 94: 2330, 95: 530, 31: 0, 32: 0, 56: 1600, 57: 1900, 44: 0, 45: 0 });
     const schedules = buildSchedules(registers, singlePhaseContextFor(registers));
     expect(schedules.charge).toEqual([{ start: '23:30', end: '05:30' }, { start: '00:00', end: '00:00' }]);
     expect(schedules.discharge).toEqual([{ start: '16:00', end: '19:00' }, { start: '00:00', end: '00:00' }]);
@@ -84,6 +84,22 @@ describe('schedule quirks', () => {
 
   it('reads an unset slot as 00:00–00:00 and normalises 2400 to 00:00, as 2.x does', () => {
     expect(gen3({ 94: 0, 95: 2400 }).charge[0]).toMatchObject({ start: '00:00', end: '00:00' });
+  });
+
+  it('leaves out a slot whose start or end register is unread, rather than show a fake 00:00–00:00 slot', () => {
+    // A full poll reads every slot register, so this only happens with partial data.
+    const legacy = (holding: Record<number, number>) => {
+      const registers = registersOf({ 0: 0x2001, 21: 920, ...holding });
+      return buildSchedules(registers, singlePhaseContextFor(registers));
+    };
+    expect(legacy({ 94: 2330, 95: 530, 31: 100 }).charge).toEqual([{ start: '23:30', end: '05:30' }]);
+    expect(legacy({ 95: 530, 31: 100, 32: 200 }).charge).toEqual([{ start: '01:00', end: '02:00' }]);
+    expect(legacy({}).discharge).toEqual([]);
+  });
+
+  it('leaves out a slot target whose register is unread, rather than show 0 %', () => {
+    expect(gen3({ 94: 2330, 95: 530 }).charge[0]).toEqual({ start: '23:30', end: '05:30' });
+    expect(gen3({ 94: 2330, 95: 530, 242: 80 }).charge[0]).toEqual({ start: '23:30', end: '05:30', targetStateOfCharge: 80 });
   });
 
   it('decodes an unnamed HR 318 value as "unknown", like the catalogue enums (2.x read it as off)', () => {
@@ -114,11 +130,35 @@ describe('buildSchedules on three-phase', () => {
     expect(schedules.discharge.slice(0, 2)).toEqual([{ start: '01:00', end: '01:00' }, { start: '00:00', end: '00:00' }]);
   });
 
-  it('has ten slots, with slots 3–10 (and their targets) in HR 246–299 as on single-phase', () => {
-    expect(schedules.charge).toHaveLength(10);
-    // This capture never read HR 240–299, so slots 3–10 read as unset.
-    expect(schedules.charge[2]).toEqual(unsetSlot(0));
+  it('leaves out slots 3–10 (HR 246–299), which this capture never read, rather than zero-fill them', () => {
+    // Ten-slot firmware: slots 3–10 and their targets are in HR 246–299 as on single-phase.
+    // 2.x-style zero-filling showed them as 00:00–00:00 slots with 0 % targets.
+    expect(threePhaseContextFor(registers).capabilities.tenSlots).toBe(true);
+    expect(schedules.charge).toHaveLength(2);
+    expect(schedules.discharge).toHaveLength(2);
     expect(schedules).not.toHaveProperty('batteryPause');
+  });
+});
+
+describe('slots the captures never read', () => {
+  const lengths = (name: string, inject?: Record<number, number>) => {
+    const registers = capture(name, inject);
+    const schedules = buildSchedules(registers, contextFor(registers));
+    return [schedules.charge.length, schedules.discharge.length];
+  };
+
+  it('AC: charge slot 1 (HR 94/95) is not in the capture, so only legacy slot 2 (HR 31/32) is listed', () => {
+    expect(lengths('ac_arm282.log')).toEqual([1, 2]);
+  });
+
+  it('HV Gen3: no HR 0–179 block, so charge slot 1 and discharge slots 1–2 are left out', () => {
+    expect(lengths('hybrid_hv_gen3_arm295.log', { 0: 0x8102, 21: 295 })).toEqual([9, 8]);
+  });
+
+  it('every slot register is read on Gen1, Gen2 and the All in One', () => {
+    expect(lengths('hybrid_gen1_arm449.log')).toEqual([2, 2]);
+    expect(lengths('hybrid_gen2_arm920.log')).toEqual([2, 2]);
+    expect(lengths('all_in_one_arm620.log')).toEqual([10, 10]);
   });
 });
 
@@ -127,9 +167,10 @@ describe.each(INVERTER_CAPTURES)('buildSchedules on capture $name', ({ name, inj
     const registers = capture(name, inject);
     const context = contextFor(registers);
     const schedules = buildSchedules(registers, context);
+    // Fewer when a capture lacks some slot registers: unread slots are left out.
     const count = context.capabilities.tenSlots ? 10 : 2;
-    expect(schedules.charge).toHaveLength(count);
-    expect(schedules.discharge).toHaveLength(count);
+    expect(schedules.charge.length).toBeLessThanOrEqual(count);
+    expect(schedules.discharge.length).toBeLessThanOrEqual(count);
     for (const slots of [schedules.charge, schedules.discharge]) {
       slots.forEach((slot, index) => {
         expect(slot.start).toMatch(/^([01]\d|2[0-3]):[0-5]\d$/);

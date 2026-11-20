@@ -36,6 +36,7 @@ export interface TimeSlotConfig {
   /**
    * Target state of charge for the slot, %. Present only when `capabilities.perSlotTargets`,
    * and never on three-phase slots 1/2 (HR 1113–1121), for which no source gives a target.
+   * Absent too when its register is unread, rather than 0 %.
    * Charge slots stop at this upper limit; discharge slots stop at this lower limit.
    * On 10-slot firmware charging stops at min(HR 116, slot target) (GivTCP #576).
    */
@@ -161,8 +162,9 @@ export interface SinglePhaseStatus extends Status {
    */
   batteryWarnings: string[];
   /**
-   * Total hours of operation, IR 47–48 uint32. Absent when the value is over 100 years
-   * (876,000 h), which marks a bad read: the HV Gen3 capture reads IR 47 = 11034, IR 48 = 0.
+   * Total hours of operation, IR 47–48 uint32. Absent unless both registers were read, and
+   * when the value is over 100 years (876,000 h), which marks a bad read: the HV Gen3 capture
+   * reads IR 47 = 11034, IR 48 = 0.
    */
   hoursOfOperation?: number;
   /** Inverter start-up countdown, s, IR 38. */
@@ -243,7 +245,8 @@ export interface BatteryEnergy {
    * module's IR 106 ÷10 (a stack-level value every pack repeats, so not summed; wraps at
    * 6553.5); inverter IR 181 ÷10. Absent when every source reads 0 or is missing. Not used:
    * HR 4109–4112 (write-only seed registers, not live totals) and IR 27–28 (the AC charge
-   * total, which 2.x fell back to). Three-phase IR 1394–1395 uint32 ÷10.
+   * total, which 2.x fell back to). Three-phase IR 1394–1395 uint32 ÷10, absent when unread or
+   * when charge and discharge both read 0.
    */
   chargeTotalKwh?: number;
   /**
@@ -681,7 +684,14 @@ export interface BatteryPause {
   end?: string;
 }
 
-/** Charge and discharge slots. */
+/**
+ * Charge and discharge slots.
+ *
+ * A slot whose start or end register is unread is left out rather than shown as a fake
+ * `00:00`–`00:00` slot. The full poll always reads every slot register, so a gap only appears
+ * with partial data (such as a capture), and then array position no longer matches the slot
+ * number.
+ */
 export interface Schedules {
   /**
    * AC charge slots, slot 1 first. 10 slots when `capabilities.tenSlots`, otherwise 2.
@@ -716,16 +726,20 @@ export type ThreePhaseSchedules = Schedules;
 export interface Meter {
   /** Device address, 1–8. */
   slaveAddress: number;
-  /** Serial number, product registers 60–61 uint32 (a number, not a string). */
-  serialNumber: number;
+  /**
+   * Serial number, product registers 60–61 uint32 (a number, not a string). The product
+   * fields (this one to `softwareVersion`) are each absent when their function 22 registers
+   * weren't read: the Gen2 capture's meter never answered function 22.
+   */
+  serialNumber?: number;
   /** Factory code, product registers 62–63 (4 ASCII characters, e.g. `"GivE"`). */
-  factoryCode: string;
+  factoryCode?: string;
   /** Meter type code, product register 64 (e.g. 33). */
-  meterType: number;
+  meterType?: number;
   /** Hardware version, product register 65. */
-  hardwareVersion: number;
+  hardwareVersion?: number;
   /** Software version, product register 66 (e.g. 518). */
-  softwareVersion: number;
+  softwareVersion?: number;
   /** Phase voltage, V. IR 60–62 ÷10. */
   voltage: ThreePhase<number>;
   /**

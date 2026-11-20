@@ -79,6 +79,13 @@ describe('buildStatus quirks', () => {
     expect(singlePhase({ 47: 0, 48: 36316 }).hoursOfOperation).toBe(36316);
   });
 
+  it('leaves out hours of operation unless both halves (IR 47 and IR 48) were read, rather than zero-fill', () => {
+    // An unread high word would otherwise read as 0 and turn a partial read into a plausible value.
+    expect(singlePhase({ 48: 36316 })).not.toHaveProperty('hoursOfOperation');
+    expect(singlePhase({ 47: 0 })).not.toHaveProperty('hoursOfOperation');
+    expect(singlePhase({})).not.toHaveProperty('hoursOfOperation');
+  });
+
   it('falls back to the previous snapshot clock when HR 35–40 are invalid', () => {
     const previousTime = new Date(2026, 0, 1, 12, 0, 0);
     const registers = registersOf({ 0: 0x2001, 21: 316, 35: 0, 36: 0, 37: 0 });

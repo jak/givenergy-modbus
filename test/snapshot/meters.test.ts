@@ -25,8 +25,10 @@ describe('buildMeters', () => {
       importActiveEnergyKwh: 5243.4,
       exportActiveEnergyKwh: 1499.4,
     });
-    // No function 22 product data in this capture.
-    expect(meter).toMatchObject({ serialNumber: 0, factoryCode: '', meterType: 0 });
+    // No function 22 product data in this capture, so the product fields are absent, not 0.
+    for (const field of ['serialNumber', 'factoryCode', 'meterType', 'hardwareVersion', 'softwareVersion']) {
+      expect(meter).not.toHaveProperty(field);
+    }
   });
 
   it('decodes product information from function 22 (three-phase capture, meter 0x02)', () => {
