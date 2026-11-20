@@ -66,7 +66,7 @@ interface SinglePhaseSnapshot {
 // ThreePhaseSnapshot: same groups, per-phase arrays for grid / inverter / eps, ThreePhaseSettings.
 ```
 
-`schedules.charge` has 10 entries when `capabilities.tenSlots`, otherwise 1 (charge) and 2
+`schedules.charge` has 10 entries when `capabilities.tenSlots`, otherwise 2 (charge: HR 94/95 and 31/32) and 2
 (discharge). `targetStateOfCharge` is present only when `capabilities.perSlotTargets`.
 `batteryPause` is present when `capabilities.pauseMode`; `start`/`end` only when
 `capabilities.pauseWindow` (Gen1 accepts the mode but rejects HR 319/320).
