@@ -131,6 +131,8 @@ for every key, its registers, values and gate.
 | `TimeSlot` | `TimeSlotConfig` |
 | `BatteryPauseMode` | `BatteryPause['mode']` |
 
+Deep imports into `dist/` (for example `givenergy-modbus/dist/pdu/encode.js`) are no longer supported. The package's `exports` map only exposes the main entry point, so import everything from `givenergy-modbus`.
+
 ## Snapshot fields
 
 `s` is the snapshot from `getData()` or a `data` event.
