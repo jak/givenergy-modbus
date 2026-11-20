@@ -339,10 +339,9 @@ describe('Integration: GivEnergyInverter with mock inverter', () => {
     inv.on('data', (s: any) => snapshots.push(s));
 
     try {
-      // connect() already completed one poll. The next poll fires 100ms later
-      // and takes ~4s to complete (inter-read delays + push soak). Wait 6s.
-      await new Promise(r => setTimeout(r, 6000));
-      expect(snapshots.length).toBeGreaterThanOrEqual(1);
+      // connect() already completed one poll. The next poll fires 100ms later and takes a few
+      // seconds (inter-read delays + push soak).
+      await vi.waitFor(() => expect(snapshots.length).toBeGreaterThanOrEqual(1), { timeout: 20000, interval: 100 });
     } finally {
       await inv.stop();
       await mock.close();

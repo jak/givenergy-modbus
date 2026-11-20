@@ -34,6 +34,8 @@ if (debug) inverter.on('debug', (msg) => console.log(`  [debug] ${msg}`));
 
 // connect() waits for the first complete poll, so getData() is immediately available.
 const s = inverter.getData();
+// Which catalogue settings this inverter supports, with its capabilities after any downgrade.
+const supported = new Map(Object.keys(SETTINGS).map((key) => [key, inverter.supports(key)]));
 await inverter.stop();
 
 // ── Formatting ───────────────────────────────────────────────────────────────
@@ -152,8 +154,7 @@ const notRead = [];
 for (const [key, definition] of Object.entries(SETTINGS)) {
   const register = registerOn(definition);
   if (register === undefined) continue; // not on this layout
-  const supported = definition.supported ? definition.supported(s.capabilities, s.layout) : true;
-  if (!supported) { notSupported.push(`${key} (HR ${register})`); continue; }
+  if (!supported.get(key)) { notSupported.push(`${key} (HR ${register})`); continue; }
   if (!(key in s.settings)) { notRead.push(`${key} (HR ${register})`); continue; }
   const unit = definition.unit ?? (definition.kind === 'percent' ? '%' : '');
   const marks = [definition.unsafe ? 'UNSAFE' : '', definition.writable === false ? 'read only' : ''].filter(Boolean);
