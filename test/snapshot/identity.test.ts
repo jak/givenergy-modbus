@@ -9,10 +9,11 @@ import {
   singlePhaseContextFor,
   threePhaseContextFor,
 } from '../helpers/snapshot-fixtures.js';
+import { buildForLayout } from '../../src/snapshot/read.js';
 
 describe('buildIdentity on the Gen3 reference unit', () => {
   const registers = reference();
-  const identity = buildIdentity(registers, contextFor(registers));
+  const identity = buildIdentity(registers, singlePhaseContextFor(registers));
 
   it('matches website/register-map.md', () => {
     expect(identity).toEqual({
@@ -46,7 +47,7 @@ describe('buildIdentity on the Gen3 reference unit', () => {
 describe('buildIdentity quirks', () => {
   const singlePhase = (holding: Record<number, number>) => {
     const registers = registersOf({ 0: 0x2001, 21: 316, ...holding });
-    return buildIdentity(registers, contextFor(registers));
+    return buildIdentity(registers, singlePhaseContextFor(registers));
   };
 
   it('reads the solar input count from the high byte of HR 3', () => {
@@ -86,20 +87,20 @@ describe('buildIdentity quirks', () => {
 
   it('gives Gen1/Gen2 firmware centuries their own battery power', () => {
     const gen1 = registersOf({ 0: 0x2001, 21: 449 });
-    expect(buildIdentity(gen1, contextFor(gen1)).batteryMaxPower).toBe(2600);
+    expect(buildIdentity(gen1, singlePhaseContextFor(gen1)).batteryMaxPower).toBe(2600);
     const gen2 = registersOf({ 0: 0x2001, 21: 920 });
-    expect(buildIdentity(gen2, contextFor(gen2)).batteryMaxPower).toBe(3600);
+    expect(buildIdentity(gen2, singlePhaseContextFor(gen2)).batteryMaxPower).toBe(3600);
   });
 
   it('leaves out rated and battery power for codes it has no table entry for', () => {
     const registers = registersOf({ 0: 0x2207, 21: 316 });
-    const identity = buildIdentity(registers, contextFor(registers));
+    const identity = buildIdentity(registers, singlePhaseContextFor(registers));
     expect(identity).not.toHaveProperty('ratedPower');
     expect(identity).not.toHaveProperty('batteryMaxPower');
     // The 20xx family gets battery power from its firmware rule even without a rated power entry.
     const unlisted = registersOf({ 0: 0x2007, 21: 316 });
-    expect(buildIdentity(unlisted, contextFor(unlisted))).toMatchObject({ batteryMaxPower: 3600 });
-    expect(buildIdentity(unlisted, contextFor(unlisted))).not.toHaveProperty('ratedPower');
+    expect(buildIdentity(unlisted, singlePhaseContextFor(unlisted))).toMatchObject({ batteryMaxPower: 3600 });
+    expect(buildIdentity(unlisted, singlePhaseContextFor(unlisted))).not.toHaveProperty('ratedPower');
   });
 
   it('strips padding from serial numbers and leaves out an empty battery serial', () => {
@@ -129,7 +130,7 @@ describe.each(INVERTER_CAPTURES)('buildIdentity on capture $name', ({ name, inje
   it('decodes without throwing and gives plausible values', () => {
     const registers = capture(name, inject);
     const context = contextFor(registers);
-    const identity = buildIdentity(registers, context);
+    const identity = buildForLayout(buildIdentity, registers, context);
     expect(identity.model).toBe(context.model);
     expect(identity.deviceTypeCode).toBeGreaterThan(0);
     expect(identity.firmware.arm).toBeGreaterThan(0);

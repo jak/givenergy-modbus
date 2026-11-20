@@ -83,8 +83,9 @@ export function contextFor(registers: RegisterCaches): BuildContext {
   const model = resolveModel(deviceTypeCode, singlePhaseArm);
   if (model === 'unknown' || isPlantController(model)) throw new Error(`not an inverter: ${model}`);
   const layout = layoutOf(model);
-  const arm = layout === 'three_phase' ? registers.input.get(1327) ?? 0 : singlePhaseArm;
-  return { model, layout, capabilities: capabilitiesFor(model, arm) } as BuildContext;
+  const armFirmwareVersion = layout === 'three_phase' ? registers.input.get(1327) ?? 0 : singlePhaseArm;
+  const capabilities = capabilitiesFor(model, armFirmwareVersion);
+  return { model, layout, capabilities, armFirmwareVersion } as BuildContext;
 }
 
 export function singlePhaseContextFor(registers: RegisterCaches): SinglePhaseBuildContext {

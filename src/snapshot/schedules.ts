@@ -78,10 +78,6 @@ export function buildSchedules(registers: RegisterCaches, context: ThreePhaseBui
 export function buildSchedules(
   registers: RegisterCaches,
   context: BuildContext,
-): SinglePhaseSchedules | ThreePhaseSchedules;
-export function buildSchedules(
-  registers: RegisterCaches,
-  context: BuildContext,
 ): SinglePhaseSchedules | ThreePhaseSchedules {
   const { tenSlots, perSlotTargets } = context.capabilities;
 

@@ -9,6 +9,7 @@ import {
   singlePhaseContextFor,
   threePhaseContextFor,
 } from '../helpers/snapshot-fixtures.js';
+import { buildForLayout } from '../../src/snapshot/read.js';
 
 const unsetSlot = (targetStateOfCharge: number) => ({ start: '00:00', end: '00:00', targetStateOfCharge });
 
@@ -143,7 +144,7 @@ describe('buildSchedules on three-phase', () => {
 describe('slots the captures never read', () => {
   const lengths = (name: string, inject?: Record<number, number>) => {
     const registers = capture(name, inject);
-    const schedules = buildSchedules(registers, contextFor(registers));
+    const schedules = buildForLayout(buildSchedules, registers, contextFor(registers));
     return [schedules.charge.length, schedules.discharge.length];
   };
 
@@ -166,7 +167,7 @@ describe.each(INVERTER_CAPTURES)('buildSchedules on capture $name', ({ name, inj
   it('decodes without throwing, with valid times and slot counts', () => {
     const registers = capture(name, inject);
     const context = contextFor(registers);
-    const schedules = buildSchedules(registers, context);
+    const schedules = buildForLayout(buildSchedules, registers, context);
     // Fewer when a capture lacks some slot registers: unread slots are left out.
     const count = context.capabilities.tenSlots ? 10 : 2;
     expect(schedules.charge.length).toBeLessThanOrEqual(count);

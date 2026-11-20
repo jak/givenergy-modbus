@@ -4,7 +4,7 @@
  */
 import type { Meter, ThreePhase } from '../model/snapshot.js';
 import { registersToString, toCenti, toDeci, toInt16, toOffsetPowerFactor, toUint32 } from '../model/converters.js';
-import type { MeterCaches, RegisterCaches } from './read.js';
+import { zeroFilledReader, type MeterCaches, type RegisterCaches } from './read.js';
 
 type ProductInformation = Pick<Meter, 'serialNumber' | 'factoryCode' | 'meterType' | 'hardwareVersion' | 'softwareVersion'>;
 
@@ -32,7 +32,7 @@ function productInformation(product: Map<number, number>): ProductInformation {
 }
 
 function meter({ slaveAddress, input, product }: MeterCaches): Meter | null {
-  const get = (register: number) => input.get(register) ?? 0;
+  const { get } = zeroFilledReader(input);
   const phases = (from: number, decode: (raw: number) => number): ThreePhase<number> =>
     [decode(get(from)), decode(get(from + 1)), decode(get(from + 2))];
   const signed = (raw: number) => toInt16(raw);

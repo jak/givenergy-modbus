@@ -72,7 +72,6 @@ function usbDevice(value: number | undefined): Identity['usbDevice'] {
 
 export function buildIdentity(registers: RegisterCaches, context: SinglePhaseBuildContext): Identity<SinglePhaseModel>;
 export function buildIdentity(registers: RegisterCaches, context: ThreePhaseBuildContext): ThreePhaseIdentity;
-export function buildIdentity(registers: RegisterCaches, context: BuildContext): Identity<SinglePhaseModel> | ThreePhaseIdentity;
 export function buildIdentity(
   registers: RegisterCaches,
   context: BuildContext,
@@ -83,9 +82,10 @@ export function buildIdentity(
 
   const deviceTypeCode = hr(0) ?? 0;
   const code = hexCode(deviceTypeCode);
-  // HR 19/21 read 0 on three-phase; the firmware versions are in IR 1325 (AC DSP), 1326 (DC DSP), 1327 (ARM).
+  // HR 19/21 read 0 on three-phase; the firmware versions are in IR 1325 (AC DSP), 1326 (DC DSP)
+  // and 1327 (ARM). The context resolves the ARM version the same way.
   const dsp = (threePhase ? ir(1325) : hr(19)) ?? 0;
-  const arm = (threePhase ? ir(1327) : hr(21)) ?? 0;
+  const arm = context.armFirmwareVersion;
   // GivTCP decodes any battery type other than 0 (and an unread one) as lithium.
   const batteryTypeRaw = threePhase ? ir(1121) : hr(54);
   const solarInputs = (hr(3) ?? 0) >> 8;
@@ -94,12 +94,10 @@ export function buildIdentity(
   const maxBatteryPower = batteryMaxPower(code, arm);
   const batterySerialNumber = readText(registers.holding, 8, 5);
 
-  const identity: Identity<SinglePhaseModel> = {
+  const identity: Omit<Identity, 'model'> = {
     serialNumber: readText(registers.holding, 13, 5) ?? '',
     ...(batterySerialNumber ? { batterySerialNumber } : {}),
     deviceTypeCode,
-    // Narrowed by the overloads: the model matches the layout.
-    model: context.model as SinglePhaseModel,
     firmware: {
       dsp,
       arm,
@@ -121,7 +119,7 @@ export function buildIdentity(
     userCode: hr(33) ?? 0,
   };
 
-  if (!threePhase) return identity;
+  if (context.layout === 'single_phase') return { ...identity, model: context.model };
   return {
     ...identity,
     model: context.model,

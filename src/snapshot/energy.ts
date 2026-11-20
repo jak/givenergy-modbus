@@ -7,9 +7,11 @@
  */
 import type { InverterModel } from '../model/models.js';
 import type { BatteryEnergy, GridEnergy, InverterEnergy } from '../model/snapshot.js';
-import { toDeci, toUint32 } from '../model/converters.js';
+import { toDeci } from '../model/converters.js';
 import {
   readInput,
+  round2,
+  zeroFilledReader,
   type BuildContext,
   type RegisterCaches,
   type SinglePhaseBuildContext,
@@ -52,15 +54,6 @@ export interface ThreePhaseEnergy {
   battery: BatteryEnergy;
 }
 
-/** Round to 0.01 kWh, dropping float error from adding ÷10 values. */
-function round2(value: number): number {
-  return Math.round(value * 100) / 100;
-}
-
-function deciUint32(cache: Map<number, number>, high: number): number {
-  return toDeci(toUint32(cache.get(high) ?? 0, cache.get(high + 1) ?? 0));
-}
-
 interface Totals {
   charge: number;
   discharge: number;
@@ -80,14 +73,14 @@ interface Totals {
  * (it reads 0x5858 on the reference Gen3); and IR 27–28 is the AC charge total.
  */
 function batteryTotals(registers: RegisterCaches): Totals | undefined {
-  const ir = (address: number) => readInput(registers, address) ?? 0;
+  const { get: ir } = zeroFilledReader(registers.input);
   const candidates: Array<() => Totals | undefined> = [
     () => {
       const stacks = registers.batteryStacks ?? [];
       if (stacks.length === 0) return undefined;
       return {
-        charge: round2(stacks.reduce((sum, stack) => sum + deciUint32(stack.controlUnit, 82), 0)),
-        discharge: round2(stacks.reduce((sum, stack) => sum + deciUint32(stack.controlUnit, 84), 0)),
+        charge: round2(stacks.reduce((sum, stack) => sum + zeroFilledReader(stack.controlUnit).deciUint32(82), 0)),
+        discharge: round2(stacks.reduce((sum, stack) => sum + zeroFilledReader(stack.controlUnit).deciUint32(84), 0)),
       };
     },
     () => {
@@ -111,18 +104,17 @@ function batteryTotals(registers: RegisterCaches): Totals | undefined {
 function threePhaseBatteryTotals(registers: RegisterCaches): Pick<BatteryEnergy, 'chargeTotalKwh' | 'dischargeTotalKwh'> {
   const read = [1390, 1391, 1394, 1395].every((address) => readInput(registers, address) !== undefined);
   if (!read) return {};
-  const charge = deciUint32(registers.input, 1394);
-  const discharge = deciUint32(registers.input, 1390);
+  const { deciUint32 } = zeroFilledReader(registers.input);
+  const charge = deciUint32(1394);
+  const discharge = deciUint32(1390);
   return charge !== 0 || discharge !== 0 ? { chargeTotalKwh: charge, dischargeTotalKwh: discharge } : {};
 }
 
 export function buildEnergy(registers: RegisterCaches, context: SinglePhaseBuildContext): SinglePhaseEnergy;
 export function buildEnergy(registers: RegisterCaches, context: ThreePhaseBuildContext): ThreePhaseEnergy;
-export function buildEnergy(registers: RegisterCaches, context: BuildContext): SinglePhaseEnergy | ThreePhaseEnergy;
 export function buildEnergy(registers: RegisterCaches, context: BuildContext): SinglePhaseEnergy | ThreePhaseEnergy {
-  const ir = (address: number) => readInput(registers, address) ?? 0;
+  const { get: ir, deciUint32: counter } = zeroFilledReader(registers.input);
   const deci = (address: number) => toDeci(ir(address));
-  const counter = (high: number) => deciUint32(registers.input, high);
 
   if (context.layout === 'three_phase') {
     return {

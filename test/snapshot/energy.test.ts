@@ -10,6 +10,7 @@ import {
   singlePhaseContextFor,
   threePhaseContextFor,
 } from '../helpers/snapshot-fixtures.js';
+import { buildForLayout } from '../../src/snapshot/read.js';
 
 /** An LV battery module cache with a serial (IR 110) and the stack totals IR 105/106. */
 function module(discharge: number, charge: number): Map<number, number> {
@@ -201,7 +202,7 @@ describe('three-phase battery totals', () => {
 describe.each(INVERTER_CAPTURES)('buildEnergy on capture $name', ({ name, inject }) => {
   it('decodes without throwing and gives plausible values', () => {
     const registers = capture(name, inject);
-    const energy = buildEnergy(registers, contextFor(registers));
+    const energy = buildForLayout(buildEnergy, registers, contextFor(registers));
     const counters = [
       energy.solar.energyTodayKwh, energy.solar.energyTotalKwh,
       ...Object.values(energy.grid), ...Object.values(energy.inverter),

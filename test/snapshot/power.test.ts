@@ -10,6 +10,7 @@ import {
   singlePhaseContextFor,
   threePhaseContextFor,
 } from '../helpers/snapshot-fixtures.js';
+import { buildForLayout } from '../../src/snapshot/read.js';
 
 /**
  * The reference fixture is the full scan at 22:28, a few minutes after the register map's dump
@@ -205,11 +206,11 @@ describe.each(INVERTER_CAPTURES)('power groups on capture $name', ({ name, injec
   it('decode without throwing and give plausible values', () => {
     const registers = capture(name, inject);
     const context = contextFor(registers);
-    const solar = buildSolar(registers, context);
-    const grid = buildGrid(registers, context);
-    const inverter = buildInverterOutput(registers, context);
-    const eps = buildEps(registers, context);
-    const load = buildLoad(registers, context);
+    const solar = buildForLayout(buildSolar, registers, context);
+    const grid = buildForLayout(buildGrid, registers, context);
+    const inverter = buildForLayout(buildInverterOutput, registers, context);
+    const eps = buildForLayout(buildEps, registers, context);
+    const load = buildForLayout(buildLoad, registers, context);
 
     expect(solar.power).toBeGreaterThanOrEqual(0);
     expect(solar.power).toBeLessThan(30_000);

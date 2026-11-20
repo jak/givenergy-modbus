@@ -10,6 +10,7 @@ import { decodeBatteryWarnings, decodeInverterFaults, decodeThreePhaseFaults } f
 import {
   readHolding,
   readInput,
+  zeroFilledReader,
   type BuildContext,
   type RegisterCaches,
   type SinglePhaseBuildContext,
@@ -38,12 +39,11 @@ function hex4(value: number | undefined): string {
 
 export function buildStatus(registers: RegisterCaches, context: SinglePhaseBuildContext): SinglePhaseStatus;
 export function buildStatus(registers: RegisterCaches, context: ThreePhaseBuildContext): ThreePhaseStatus;
-export function buildStatus(registers: RegisterCaches, context: BuildContext): SinglePhaseStatus | ThreePhaseStatus;
 export function buildStatus(
   registers: RegisterCaches,
   context: BuildContext,
 ): SinglePhaseStatus | ThreePhaseStatus {
-  const hr = (address: number) => readHolding(registers, address) ?? 0;
+  const { get: hr } = zeroFilledReader(registers.holding);
   const ir = (address: number) => readInput(registers, address);
 
   // HR 35 holds the year as an offset from 2000.
