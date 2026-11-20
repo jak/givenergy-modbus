@@ -197,11 +197,16 @@ export interface ThreePhaseSolarString extends SolarString {
 }
 
 export interface Solar<S extends SolarString = SolarString> {
-  /** Total solar power, W: the sum of the strings' power. */
+  /**
+   * Total solar power, W. Single-phase IR 18 + IR 20; three-phase the sum of the strings. On
+   * AC-coupled and All in One models these registers still count generation, metered on the
+   * AC side, even though `strings` is empty.
+   */
   power: number;
   /**
-   * The PV strings, string 1 first. Empty on AC-coupled and All in One models, whose PV
-   * registers echo the AC side rather than measuring PV (research C).
+   * The PV strings, string 1 first. Empty on AC-coupled models (`ac`, `ac_3ph`) and the
+   * All in One (`all_in_one`): they have no DC string, and their PV voltage and current
+   * registers echo the AC side (research C; the external library's `pv_string_vi_ac_derived`).
    */
   strings: S[];
   /** Solar energy generated today, kWh. Single-phase: IR 17 + IR 19 ÷10. Three-phase: IR 1412–1413 uint32 ÷10. */
@@ -481,8 +486,9 @@ export interface Grid {
    */
   power: number;
   /**
-   * Grid frequency, Hz. Single-phase IR 13 ÷100; three-phase IR 1067 ÷100. Some units report
-   * ten times too high, so the value is divided by 10 again when over 100.
+   * Grid frequency, Hz. Single-phase IR 13; three-phase IR 1067. Normally ÷100 (5009 is
+   * 50.09 Hz), but some firmware reports ÷10 (500 is 50.0 Hz): the raw value is divided by 10,
+   * then by 10 again when the result is over 100.
    */
   frequency: number;
   energy: GridEnergy;
@@ -581,7 +587,7 @@ export interface ThreePhaseInverterOutput extends InverterOutput {
 export interface Eps {
   /** EPS (backup) output power, W. Single-phase IR 31; three-phase: the sum of the phases. */
   power: number;
-  /** EPS frequency, Hz. Single-phase IR 54 ÷100 (×10 quirk as for grid frequency); three-phase nominal IR 1180 ÷100. */
+  /** EPS frequency, Hz. Single-phase IR 54; three-phase nominal IR 1180. Scaled as grid frequency (÷100, or ÷10 on some firmware). */
   frequency: number;
 }
 

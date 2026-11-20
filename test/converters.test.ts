@@ -11,6 +11,9 @@ import {
   toTimeslot,
   frequencyScale,
   hvCapacityUsable,
+  toSignedDeci,
+  toInt32,
+  toOffsetPowerFactor,
 } from '../src/model/converters.js';
 
 describe('Register Converters', () => {
@@ -207,6 +210,34 @@ describe('Register Converters', () => {
     it('rounds to 2 decimal places', () => {
       // Python uses round(..., 2)
       expect(hvCapacityUsable(13.5, 4)).toBeCloseTo(48.6, 2);
+    });
+  });
+
+  describe('toSignedDeci', () => {
+    it('reads temperatures as signed ÷10, so sub-zero readings are not 6000 °C', () => {
+      expect(toSignedDeci(289)).toBe(28.9);
+      expect(toSignedDeci(0xffec)).toBe(-2); // −20 raw
+    });
+
+    it('decodes the empty battery slot marker as −273.0 °C', () => {
+      expect(toSignedDeci(0xf555)).toBe(-273.1);
+      expect(toSignedDeci(65536 - 2730)).toBe(-273);
+    });
+  });
+
+  describe('toInt32', () => {
+    it('combines two registers, high word first, as a signed 32-bit value', () => {
+      expect(toInt32(0, 16060)).toBe(16060);
+      expect(toInt32(0xffff, 0xffff)).toBe(-1);
+      expect(toInt32(0xffff, 0x0000)).toBe(-65536);
+    });
+  });
+
+  describe('toOffsetPowerFactor', () => {
+    it('decodes the inverter power factor as raw ÷10000 − 1 (offset-unsigned, IR 16 and HR 52)', () => {
+      expect(toOffsetPowerFactor(10000)).toBe(0);
+      expect(toOffsetPowerFactor(19980)).toBe(0.998);
+      expect(toOffsetPowerFactor(1000)).toBe(-0.9);
     });
   });
 });

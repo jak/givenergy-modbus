@@ -23,13 +23,12 @@ describe('buildIdentity on the Gen3 reference unit', () => {
       firmware: { dsp: 316, arm: 316, batteryManagementSystem: 4009, modbusVersion: 1.4 },
       batteryType: 'lithium',
       batteryCapacityAh: 186,
-      // HR 47 reads 1 although the unit has a GivEnergy meter on slave 0x01.
+      // HR 47 = 1: the GivEnergy meter on slave 0x01 is an EM115.
       meterType: 'em115',
       ratedPower: 5000,
       // 20xx family with ARM firmware century 3.
       batteryMaxPower: 3600,
-      // Quirk: HR 22 reads 2 on the reference unit and on every capture. GivTCP and the
-      // external library only name 0 (none), 1 (Wi-Fi) and 8 (disk).
+      // HR 22 reads 2: see the USB device quirk test below.
       usbDevice: 'unknown',
       ammeterEnabled: true,
       // HR 2 = 0x0C32: first two hex digits 0x0C = 12.
@@ -66,6 +65,17 @@ describe('buildIdentity quirks', () => {
     expect(singlePhase({ 54: 0 }).batteryType).toBe('lead_acid');
     expect(singlePhase({ 54: 1 }).batteryType).toBe('lithium');
     expect(singlePhase({ 54: 7 }).batteryType).toBe('lithium');
+  });
+
+  it('decodes HR 22 = 2 as "unknown" because the sources conflict', () => {
+    // Quirk: HR 22 reads 2 on the reference unit and on every capture. GivTCP's UsbDevice is
+    // 0 none, 1 Wi-Fi, 8 disk, so 2 has no name. The external library's UsbDevice is
+    // 0 none, 1 Wi-Fi, 2 disk, which would make the reference unit a disk, yet it has a
+    // Wi-Fi dongle. Until that is resolved, 2 decodes as 'unknown'.
+    expect(singlePhase({ 22: 2 }).usbDevice).toBe('unknown');
+    for (const name of INVERTER_CAPTURES.map((c) => c.name).filter((n) => !n.startsWith('hybrid_hv_gen3'))) {
+      expect(capture(name).holding.get(22)).toBe(2);
+    }
   });
 
   it('names the USB devices it knows', () => {
