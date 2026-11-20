@@ -196,6 +196,16 @@ describe('unsafe_setSetting', { timeout: 20_000 }, () => {
 });
 
 describe('other writes', { timeout: 20_000 }, () => {
+  it('shows the new clock in the snapshot straight away, with one data event', async () => {
+    const { inverter } = await gen3();
+    let events = 0;
+    inverter.on('data', () => { events++; });
+    const date = new Date(2026, 10, 20, 13, 45, 30);
+    await inverter.setDateTime(date);
+    expect(inverter.getData().status.systemTime.getTime()).toBe(date.getTime());
+    expect(events).toBe(1);
+  });
+
   it('rejects an invalid date, or a year outside 2000–2099, before writing anything', async () => {
     const { mock, inverter } = await gen3();
     await expect(inverter.setDateTime(new Date('not a date'))).rejects.toThrow(RangeError);
