@@ -11,8 +11,12 @@ export interface SettingBase {
   appName?: string;
   /** One-line description for docs and JSDoc. */
   description: string;
-  /** Runtime gate on model/firmware. Settings with this are optional in the snapshot. */
-  supported?: (capabilities: Capabilities) => boolean;
+  /**
+   * Runtime gate on model/firmware. Settings with this are optional in the snapshot on every layout.
+   * Receives the layout because some gates apply to one layout only (e.g. HR 313 is gated on single-phase,
+   * while its three-phase twin HR 1110 is always present).
+   */
+  supported?: (capabilities: Capabilities, layout: Layout) => boolean;
   /** Read-only: shown in the snapshot, never written. */
   writable?: false;
   /** Writable only through unsafe_setSetting. `risk` is copied into its docs. */
