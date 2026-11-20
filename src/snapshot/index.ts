@@ -10,9 +10,11 @@ import { buildIdentity } from './identity.js';
 import { buildMeters } from './meters.js';
 import { buildEps, buildGrid, buildInverterOutput, buildLoad, buildSolar } from './power.js';
 import {
+  buildForLayout,
   readHolding,
   readInput,
   type BuildContext,
+  type LayoutBuilder,
   type RegisterCaches,
   type SinglePhaseBuildContext,
   type ThreePhaseBuildContext,
@@ -68,53 +70,32 @@ export function buildSnapshot(registers: RegisterCaches, context: ThreePhaseBuil
 export function buildSnapshot(registers: RegisterCaches, context: BuildContext): InverterSnapshot | null;
 export function buildSnapshot(registers: RegisterCaches, context: BuildContext): InverterSnapshot | null {
   if (!passesSanityCheck(registers, context)) return null;
-  const meters = buildMeters(registers);
+  const build = <SinglePhaseResult, ThreePhaseResult>(builder: LayoutBuilder<SinglePhaseResult, ThreePhaseResult>) =>
+    buildForLayout(builder, registers, context);
 
-  if (context.layout === 'three_phase') {
-    const energy = buildEnergy(registers, context);
-    const solar = { ...buildSolar(registers, context), ...energy.solar };
-    const grid = { ...buildGrid(registers, context), energy: energy.grid };
-    const load = { ...buildLoad(registers, context), ...energy.load };
-    const battery = { ...buildBattery(registers, context), energy: energy.battery };
-    return {
-      layout: 'three_phase',
-      model: context.model,
-      capabilities: context.capabilities,
-      identity: buildIdentity(registers, context),
-      status: buildStatus(registers, context),
-      solar,
-      battery,
-      grid,
-      inverter: { ...buildInverterOutput(registers, context), energy: energy.inverter },
-      eps: buildEps(registers, context),
-      load,
-      powerFlows: powerFlows(solar.power, load.power, battery.power, grid.power),
-      meters,
-      settings: buildSettings(registers, context),
-      schedules: buildSchedules(registers, context),
-    };
-  }
-
-  const energy = buildEnergy(registers, context);
-  const solar = { ...buildSolar(registers, context), ...energy.solar };
-  const grid = { ...buildGrid(registers, context), energy: energy.grid };
-  const load = { ...buildLoad(registers, context), ...energy.load };
-  const battery = { ...buildBattery(registers, context), energy: energy.battery };
-  return {
-    layout: 'single_phase',
+  const energy = build(buildEnergy);
+  const solar = { ...build(buildSolar), ...energy.solar };
+  const grid = { ...build(buildGrid), energy: energy.grid };
+  const load = { ...build(buildLoad), ...energy.load };
+  const battery = { ...build(buildBattery), energy: energy.battery };
+  const snapshot = {
+    layout: context.layout,
     model: context.model,
     capabilities: context.capabilities,
-    identity: buildIdentity(registers, context),
-    status: buildStatus(registers, context),
+    identity: build(buildIdentity),
+    status: build(buildStatus),
     solar,
     battery,
     grid,
-    inverter: { ...buildInverterOutput(registers, context), energy: energy.inverter },
-    eps: buildEps(registers, context),
+    inverter: { ...build(buildInverterOutput), energy: energy.inverter },
+    eps: build(buildEps),
     load,
     powerFlows: powerFlows(solar.power, load.power, battery.power, grid.power),
-    meters,
-    settings: buildSettings(registers, context),
-    schedules: buildSchedules(registers, context),
-  };
+    meters: buildMeters(registers),
+    settings: build(buildSettings),
+    schedules: build(buildSchedules),
+  } satisfies Record<keyof InverterSnapshot, unknown>;
+  // Every group comes from a builder narrowed to this context's layout, so the groups match the
+  // layout; TypeScript can't correlate the separately narrowed unions, hence the assertion.
+  return snapshot as InverterSnapshot;
 }

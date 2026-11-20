@@ -9,6 +9,7 @@ import {
   singlePhaseContextFor,
   threePhaseContextFor,
 } from '../helpers/snapshot-fixtures.js';
+import { buildForLayout } from '../../src/snapshot/read.js';
 
 describe('buildSettings on the Gen3 reference unit', () => {
   const registers = reference();
@@ -92,7 +93,7 @@ describe('buildSettings on three-phase', () => {
 describe.each(INVERTER_CAPTURES)('buildSettings on capture $name', ({ name, inject }) => {
   it('decodes without throwing, with percentages in range', () => {
     const registers = capture(name, inject);
-    const settings = buildSettings(registers, contextFor(registers));
+    const settings = buildForLayout(buildSettings, registers, contextFor(registers));
     for (const [key, value] of Object.entries(settings)) {
       expect(value, key).not.toBeUndefined();
       if (key.endsWith('Percent') || ['batteryReserve', 'batteryCutoff', 'acChargeUpperLimit'].includes(key)) {

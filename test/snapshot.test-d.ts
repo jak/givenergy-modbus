@@ -10,6 +10,8 @@ import type {
 import type { SinglePhaseSettings, ThreePhaseSettings } from '../src/catalogue/index.js';
 import type { SinglePhaseModel, ThreePhaseModel } from '../src/model/models.js';
 import { buildSnapshot } from '../src/snapshot/index.js';
+import { buildSolar, type SinglePhaseSolarPower, type ThreePhaseSolarPower } from '../src/snapshot/power.js';
+import { buildForLayout } from '../src/snapshot/read.js';
 import type {
   BuildContext,
   RegisterCaches,
@@ -111,6 +113,13 @@ test('identity enums', () => {
   expectTypeOf<Identity['meterType']>().toEqualTypeOf<'ct_or_em418' | 'em115'>();
   expectTypeOf<Identity['usbDevice']>().toEqualTypeOf<'none' | 'wifi' | 'disk' | 'unknown'>();
   expectTypeOf<{}>().toExtend<Pick<Identity, 'ratedPower' | 'batteryMaxPower' | 'certification'>>();
+});
+
+test('group builders take a narrowed context; buildForLayout takes the union', () => {
+  expectTypeOf(buildSolar(registers, singlePhaseContext)).toEqualTypeOf<SinglePhaseSolarPower>();
+  // @ts-expect-error: no overload for the BuildContext union
+  buildSolar(registers, anyContext);
+  expectTypeOf(buildForLayout(buildSolar, registers, anyContext)).toEqualTypeOf<SinglePhaseSolarPower | ThreePhaseSolarPower>();
 });
 
 test('buildSnapshot narrows its return type to the context layout', () => {

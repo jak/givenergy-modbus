@@ -9,6 +9,7 @@ import {
   singlePhaseContextFor,
   threePhaseContextFor,
 } from '../helpers/snapshot-fixtures.js';
+import { buildForLayout } from '../../src/snapshot/read.js';
 
 describe('buildStatus on the Gen3 reference unit', () => {
   const registers = reference();
@@ -124,7 +125,7 @@ describe('buildStatus on three-phase', () => {
 describe.each(INVERTER_CAPTURES)('buildStatus on capture $name', ({ name, inject }) => {
   it('decodes without throwing and gives plausible values', () => {
     const registers = capture(name, inject);
-    const status = buildStatus(registers, contextFor(registers));
+    const status = buildForLayout(buildStatus, registers, contextFor(registers));
     expect(status.inverterStatus).not.toBe('unknown');
     expect(status.faults).toEqual([]);
     expect(status.systemTime).toBeInstanceOf(Date);

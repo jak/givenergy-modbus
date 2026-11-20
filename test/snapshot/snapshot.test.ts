@@ -105,6 +105,22 @@ const SNAPSHOT_INJECT: Record<string, Record<number, number>> = {
   'hybrid_hv_gen3_arm295.log': { 30: 17, 33: 7, 34: 140 },
 };
 
+/** The path of every number in `value` that is NaN or ±Infinity. */
+function nonFiniteNumbers(value: unknown, path = 'snapshot'): string[] {
+  if (typeof value === 'number') return Number.isFinite(value) ? [] : [`${path} = ${value}`];
+  if (value === null || typeof value !== 'object') return [];
+  return Object.entries(value).flatMap(([key, child]) => nonFiniteNumbers(child, `${path}.${key}`));
+}
+
+describe('nonFiniteNumbers', () => {
+  it('finds NaN and Infinity at any depth, including inside arrays', () => {
+    expect(nonFiniteNumbers({ a: 1, b: { c: [2, Number.NaN] }, d: -Infinity, e: 'x', f: null })).toEqual([
+      'snapshot.b.c.1 = NaN',
+      'snapshot.d = -Infinity',
+    ]);
+  });
+});
+
 describe.each(INVERTER_CAPTURES)('buildSnapshot on capture $name', ({ name, inject }) => {
   it('builds a snapshot of the right layout', () => {
     const registers = capture(name, { ...inject, ...SNAPSHOT_INJECT[name] });
@@ -115,7 +131,7 @@ describe.each(INVERTER_CAPTURES)('buildSnapshot on capture $name', ({ name, inje
     expect(snapshot!.model).toBe(context.model);
     expect(() => JSON.stringify(snapshot)).not.toThrow();
     // No NaN or Infinity, which JSON would silently turn into null.
-    expect(JSON.stringify(snapshot)).not.toMatch(/null/);
+    expect(nonFiniteNumbers(snapshot)).toEqual([]);
   });
 });
 

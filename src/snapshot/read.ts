@@ -8,7 +8,7 @@
 import type { Capabilities } from '../model/capabilities.js';
 import type { SinglePhaseModel, ThreePhaseModel } from '../model/models.js';
 import type { InverterSnapshot } from '../model/snapshot.js';
-import { registersToString } from '../model/converters.js';
+import { registersToString, toDeci, toUint32 } from '../model/converters.js';
 
 /** Register values, keyed by register number. */
 export interface RegisterCaches {
@@ -63,6 +63,11 @@ export interface HighVoltageModuleCaches {
 
 interface BuildContextBase {
   capabilities: Capabilities;
+  /**
+   * ARM firmware version: HR 21 on single-phase, IR 1327 on three-phase (HR 21 reads 0 there).
+   * Resolved once, with the model, by whoever builds the context.
+   */
+  armFirmwareVersion: number;
   /** The previous snapshot, for fallbacks such as an invalid clock. */
   previous?: InverterSnapshot | null;
 }
@@ -79,6 +84,24 @@ export interface ThreePhaseBuildContext extends BuildContextBase {
 
 /** What a builder knows about the inverter besides its registers. Discriminated on `layout`. */
 export type BuildContext = SinglePhaseBuildContext | ThreePhaseBuildContext;
+
+/** A group builder with one overload per layout. */
+export interface LayoutBuilder<SinglePhaseResult, ThreePhaseResult> {
+  (registers: RegisterCaches, context: SinglePhaseBuildContext): SinglePhaseResult;
+  (registers: RegisterCaches, context: ThreePhaseBuildContext): ThreePhaseResult;
+}
+
+/**
+ * Call a layout builder with a context whose layout isn't known statically. The builders have
+ * no overload for the `BuildContext` union, so this narrows the context first.
+ */
+export function buildForLayout<SinglePhaseResult, ThreePhaseResult>(
+  build: LayoutBuilder<SinglePhaseResult, ThreePhaseResult>,
+  registers: RegisterCaches,
+  context: BuildContext,
+): SinglePhaseResult | ThreePhaseResult {
+  return context.layout === 'three_phase' ? build(registers, context) : build(registers, context);
+}
 
 export function readHolding(registers: RegisterCaches, address: number): number | undefined {
   return registers.holding.get(address);
@@ -102,4 +125,37 @@ export function readText(table: Map<number, number>, start: number, count: numbe
   }
   if (!anyRead) return undefined;
   return registersToString(values).replace(/\0/g, '').trim();
+}
+
+/**
+ * Readers over one register table that treat an unread register as 0. For values that are
+ * always present in the snapshot; use `readHolding`/`readInput` where unread must stay absent.
+ */
+export function zeroFilledReader(table: Map<number, number>) {
+  const get = (address: number) => table.get(address) ?? 0;
+  const uint32 = (high: number) => toUint32(get(high), get(high + 1));
+  return {
+    get,
+    /** Two registers, high word first, as an unsigned 32-bit value. */
+    uint32,
+    /** `uint32` ÷10, the scaling of most energy and three-phase power counters. */
+    deciUint32: (high: number) => toDeci(uint32(high)),
+    /** ASCII text as `readText`, but `''` rather than `undefined` when nothing was read. */
+    text: (start: number, count: number) => readText(table, start, count) ?? '',
+  };
+}
+
+/** The `count` consecutive register addresses from `from`. */
+export function range(from: number, count: number): number[] {
+  return Array.from({ length: count }, (_, i) => from + i);
+}
+
+/** Round to one decimal place, for sums of ÷10 values. */
+export function round1(value: number): number {
+  return Math.round(value * 10) / 10;
+}
+
+/** Round to two decimal places, dropping float error from adding ÷10 values. */
+export function round2(value: number): number {
+  return Math.round(value * 100) / 100;
 }

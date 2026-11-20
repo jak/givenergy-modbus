@@ -37,6 +37,8 @@ import {
 } from '../model/converters.js';
 import {
   readInput,
+  round1,
+  zeroFilledReader,
   type BuildContext,
   type RegisterCaches,
   type SinglePhaseBuildContext,
@@ -68,30 +70,19 @@ function frequency(raw: number): number {
   return Math.round(frequencyScale(raw) * 100) / 100;
 }
 
-/** Round to one decimal place, for sums of ÷10 values. */
-function round1(value: number): number {
-  return Math.round(value * 10) / 10;
-}
-
-function reader(registers: RegisterCaches) {
-  const ir = (address: number) => readInput(registers, address) ?? 0;
-  return {
-    ir,
-    uint32: (high: number) => toUint32(ir(high), ir(high + 1)),
-    phases: <T>(build: (phase: 0 | 1 | 2) => T): ThreePhase<T> => [build(0), build(1), build(2)],
-  };
+function phases<T>(build: (phase: 0 | 1 | 2) => T): ThreePhase<T> {
+  return [build(0), build(1), build(2)];
 }
 
 // ── Solar ────────────────────────────────────────────────────────────────────
 
 export function buildSolar(registers: RegisterCaches, context: SinglePhaseBuildContext): SinglePhaseSolarPower;
 export function buildSolar(registers: RegisterCaches, context: ThreePhaseBuildContext): ThreePhaseSolarPower;
-export function buildSolar(registers: RegisterCaches, context: BuildContext): SinglePhaseSolarPower | ThreePhaseSolarPower;
 export function buildSolar(
   registers: RegisterCaches,
   context: BuildContext,
 ): SinglePhaseSolarPower | ThreePhaseSolarPower {
-  const { ir, uint32 } = reader(registers);
+  const { get: ir, deciUint32 } = zeroFilledReader(registers.input);
   const hasStrings = !NO_PV_STRING_MODELS.has(context.model);
 
   if (context.layout === 'three_phase') {
@@ -100,9 +91,9 @@ export function buildSolar(
     const strings = ([0, 1] as const).map((n): ThreePhaseSolarString => ({
       voltage: toDeci(ir(1001 + n)),
       current: toDeci(ir(1009 + n)),
-      power: toDeci(uint32(1017 + 2 * n)),
-      energyTodayKwh: toDeci(uint32(1366 + 4 * n)),
-      energyTotalKwh: toDeci(uint32(1368 + 4 * n)),
+      power: deciUint32(1017 + 2 * n),
+      energyTodayKwh: deciUint32(1366 + 4 * n),
+      energyTotalKwh: deciUint32(1368 + 4 * n),
     }));
     return {
       power: round1(strings[0].power + strings[1].power),
@@ -132,17 +123,16 @@ export function buildSolar(
 
 export function buildGrid(registers: RegisterCaches, context: SinglePhaseBuildContext): SinglePhaseGridPower;
 export function buildGrid(registers: RegisterCaches, context: ThreePhaseBuildContext): ThreePhaseGridPower;
-export function buildGrid(registers: RegisterCaches, context: BuildContext): SinglePhaseGridPower | ThreePhaseGridPower;
 export function buildGrid(
   registers: RegisterCaches,
   context: BuildContext,
 ): SinglePhaseGridPower | ThreePhaseGridPower {
-  const { ir, uint32, phases } = reader(registers);
+  const { get: ir, deciUint32 } = zeroFilledReader(registers.input);
 
   if (context.layout === 'three_phase') {
     return {
       // Meter export IR 1081–1082 minus import IR 1079–1080, each uint32 ÷10 (GivTCP's scaling).
-      power: round1(toDeci(uint32(1081)) - toDeci(uint32(1079))),
+      power: round1(deciUint32(1081) - deciUint32(1079)),
       frequency: frequency(ir(1067)),
       // IR 1083–1085 are per-phase grid power (research C calls them per-phase load): on the
       // three-phase capture they sum to `power` and negate meter 0x01's per-phase power.
@@ -169,21 +159,17 @@ export function buildInverterOutput(registers: RegisterCaches, context: ThreePha
 export function buildInverterOutput(
   registers: RegisterCaches,
   context: BuildContext,
-): SinglePhaseInverterPower | ThreePhaseInverterPower;
-export function buildInverterOutput(
-  registers: RegisterCaches,
-  context: BuildContext,
 ): SinglePhaseInverterPower | ThreePhaseInverterPower {
-  const { ir, uint32, phases } = reader(registers);
+  const { get: ir, deciUint32 } = zeroFilledReader(registers.input);
 
   if (context.layout === 'three_phase') {
     return {
       outputPower: toDeci(toInt32(ir(1069), ir(1070))),
-      apparentPower: toDeci(uint32(1073)),
+      apparentPower: deciUint32(1073),
       heatsinkTemperature: toSignedDeci(ir(1128)),
       // Per-phase power IR 1091–1093 is signed W, not ÷10 (research C).
       phases: phases((p) => ({ voltage: toDeci(ir(1094 + p)), power: toInt16(ir(1091 + p)) })),
-      acChargePower: toDeci(uint32(1071)),
+      acChargePower: deciUint32(1071),
       boostTemperature: toSignedDeci(ir(1129)),
       buckBoostTemperature: toSignedDeci(ir(1130)),
       dcBusVoltage: toDeci(ir(1134)),
@@ -207,15 +193,14 @@ export function buildInverterOutput(
 
 export function buildEps(registers: RegisterCaches, context: SinglePhaseBuildContext): SinglePhaseEps;
 export function buildEps(registers: RegisterCaches, context: ThreePhaseBuildContext): ThreePhaseEps;
-export function buildEps(registers: RegisterCaches, context: BuildContext): SinglePhaseEps | ThreePhaseEps;
 export function buildEps(registers: RegisterCaches, context: BuildContext): SinglePhaseEps | ThreePhaseEps {
-  const { ir, uint32, phases } = reader(registers);
+  const { get: ir, deciUint32 } = zeroFilledReader(registers.input);
 
   if (context.layout === 'three_phase') {
     const epsPhases = phases((p) => ({
       voltage: toDeci(ir(1181 + p)),
       current: toDeci(ir(1184 + p)),
-      power: toDeci(uint32(1187 + 2 * p)),
+      power: deciUint32(1187 + 2 * p),
     }));
     return {
       power: round1(epsPhases[0].power + epsPhases[1].power + epsPhases[2].power),
@@ -235,16 +220,15 @@ export function buildEps(registers: RegisterCaches, context: BuildContext): Sing
 
 export function buildLoad(registers: RegisterCaches, context: SinglePhaseBuildContext): SinglePhaseLoadPower;
 export function buildLoad(registers: RegisterCaches, context: ThreePhaseBuildContext): ThreePhaseLoadPower;
-export function buildLoad(registers: RegisterCaches, context: BuildContext): SinglePhaseLoadPower | ThreePhaseLoadPower;
 export function buildLoad(
   registers: RegisterCaches,
   context: BuildContext,
 ): SinglePhaseLoadPower | ThreePhaseLoadPower {
-  const { ir, uint32 } = reader(registers);
+  const { get: ir, deciUint32 } = zeroFilledReader(registers.input);
 
   if (context.layout === 'three_phase') {
     // No per-phase load: IR 1083–1085, which research C names per-phase load, are grid power.
-    return { power: toDeci(uint32(1089)) };
+    return { power: deciUint32(1089) };
   }
 
   // IR 42 already includes the EPS load; don't add IR 31.

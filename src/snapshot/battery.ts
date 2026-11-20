@@ -9,7 +9,7 @@ import { applyStateOfChargeFallback } from '../validation.js';
 import { buildBatteryStacks, buildLowVoltageModules } from './battery-modules.js';
 import {
   readHolding,
-  readInput,
+  zeroFilledReader,
   type BuildContext,
   type RegisterCaches,
   type SinglePhaseBuildContext,
@@ -26,12 +26,8 @@ export function buildBattery(registers: RegisterCaches, context: ThreePhaseBuild
 export function buildBattery(
   registers: RegisterCaches,
   context: BuildContext,
-): SinglePhaseBatteryWithoutEnergy | ThreePhaseBatteryWithoutEnergy;
-export function buildBattery(
-  registers: RegisterCaches,
-  context: BuildContext,
 ): SinglePhaseBatteryWithoutEnergy | ThreePhaseBatteryWithoutEnergy {
-  const ir = (address: number) => readInput(registers, address) ?? 0;
+  const { get: ir } = zeroFilledReader(registers.input);
   const previousStateOfCharge = context.previous?.battery.stateOfCharge ?? null;
 
   const highVoltage = context.capabilities.highVoltageBattery;

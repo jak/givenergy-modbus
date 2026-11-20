@@ -16,6 +16,7 @@ import {
   singlePhaseContextFor,
   threePhaseContextFor,
 } from '../helpers/snapshot-fixtures.js';
+import { buildForLayout } from '../../src/snapshot/read.js';
 
 const EMPTY_SLOT_TEMPERATURE = 65536 - 2730; // −273.0 °C signed ÷10
 
@@ -244,7 +245,7 @@ describe.each(INVERTER_CAPTURES)('buildBattery on capture $name', ({ name, injec
   it('decodes without throwing and gives plausible values', () => {
     const registers = capture(name, inject);
     const context = contextFor(registers);
-    const battery = buildBattery(registers, context);
+    const battery = buildForLayout(buildBattery, registers, context);
     expect(battery.stateOfCharge).toBeGreaterThanOrEqual(0);
     expect(battery.stateOfCharge).toBeLessThanOrEqual(100);
     expect(battery.voltage).toBeGreaterThan(40);

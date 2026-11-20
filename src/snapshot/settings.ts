@@ -19,10 +19,6 @@ export function buildSettings(registers: RegisterCaches, context: ThreePhaseBuil
 export function buildSettings(
   registers: RegisterCaches,
   context: BuildContext,
-): Settings<'single_phase'> | Settings<'three_phase'>;
-export function buildSettings(
-  registers: RegisterCaches,
-  context: BuildContext,
 ): Settings<'single_phase'> | Settings<'three_phase'> {
   const settings: Record<string, unknown> = {};
   for (const key of Object.keys(SETTINGS) as (keyof typeof SETTINGS)[]) {
