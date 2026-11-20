@@ -1,15 +1,21 @@
 import { existsSync } from 'fs';
+import { parseArgs } from 'util';
 
 if (!existsSync(new URL('../dist/index.js', import.meta.url))) {
   console.error('Error: dist/index.js not found. Run `npm run build` first.');
   process.exit(1);
 }
 
-const { GivEnergyInverter, discover } = await import('../dist/index.js');
+const { GivEnergyInverter, SETTINGS, discover } = await import('../dist/index.js');
 
-const args = process.argv.slice(2);
-const debug = args.includes('--debug');
-let host = args.find(a => a !== '--debug');
+// Usage: node scripts/snapshot.mjs [host] [--port 8899] [--debug]
+const { values: flags, positionals } = parseArgs({
+  options: { port: { type: 'string' }, debug: { type: 'boolean' } },
+  allowPositionals: true,
+});
+const debug = flags.debug ?? false;
+const port = flags.port === undefined ? undefined : Number(flags.port);
+let host = positionals[0];
 
 if (!host) {
   console.log('No host specified, auto-discovering...');
@@ -22,143 +28,153 @@ if (!host) {
   console.log(`Using ${host}`);
 }
 
-// connect() detects generation and returns the appropriate inverter subclass
-const inverter = await GivEnergyInverter.connect({ host });
+// connect() resolves the model and returns a SinglePhaseInverter or ThreePhaseInverter.
+const inverter = await GivEnergyInverter.connect({ host, port });
+if (debug) inverter.on('debug', (msg) => console.log(`  [debug] ${msg}`));
 
-if (debug) {
-  inverter.on('debug', (msg) => console.log(`  [debug] ${msg}`));
-}
-
-// connect() waits for the first complete poll, so getData() is immediately available
+// connect() waits for the first complete poll, so getData() is immediately available.
 const s = inverter.getData();
-
 await inverter.stop();
 
-// Generation determines slot counts and available features
-const GENERATION_LABELS = {
-  gen2: 'Gen2 (single-phase, 1 charge slot / 2 discharge slots)',
-  gen3: 'Gen3 (single-phase, 10 charge slots / 10 discharge slots)',
-  three_phase: 'Three-phase (2 charge slots / 2 discharge slots)',
-};
+// ── Formatting ───────────────────────────────────────────────────────────────
+// The groups are walked generically so new snapshot fields show up without editing this
+// script. Units are inferred from field names.
+
+const UNIT_RULES = [
+  [/Kwh$/, 'kWh'],
+  [/Kvarh$/, 'kvarh'],
+  [/Ah$/, 'Ah'],
+  [/Seconds$/, 's'],
+  [/apparentPower(Total)?$/i, 'VA'],
+  [/reactivePower(Total)?$/i, 'var'],
+  [/powerFactor/i, ''],
+  [/(^|[a-z])(p|P)ower(Total)?$|ratedPower$|MaxPower$/, 'W'],
+  [/^solarTo|^batteryTo|^gridTo/, 'W'],
+  [/[vV]oltages?(Total)?$|[vV]oltage(Min|Max)$/, 'V'],
+  [/[cC]urrent(Total)?$/, 'A'],
+  [/[fF]requency$/, 'Hz'],
+  [/[tT]emperatures?(Min|Max)?$/, '°C'],
+  [/stateOfCharge(Max|Min)?$|Percent$/, '%'],
+  [/^hoursOfOperation$/, 'h'],
+];
+
+function unitFor(key) {
+  for (const [pattern, unit] of UNIT_RULES) if (pattern.test(key)) return unit;
+  return '';
+}
+
+function formatValue(value, unit = '') {
+  if (value instanceof Date) return value.toISOString();
+  if (Array.isArray(value)) return `[${value.map((v) => formatValue(v)).join(', ')}]${unit ? ` ${unit}` : ''}`;
+  if (typeof value === 'string') return value === '' ? '""' : value;
+  return `${value}${unit ? ` ${unit}` : ''}`;
+}
+
+const isPlainObject = (value) => typeof value === 'object' && value !== null && !Array.isArray(value) && !(value instanceof Date);
+
+function walk(value, indent = '  ') {
+  for (const [key, field] of Object.entries(value)) {
+    if (isPlainObject(field)) {
+      console.log(`${indent}${key}:`);
+      walk(field, `${indent}  `);
+    } else if (Array.isArray(field) && field.some(isPlainObject)) {
+      console.log(`${indent}${key}:${field.length === 0 ? ' (none)' : ''}`);
+      field.forEach((item, i) => {
+        console.log(`${indent}  [${i}]`);
+        walk(item, `${indent}    `);
+      });
+    } else if (key === 'deviceTypeCode') {
+      console.log(`${indent}${key}: 0x${field.toString(16).padStart(4, '0')}`);
+    } else {
+      console.log(`${indent}${key}: ${formatValue(field, unitFor(key))}`);
+    }
+  }
+}
+
+function section(title) {
+  console.log(`\n--- ${title} ---`);
+}
+
+// ── Header ───────────────────────────────────────────────────────────────────
 
 console.log('\n=== GivEnergy Inverter Snapshot ===');
-console.log(`Generation:  ${GENERATION_LABELS[s.generation] ?? s.generation}`);
+console.log(`Model:        ${s.model} (${s.layout})`);
+console.log(`Serial:       ${s.identity.serialNumber}`);
+console.log(`Device type:  0x${s.identity.deviceTypeCode.toString(16).padStart(4, '0')}`);
+console.log(`Firmware:     ${Object.entries(s.identity.firmware).map(([k, v]) => `${k}=${v}`).join(' ')}`);
+console.log(`Capabilities: ${Object.entries(s.capabilities).map(([k, v]) => `${k}=${v}`).join(' ')}`);
 
-console.log('\n--- Identity ---');
-console.log(`Serial:      ${s.serialNumber}`);
-console.log(`Model code:  ${s.modelCode}`);
-console.log(`System time: ${s.systemTime.toISOString()}`);
+// ── Groups ───────────────────────────────────────────────────────────────────
 
-console.log('\n--- Real-time Power ---');
-console.log(`Solar:    ${s.solarPower} W (PV1: ${s.pvString1Power} W, PV2: ${s.pvString2Power} W)`);
-console.log(`Battery:  ${s.batteryPower >= 0 ? '+' : ''}${s.batteryPower} W (${s.batteryPower > 0 ? 'discharging' : s.batteryPower < 0 ? 'charging' : 'idle'})`);
-console.log(`Grid:     ${s.gridPower >= 0 ? '+' : ''}${s.gridPower} W (${s.gridPower > 0 ? 'exporting' : s.gridPower < 0 ? 'importing' : 'idle'})`);
-console.log(`Load:     ${s.loadPower} W`);
-console.log(`Inverter: ${s.inverterOutputPower} W`);
-console.log(`Grid apparent: ${s.gridApparentPower} VA`);
-if (s.epsBackupPower > 0) console.log(`EPS:      ${s.epsBackupPower} W`);
+const HEADER_KEYS = new Set(['layout', 'model', 'capabilities']);
+const SPECIAL_KEYS = new Set(['battery', 'meters', 'settings', 'schedules', 'powerFlows']);
 
-console.log('\n--- PV Strings ---');
-console.log(`String 1: ${s.pvString1Voltage} V / ${s.pvString1Current} A / ${s.pvString1Power} W`);
-console.log(`String 2: ${s.pvString2Voltage} V / ${s.pvString2Current} A / ${s.pvString2Power} W`);
-
-console.log('\n--- Battery ---');
-console.log(`SoC:      ${s.stateOfCharge}%`);
-console.log(`Voltage:  ${s.batteryVoltage} V`);
-console.log(`Current:  ${s.batteryCurrent} A`);
-
-console.log('\n--- Grid ---');
-console.log(`Voltage:   ${s.gridVoltage} V`);
-console.log(`Frequency: ${s.gridFrequency} Hz`);
-console.log(`Current:   ${s.inverterCurrent} A`);
-
-console.log('\n--- EPS Backup ---');
-console.log(`Voltage:   ${s.epsBackupVoltage} V`);
-console.log(`Frequency: ${s.epsBackupFrequency} Hz`);
-
-console.log('\n--- Temperatures ---');
-console.log(`Heatsink:  ${s.inverterHeatsinkTemp} °C`);
-console.log(`Charger:   ${s.chargerTemperature} °C`);
-console.log(`Battery:   ${s.batteryTemperature} °C`);
-
-console.log('\n--- Energy Today ---');
-console.log(`PV generated:       ${s.pvEnergyTodayKwh} kWh (PV1: ${s.pvString1EnergyTodayKwh} kWh, PV2: ${s.pvString2EnergyTodayKwh} kWh)`);
-console.log(`Battery charged:    ${s.batteryChargeEnergyTodayKwh} kWh`);
-console.log(`Battery discharged: ${s.batteryDischargeEnergyTodayKwh} kWh`);
-console.log(`Grid import:        ${s.gridImportEnergyTodayKwh} kWh`);
-console.log(`Grid export:        ${s.gridExportEnergyTodayKwh} kWh`);
-console.log(`Consumption:        ${s.consumptionEnergyTodayKwh} kWh`);
-
-console.log('\n--- Energy Totals ---');
-console.log(`PV generated:       ${s.pvEnergyTotalKwh} kWh`);
-console.log(`Battery charged:    ${s.batteryChargeEnergyTotalKwh} kWh`);
-console.log(`Battery discharged: ${s.batteryDischargeEnergyTotalKwh} kWh`);
-console.log(`Grid import:        ${s.gridImportEnergyTotalKwh} kWh`);
-console.log(`Grid export:        ${s.gridExportEnergyTotalKwh} kWh`);
-console.log(`Consumption:        ${s.consumptionEnergyTotalKwh} kWh`);
-console.log(`Battery throughput: ${s.batteryThroughputTotalKwh} kWh`);
-console.log(`Hours of operation: ${s.hoursOfOperation}`);
-
-console.log('\n--- Config ---');
-console.log(`Eco mode:          ${s.ecoMode}`);
-console.log(`Timed export:      ${s.timedExport}`);
-console.log(`Timed charge:      ${s.timedCharge}`);
-if (s.generation === 'gen3') {
-  console.log(`Battery pause:     ${s.batteryPauseMode}`);
-  console.log(`Timed discharge:   ${s.timedDischargeSlot.start} - ${s.timedDischargeSlot.end}`);
-}
-console.log(`Charge target:     ${s.chargeTargetStateOfCharge}%`);
-console.log(`Battery reserve:   ${s.batteryReservePercent}%`);
-console.log(`Charge rate:       ${s.chargeRatePercent}%`);
-console.log(`Discharge rate:    ${s.dischargeRatePercent}%`);
-
-console.log('\n--- Charge Slots ---');
-for (const [i, slot] of s.chargeSlots.entries()) {
-  const target = 'targetStateOfCharge' in slot ? ` → ${slot.targetStateOfCharge}%` : '';
-  console.log(`  Slot ${i + 1}: ${slot.start} - ${slot.end}${target}`);
+for (const [group, value] of Object.entries(s)) {
+  if (HEADER_KEYS.has(group) || SPECIAL_KEYS.has(group)) continue;
+  section(group);
+  walk(value);
 }
 
-console.log('\n--- Discharge Slots ---');
-for (const [i, slot] of s.dischargeSlots.entries()) {
-  const target = 'targetStateOfCharge' in slot ? ` → ${slot.targetStateOfCharge}%` : '';
-  console.log(`  Slot ${i + 1}: ${slot.start} - ${slot.end}${target}`);
+// Battery: the battery's own fields, then its modules and stacks.
+section('battery');
+const { modules, stacks, ...battery } = s.battery;
+walk(battery);
+console.log(`  modules:${modules.length === 0 ? ' (none)' : ''}`);
+modules.forEach((module, i) => {
+  console.log(`    [${i}] ${module.kind} ${module.serialNumber}`);
+  walk(module, '      ');
+});
+if (stacks !== undefined) {
+  console.log(`  stacks:${stacks.length === 0 ? ' (none)' : ''}`);
+  stacks.forEach((stack, i) => {
+    console.log(`    [${i}]`);
+    walk(stack, '      ');
+  });
 }
 
-console.log('\n--- Power Flows ---');
-const pf = s.powerFlows;
-console.log(`Solar → House:   ${pf.solarToHouse} W`);
-console.log(`Solar → Battery: ${pf.solarToBattery} W`);
-console.log(`Solar → Grid:    ${pf.solarToGrid} W`);
-console.log(`Battery → House: ${pf.batteryToHouse} W`);
-console.log(`Battery → Grid:  ${pf.batteryToGrid} W`);
-console.log(`Grid → House:    ${pf.gridToHouse} W`);
-console.log(`Grid → Battery:  ${pf.gridToBattery} W`);
+section(`meters (${s.meters.length})`);
+s.meters.forEach((meter, i) => {
+  console.log(`  [${i}] slave 0x${meter.slaveAddress.toString(16).padStart(2, '0')}`);
+  walk(meter, '    ');
+});
 
-if (s.batteries.length > 0) {
-  console.log('\n--- Batteries ---');
-  for (const [i, b] of s.batteries.entries()) {
-    const stackLabel = b.stack != null ? ` stack=${b.stack}` : '';
-    console.log(`Battery ${i + 1}: SoC=${b.stateOfCharge}% V=${b.voltage}V serial=${b.serialNumber} cycles=${b.cycleCount}${stackLabel}`);
-    console.log(`  Charged: ${b.chargeEnergyTotalKwh} kWh  Discharged: ${b.dischargeEnergyTotalKwh} kWh`);
-    console.log(`  Temp: ${b.temperatureMin}-${b.temperatureMax} °C  Cycles: ${b.cycleCount}`);
-    console.log(`  Cells: ${b.cellVoltages.map(v => v.toFixed(3)).join(', ')} V`);
+section('powerFlows');
+walk(s.powerFlows);
+
+// ── Settings, from the catalogue ─────────────────────────────────────────────
+
+section('settings');
+const registerOn = (definition) => (typeof definition.register === 'number'
+  ? (!definition.layouts || definition.layouts.includes(s.layout) ? definition.register : undefined)
+  : definition.register[s.layout]);
+const notSupported = [];
+const notRead = [];
+for (const [key, definition] of Object.entries(SETTINGS)) {
+  const register = registerOn(definition);
+  if (register === undefined) continue; // not on this layout
+  const supported = definition.supported ? definition.supported(s.capabilities, s.layout) : true;
+  if (!supported) { notSupported.push(`${key} (HR ${register})`); continue; }
+  if (!(key in s.settings)) { notRead.push(`${key} (HR ${register})`); continue; }
+  const unit = definition.unit ?? (definition.kind === 'percent' ? '%' : '');
+  const marks = [definition.unsafe ? 'UNSAFE' : '', definition.writable === false ? 'read only' : ''].filter(Boolean);
+  const label = definition.appName ? `${definition.appName} (${key})` : key;
+  console.log(`  HR ${String(register).padEnd(4)} ${label}: ${formatValue(s.settings[key], unit)}${marks.length ? `  [${marks.join(', ')}]` : ''}`);
+}
+if (notSupported.length > 0) console.log(`  Not supported on this model: ${notSupported.join(', ')}`);
+if (notRead.length > 0) console.log(`  Supported but not read (block unanswered?): ${notRead.join(', ')}`);
+
+// ── Schedules ────────────────────────────────────────────────────────────────
+
+section('schedules');
+for (const kind of ['charge', 'discharge']) {
+  console.log(`  ${kind}:${s.schedules[kind].length === 0 ? ' (none read)' : ''}`);
+  for (const slot of s.schedules[kind]) {
+    const target = slot.targetStateOfCharge !== undefined ? ` → ${slot.targetStateOfCharge}%` : '';
+    console.log(`    Slot ${String(slot.slot).padStart(2)}: ${slot.start} - ${slot.end}${target}`);
   }
 }
-
-if (s.meters.length > 0) {
-  console.log('\n--- CT Meters ---');
-  for (const [i, m] of s.meters.entries()) {
-    const phases = m.voltage[1] !== 0 ? '3-phase' : '1-phase';
-    console.log(`Meter ${i + 1} (slave 0x${m.slaveAddress.toString(16).padStart(2, '0')}): ${phases} serial=${m.serialNumber} factory=${m.factoryCode}`);
-    console.log(`  Type: ${m.meterType}  HW: ${m.hardwareVersion}  SW: ${m.softwareVersion}`);
-    console.log(`  Voltage:  ${m.voltage.map(v => v.toFixed(1) + 'V').join(' / ')}`);
-    console.log(`  Current:  ${m.current.map(a => a.toFixed(2) + 'A').join(' / ')}`);
-    console.log(`  Active:   ${m.activePower.map(w => w + 'W').join(' / ')}  Total: ${m.activePowerTotal}W`);
-    console.log(`  Reactive: ${m.reactivePower.map(w => w + 'VAR').join(' / ')}  Total: ${m.reactivePowerTotal}VAR`);
-    console.log(`  Apparent: ${m.apparentPower.map(w => w + 'VA').join(' / ')}  Total: ${m.apparentPowerTotal}VA`);
-    console.log(`  PF:       ${m.powerFactor.map(p => p.toFixed(4)).join(' / ')}  Total: ${m.powerFactorTotal.toFixed(4)}`);
-    console.log(`  Freq:     ${m.frequency.toFixed(2)} Hz`);
-    console.log(`  Import:   ${m.importActiveEnergyKwh} kWh (active)  ${m.importReactiveEnergy} kVARh (reactive)`);
-    console.log(`  Export:   ${m.exportActiveEnergyKwh} kWh (active)  ${m.exportReactiveEnergy} kVARh (reactive)`);
-  }
+if ('batteryPause' in s.schedules) {
+  const pause = s.schedules.batteryPause;
+  const window = pause.start !== undefined ? ` (${pause.start} - ${pause.end})` : '';
+  console.log(`  battery pause: ${pause.mode}${window}`);
 }

@@ -24,7 +24,7 @@ const devices = await discover({
     }
   },
   onFound(device) {
-    console.log(`  Verified: ${device.host} (${device.serialNumber}, ${device.generation})`);
+    console.log(`  Verified: ${device.host} (${device.serialNumber}, ${device.model})`);
   },
 });
 
@@ -36,5 +36,5 @@ if (devices.length === 0) {
 }
 
 for (const device of devices) {
-  console.log(`Found: ${device.host} — ${device.serialNumber} (${device.generation}, model 0x${device.modelCode.toString(16).padStart(4, '0')})`);
+  console.log(`Found: ${device.host} — ${device.serialNumber} (${device.model}, ${device.layout}, device type 0x${device.deviceTypeCode.toString(16).padStart(4, '0')})`);
 }

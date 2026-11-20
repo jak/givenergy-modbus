@@ -23,10 +23,8 @@ if (!host) {
   console.log(`Using ${host}`);
 }
 
-// HR(110) = battery_soc_reserve — minimum SOC% the battery won't discharge below
-const REGISTER = 110;
-const TEST_VALUE = 5;
-const RESTORE_VALUE = 4;
+// A no-op write: ecoMode (HR 27) is written back with the value it already has.
+const KEY = 'ecoMode';
 
 function waitForEnter(prompt) {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
@@ -43,24 +41,25 @@ if (debug) {
 }
 
 const snapshot = inverter.getData();
-console.log(`Connected. SoC=${snapshot.stateOfCharge}%`);
+const current = snapshot.settings[KEY];
+console.log(`Connected to ${snapshot.model} ${snapshot.identity.serialNumber}. SoC=${snapshot.battery.stateOfCharge}%`);
 
-// Step 1: set to test value
-console.log(`\nWriting HR(${REGISTER}) = ${TEST_VALUE} (battery_soc_reserve → ${TEST_VALUE}%)...`);
-await inverter.writeRegister(REGISTER, TEST_VALUE);
-console.log('Write sent.');
+if (typeof current !== 'boolean') {
+  console.error(`${KEY} was not read from the inverter; not writing anything.`);
+  await inverter.stop();
+  process.exit(1);
+}
 
-// Step 2: pause for manual verification
-await waitForEnter(`\nCheck your GivEnergy app/portal to confirm battery SOC reserve is now ${TEST_VALUE}%. Press Enter to restore...`);
+// Step 1: confirm before writing anything
+await waitForEnter(`\nAbout to write ${KEY} = ${current} (its current value, so nothing changes). Press Enter to write, or Ctrl+C to abort...`);
 
-// Step 3: restore original value
-console.log(`Writing HR(${REGISTER}) = ${RESTORE_VALUE} (restoring battery_soc_reserve → ${RESTORE_VALUE}%)...`);
-await inverter.writeRegister(REGISTER, RESTORE_VALUE);
-console.log('Write sent.');
+// Step 2: write it back
+await inverter.setSetting(KEY, current);
+console.log('Write accepted.');
 
-// Step 4: confirm connection still healthy
+// Step 3: confirm the snapshot shows it and the connection is still healthy
 const final = inverter.getData();
-console.log(`\nPost-write SoC=${final.stateOfCharge}% solar=${final.solarPower}W`);
+console.log(`\nPost-write ${KEY}=${final.settings[KEY]} SoC=${final.battery.stateOfCharge}% solar=${final.solar.power}W`);
 
 await inverter.stop();
 console.log('Write test complete.');

@@ -75,7 +75,8 @@ try {
 
   // Classify timed-out blocks now that all push data received during the scan is cached.
   for (const { kind, slave, base, count, target, label } of timedOut) {
-    const cache = slave === 0x11 ? (kind === 'hr' ? pm._holdingRegisters : pm._inputRegisters) : undefined;
+    const registers = pm._devices?.get(slave);
+    const cache = kind === 'hr' ? registers?.holding : registers?.input;
     const values = Array.from({ length: count }, (_, i) => cache?.get(base + i));
     if (values.every(v => v !== undefined)) {
       values.forEach((v, i) => { target[base + i] = v; });
