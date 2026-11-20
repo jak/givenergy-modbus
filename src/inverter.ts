@@ -6,7 +6,7 @@ import { registersToString } from './model/converters.js';
 import { isPlantController, layoutOf, resolveModel } from './model/models.js';
 import type { InverterModel, Layout, SinglePhaseModel, ThreePhaseModel } from './model/models.js';
 import type { Capabilities } from './model/capabilities.js';
-import type { InverterSnapshot, SinglePhaseSnapshot, ThreePhaseSnapshot } from './model/snapshot.js';
+import type { BatteryPause, InverterSnapshot } from './model/snapshot.js';
 import {
   isSupported,
   registerFor,
@@ -16,7 +16,9 @@ import {
   type UnsafeSettingKey,
   type WritableSettingKey,
 } from './catalogue/index.js';
-import { encodeSetting } from './catalogue/codec.js';
+import { encodeSetting, timeToInt, validateTime } from './catalogue/codec.js';
+import { PAUSE_MODES } from './snapshot/schedules.js';
+import { slotRegistersFor, type SlotRegisters } from './timeslot-registers.js';
 import { UnsupportedDeviceError, UnsupportedSettingError } from './errors.js';
 
 export interface GivEnergyInverterOptions {
@@ -39,6 +41,30 @@ export interface InverterIdentity {
   layout: Layout;
 }
 
+/** A charge or discharge slot to write. Times are `"HH:MM"`. */
+export interface TimeSlotInput {
+  start: string;
+  end: string;
+  /**
+   * Charge slots: the state of charge to charge up to. Discharge slots: the state of charge to
+   * stop discharging at. 4–100. Only with `capabilities.perSlotTargets`, and never on three-phase
+   * slots 1/2, which have no target register.
+   */
+  targetStateOfCharge?: number;
+}
+
+/** A slot with its number, from 1, as `getData().schedules` lists them, so an entry can be written back. */
+export interface NumberedTimeSlotInput extends TimeSlotInput {
+  slot: number;
+}
+
+/** Battery pause to write. `start`/`end` (`"HH:MM"`) need `capabilities.pauseWindow`; give both or neither. */
+export interface BatteryPauseInput {
+  mode: Exclude<BatteryPause['mode'], 'unknown'>;
+  start?: string;
+  end?: string;
+}
+
 /** The model type for layout `L`. */
 export type ModelOf<L extends Layout> = L extends 'three_phase' ? ThreePhaseModel : SinglePhaseModel;
 /** The snapshot type for layout `L`. */
@@ -48,6 +74,13 @@ const INVERTER_SLAVE = 0x11;
 /** HR 163: writing 100 restarts the inverter. */
 const REBOOT_REGISTER = 163;
 const REBOOT_VALUE = 100;
+/** HR 318–320: battery pause mode, window start, window end. */
+const PAUSE_MODE_REGISTER = 318;
+const PAUSE_START_REGISTER = 319;
+const PAUSE_END_REGISTER = 320;
+/** Per-slot targets take 4–100, as the external library validates them. */
+const SLOT_TARGET_MIN = 4;
+const SLOT_TARGET_MAX = 100;
 /** HR 35–40: system clock, year as an offset from 2000. */
 const SYSTEM_TIME_REGISTER = 35;
 
@@ -161,6 +194,10 @@ export abstract class GivEnergyInverter<L extends Layout = Layout> extends Event
    * Write a setting from the catalogue (`SETTINGS`). The snapshot reflects the new value as soon
    * as the inverter accepts the write, without waiting for the next poll.
    *
+   * Quirk: a reply with function code 0x86 counts as accepted. Gen1 battery management firmware
+   * echoes writes with 0x86 instead of 6, so 0x86 can't be told apart from a Modbus error reply
+   * to a write (as in 2.x). Any other error reply never matches the write, so it times out.
+   *
    * @throws UnsupportedSettingError when the model or firmware doesn't support the setting.
    * @throws RangeError or TypeError for a value the setting doesn't accept.
    */
@@ -199,6 +236,41 @@ export abstract class GivEnergyInverter<L extends Layout = Layout> extends Event
     await this._write(key, value, true);
   }
 
+  /**
+   * Write one charge slot, numbered from 1 up to the model's slot count (10 with
+   * `capabilities.tenSlots`, otherwise 2). Accepts an entry of `getData().schedules.charge`.
+   * Slot 2 is HR 243/244 on ten-slot firmware and HR 31/32 otherwise.
+   *
+   * @throws RangeError for a slot number out of range, an invalid time or target.
+   * @throws UnsupportedSettingError for a `targetStateOfCharge` the slot has no register for.
+   */
+  setChargeSlot(slot: number, config: TimeSlotInput): Promise<void>;
+  setChargeSlot(config: NumberedTimeSlotInput): Promise<void>;
+  async setChargeSlot(slotOrConfig: number | NumberedTimeSlotInput, config?: TimeSlotInput): Promise<void> {
+    await this._writeSlots('charge', [numbered(slotOrConfig, config)], false);
+  }
+
+  /** Write one discharge slot. As `setChargeSlot`; slot 2 is HR 44/45 on every single-phase model. */
+  setDischargeSlot(slot: number, config: TimeSlotInput): Promise<void>;
+  setDischargeSlot(config: NumberedTimeSlotInput): Promise<void>;
+  async setDischargeSlot(slotOrConfig: number | NumberedTimeSlotInput, config?: TimeSlotInput): Promise<void> {
+    await this._writeSlots('discharge', [numbered(slotOrConfig, config)], false);
+  }
+
+  /**
+   * Write all charge slots: `configs[i]` to slot i + 1, and clear every slot after the last one
+   * to 00:00–00:00. Clearing writes the times only and leaves targets as they are, as the external
+   * library's `reset_charge_slot` does. An entry's `slot`, when given, must match its position.
+   */
+  async setChargeSlots(configs: readonly (TimeSlotInput | NumberedTimeSlotInput)[]): Promise<void> {
+    await this._writeSlots('charge', positional(configs), true);
+  }
+
+  /** Write all discharge slots, clearing the rest. As `setChargeSlots`. */
+  async setDischargeSlots(configs: readonly (TimeSlotInput | NumberedTimeSlotInput)[]): Promise<void> {
+    await this._writeSlots('discharge', positional(configs), true);
+  }
+
   /** Set the inverter clock (HR 35–40). */
   async setDateTime(date: Date): Promise<void> {
     const fields = [
@@ -229,6 +301,49 @@ export abstract class GivEnergyInverter<L extends Layout = Layout> extends Event
     await this.pollManager.writeHoldingRegister(register, value);
   }
 
+  /** Write a register, then show it in the snapshot. A failed write leaves the cache alone. */
+  protected async _writeAndApply(register: number, raw: number): Promise<void> {
+    await this.pollManager.writeHoldingRegister(register, raw);
+    this.pollManager.applyWrite(register, raw);
+  }
+
+  protected _unsupported(key: string): UnsupportedSettingError {
+    return new UnsupportedSettingError(key, this.model, this.pollManager.armFirmwareVersion);
+  }
+
+  /** Validate every slot first, so a bad entry writes nothing; then write them in order. */
+  private async _writeSlots(kind: 'charge' | 'discharge', entries: NumberedTimeSlotInput[], clearRest: boolean): Promise<void> {
+    const table = slotRegistersFor(this.layout, this.capabilities, kind);
+    if (clearRest && entries.length > table.length) {
+      throw new RangeError(`${kind} slots: ${entries.length} given, this inverter has ${table.length}`);
+    }
+    const writes: Array<[number, number]> = [];
+    for (const entry of entries) writes.push(...this._slotWrites(kind, table, entry));
+    if (clearRest) {
+      for (const registers of table.slice(entries.length)) writes.push([registers.start, 0], [registers.end, 0]);
+    }
+    for (const [register, raw] of writes) await this._writeAndApply(register, raw);
+  }
+
+  private _slotWrites(kind: 'charge' | 'discharge', table: SlotRegisters[], entry: NumberedTimeSlotInput): Array<[number, number]> {
+    const { slot, start, end, targetStateOfCharge } = entry;
+    if (!Number.isInteger(slot) || slot < 1 || slot > table.length) {
+      throw new RangeError(`${kind} slot must be 1-${table.length}, got ${slot}`);
+    }
+    const registers = table[slot - 1];
+    validateTime(start);
+    validateTime(end);
+    const writes: Array<[number, number]> = [[registers.start, timeToInt(start)], [registers.end, timeToInt(end)]];
+    if (targetStateOfCharge !== undefined) {
+      if (registers.targetStateOfCharge === undefined) throw this._unsupported(`${kind}SlotTargetStateOfCharge`);
+      if (!Number.isInteger(targetStateOfCharge) || targetStateOfCharge < SLOT_TARGET_MIN || targetStateOfCharge > SLOT_TARGET_MAX) {
+        throw new RangeError(`target state of charge must be an integer ${SLOT_TARGET_MIN}-${SLOT_TARGET_MAX}, got ${targetStateOfCharge}`);
+      }
+      writes.push([registers.targetStateOfCharge, targetStateOfCharge]);
+    }
+    return writes;
+  }
+
   private async _write(key: string, value: unknown, allowUnsafe: boolean): Promise<void> {
     const definition: SettingDefinition | undefined = (SETTINGS as Record<string, SettingDefinition>)[key];
     if (!definition) throw new TypeError(`unknown setting "${key}"`);
@@ -237,15 +352,27 @@ export abstract class GivEnergyInverter<L extends Layout = Layout> extends Event
     if (definition.unsafe && !allowUnsafe) throw new TypeError(`${key} is unsafe; write it with unsafe_setSetting`);
 
     const settingKey = key as keyof typeof SETTINGS;
-    if (!isSupported(settingKey, this.layout, this.capabilities)) {
-      throw new UnsupportedSettingError(key, this.model, this.pollManager.armFirmwareVersion);
-    }
+    if (!isSupported(settingKey, this.layout, this.capabilities)) throw this._unsupported(key);
     // isSupported checked that the setting has a register on this layout.
     const register = registerFor(settingKey, this.layout)!;
     const raw = encodeSetting(definition, value as never);
-    await this.pollManager.writeHoldingRegister(register, raw);
-    this.pollManager.applyWrite(register, raw);
+    await this._writeAndApply(register, raw);
   }
+}
+
+function numbered(slotOrConfig: number | NumberedTimeSlotInput, config?: TimeSlotInput): NumberedTimeSlotInput {
+  if (typeof slotOrConfig !== 'number') return slotOrConfig;
+  if (!config) throw new TypeError('a slot config is required');
+  return { ...config, slot: slotOrConfig };
+}
+
+function positional(configs: readonly (TimeSlotInput | NumberedTimeSlotInput)[]): NumberedTimeSlotInput[] {
+  return configs.map((config, index) => {
+    if ('slot' in config && config.slot !== index + 1) {
+      throw new RangeError(`slot ${config.slot} given at position ${index + 1}; list slots in order from 1`);
+    }
+    return { ...config, slot: index + 1 };
+  });
 }
 
 /** A single-phase inverter: Hybrid Gen1–Gen4, AC, All in One, PV and others. */
@@ -255,6 +382,32 @@ export class SinglePhaseInverter extends GivEnergyInverter<'single_phase'> {
   /** @internal Use `GivEnergyInverter.connect()`. */
   constructor(pollManager: PollManager) {
     super(pollManager);
+  }
+
+  /**
+   * Set the battery pause: HR 318 (mode), then HR 319 (start) and HR 320 (end), no swap. 2.x
+   * swapped the window registers; the app shows HR 319 as the start.
+   *
+   * @throws UnsupportedSettingError without `capabilities.pauseMode`, or for a window without
+   * `capabilities.pauseWindow` (Gen1 and AC have the mode only; Gen1 rejects HR 319/320).
+   * @throws RangeError for an unknown mode, an invalid time, or only one of start and end.
+   */
+  async setBatteryPause(pause: BatteryPauseInput): Promise<void> {
+    if (!this.capabilities.pauseMode) throw this._unsupported('batteryPause');
+    const mode = PAUSE_MODES.indexOf(pause.mode);
+    if (mode < 0) throw new RangeError(`unknown battery pause mode "${pause.mode}"`);
+    const hasWindow = pause.start !== undefined || pause.end !== undefined;
+    if (hasWindow) {
+      if (!this.capabilities.pauseWindow) throw this._unsupported('batteryPauseWindow');
+      if (pause.start === undefined || pause.end === undefined) throw new RangeError('give both start and end, or neither');
+      validateTime(pause.start);
+      validateTime(pause.end);
+    }
+    await this._writeAndApply(PAUSE_MODE_REGISTER, mode);
+    if (hasWindow) {
+      await this._writeAndApply(PAUSE_START_REGISTER, timeToInt(pause.start!));
+      await this._writeAndApply(PAUSE_END_REGISTER, timeToInt(pause.end!));
+    }
   }
 }
 

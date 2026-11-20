@@ -43,6 +43,8 @@ export interface MockInverter {
   /** Every transparent request received, in order, answered or not. */
   requests: MockRequest[];
   writes: Array<{ register: number; value: number }>;
+  /** Function code of write replies: 6 (the echo), or e.g. 0x86 as Gen1 BPM echoes and as a write error reply looks. */
+  writeReplyFunctionCode: number;
   /** Replaces the `silent` option. */
   silent: (request: MockRequest) => boolean;
   /** Send register data unsolicited to every connected client. */
@@ -110,6 +112,7 @@ export async function startMockInverter(options: MockInverterOptions): Promise<M
     requests: [],
     writes: [],
     silent: options.silent ?? (() => false),
+    writeReplyFunctionCode: 0x06,
     push(slaveAddress, functionCode, baseRegister, values) {
       const frame = buildTransparentResponse(slaveAddress, functionCode, baseRegister, values);
       for (const socket of sockets) socket.write(frame);
@@ -150,7 +153,7 @@ export async function startMockInverter(options: MockInverterOptions): Promise<M
         if (read.functionCode === 0x06) {
           if (mock.silent(read)) continue;
           mock.writes.push({ register: read.baseRegister, value: read.registerCount });
-          socket.write(buildTransparentResponse(read.slaveAddress, 0x06, read.baseRegister, [read.registerCount]));
+          socket.write(buildTransparentResponse(read.slaveAddress, mock.writeReplyFunctionCode, read.baseRegister, [read.registerCount]));
           continue;
         }
         const device = options.devices.get(read.slaveAddress);

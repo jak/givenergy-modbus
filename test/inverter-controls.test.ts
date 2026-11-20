@@ -2,50 +2,24 @@ import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SETTINGS } from '../src/catalogue/index.js';
 import { UnsupportedDeviceError, UnsupportedSettingError } from '../src/errors.js';
-import { GivEnergyInverter, SinglePhaseInverter, ThreePhaseInverter } from '../src/inverter.js';
-import type { PollTiming } from '../src/poll-manager.js';
+import { GivEnergyInverter, SinglePhaseInverter } from '../src/inverter.js';
 import { capture, reference } from './helpers/snapshot-fixtures.js';
-import { devicesOf, startMockInverter, type MockDevice, type MockInverter, type MockRequest } from './helpers/mock-inverter.js';
+import { devicesOf, startMockInverter, type MockInverter } from './helpers/mock-inverter.js';
+import { connectSinglePhase, connectThreePhase, connectToMock, disconnectAll, FAST_TIMING, onDisconnect } from './helpers/connect-mock.js';
 
-/** Short timeouts and no retries, so a full poll against the mock takes about a second. */
-const FAST: Partial<PollTiming> = { requestTimeoutMs: 60, requestRetries: 0, interReadDelayMs: 0, pushSoakMs: 30 };
+afterEach(disconnectAll);
 
-const cleanup: Array<() => Promise<void>> = [];
-afterEach(async () => {
-  for (const step of cleanup.splice(0).reverse()) await step();
-});
+const threePhase = () => connectThreePhase(devicesOf(capture('hybrid_3ph.log')));
 
-async function connectTo(devices: Map<number, MockDevice>, silent?: (request: MockRequest) => boolean) {
-  const mock = await startMockInverter({ devices, silent });
-  cleanup.push(() => mock.close());
-  const inverter = await GivEnergyInverter.connect({ host: '127.0.0.1', port: mock.port, autoReconnect: false, timing: FAST });
-  cleanup.push(() => inverter.stop());
-  // Only what the inverter is asked after connecting.
-  mock.requests.length = 0;
-  return { mock, inverter };
-}
-
-async function singlePhase(devices: Map<number, MockDevice>, silent?: (request: MockRequest) => boolean) {
-  const { mock, inverter } = await connectTo(devices, silent);
-  if (!(inverter instanceof SinglePhaseInverter)) throw new Error(`expected single-phase, got ${inverter.layout}`);
-  return { mock, inverter };
-}
-
-async function threePhase() {
-  const { mock, inverter } = await connectTo(devicesOf(capture('hybrid_3ph.log')));
-  if (!(inverter instanceof ThreePhaseInverter)) throw new Error(`expected three-phase, got ${inverter.layout}`);
-  return { mock, inverter };
-}
-
-const gen3 = () => singlePhase(devicesOf(reference()));
-const gen2 = () => singlePhase(devicesOf(capture('hybrid_gen2_arm920.log')));
+const gen3 = () => connectSinglePhase(devicesOf(reference()));
+const gen2 = () => connectSinglePhase(devicesOf(capture('hybrid_gen2_arm920.log')));
 
 /** Every request after connecting was a write: nothing was read back. */
 const onlyWrites = (mock: MockInverter) => mock.requests.every((request) => request.functionCode === 0x06);
 
 describe('connect', { timeout: 20_000 }, () => {
   it('returns a single-phase inverter for the Gen3 reference unit', async () => {
-    const { inverter } = await connectTo(devicesOf(reference()));
+    const { inverter } = await connectToMock(devicesOf(reference()));
     expect(inverter).toBeInstanceOf(SinglePhaseInverter);
     expect(inverter.layout).toBe('single_phase');
     expect(inverter.model).toBe('hybrid_gen3');
@@ -61,8 +35,8 @@ describe('connect', { timeout: 20_000 }, () => {
 
   it('rejects an Energy Management System with UnsupportedDeviceError and closes the socket', async () => {
     const mock = await startMockInverter({ devices: new Map([[0x11, { holding: new Map([[0, 0x5101]]) }]]) });
-    cleanup.push(() => mock.close());
-    const result = GivEnergyInverter.connect({ host: '127.0.0.1', port: mock.port, autoReconnect: false, timing: FAST });
+    onDisconnect(() => mock.close());
+    const result = GivEnergyInverter.connect({ host: '127.0.0.1', port: mock.port, autoReconnect: false, timing: FAST_TIMING });
     await expect(result).rejects.toBeInstanceOf(UnsupportedDeviceError);
     await expect(result).rejects.toMatchObject({ model: 'ems' });
     await vi.waitFor(() => expect(mock.connections()).toBe(0));
@@ -132,6 +106,16 @@ describe('setSetting', { timeout: 20_000 }, () => {
     await expect(inverter.setSetting('forceOffGrid' as never, true as never)).rejects.toThrow('write it with unsafe_setSetting');
     await expect(inverter.setSetting('notASetting' as never, 1 as never)).rejects.toThrow('unknown setting');
     expect(mock.writes).toEqual([]);
+  });
+
+  it('quirk: counts a 0x86 reply as accepted, because Gen1 BPM echoes writes with 0x86 (as in 2.x)', async () => {
+    // 0x86 is also what a Modbus error reply to a write looks like, so a real error reply
+    // is taken as success and the cache shows the value. Any other error code never matches
+    // the write and times out instead.
+    const { mock, inverter } = await gen3();
+    mock.writeReplyFunctionCode = 0x86;
+    await inverter.setSetting('batteryReserve', 20);
+    expect(inverter.getData().settings.batteryReserve).toBe(20);
   });
 
   it('leaves the cache alone when the write is not answered', async () => {

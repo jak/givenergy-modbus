@@ -17,6 +17,7 @@
     "test/poll-blocks.test.ts",
     "test/poll-manager.test.ts",
     "test/inverter.test.ts",
-    "test/inverter-controls.test.ts"
+    "test/inverter-controls.test.ts",
+    "test/inverter-schedules.test.ts"
   ]
 }

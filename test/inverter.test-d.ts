@@ -55,3 +55,23 @@ test('unsafe_setSetting accepts only unsafe settings', () => {
   // @ts-expect-error no unsafe settings on three-phase
   void three.unsafe_setSetting('forceOffGrid', true);
 });
+
+test('slot setters take a slot number and config, or a numbered slot from the snapshot', () => {
+  void single.setChargeSlot(1, { start: '00:30', end: '04:30', targetStateOfCharge: 80 });
+  void single.setChargeSlot(single.getData().schedules.charge[0]);
+  void three.setDischargeSlot(2, { start: '16:00', end: '19:00' });
+  void three.setChargeSlots(three.getData().schedules.charge);
+  // @ts-expect-error a slot number needs a config
+  void single.setChargeSlot(1);
+  // @ts-expect-error a config without a slot number needs one
+  void single.setChargeSlot({ start: '00:30', end: '04:30' });
+});
+
+test('setBatteryPause is single-phase only and takes only writable modes', () => {
+  void single.setBatteryPause({ mode: 'discharge', start: '16:00', end: '19:00' });
+  void single.setBatteryPause({ mode: 'off' });
+  // @ts-expect-error 'unknown' is decoded but never written
+  void single.setBatteryPause({ mode: 'unknown' });
+  // @ts-expect-error three-phase has no battery pause
+  void three.setBatteryPause({ mode: 'off' });
+});
