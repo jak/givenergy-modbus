@@ -505,7 +505,11 @@ export interface SinglePhaseGrid extends Grid {
 export interface ThreePhaseGrid extends Grid {
   /** Per-phase grid voltage and current. There is no per-phase grid power register. */
   phases: ThreePhase<{
-    /** Phase voltage, V. IR 1061–1063 ÷10. */
+    /**
+     * Phase voltage, V. IR 1061–1063 ÷10, as read. On the three-phase capture these read
+     * line-to-line (about 400 V), while `inverter.phases[n].voltage` reads line-to-neutral
+     * (about 232 V).
+     */
     voltage: number;
     /** Phase current, A. IR 1064–1066 ÷10. */
     current: number;
@@ -549,7 +553,8 @@ export interface SinglePhaseInverterOutput extends InverterOutput {
   current: number;
   /**
    * Output power factor, −1 to 1. IR 16 as raw ÷10000 − 1 (offset-unsigned, like HR 52).
-   * Three-phase IR 1068 is not exposed: its scaling is unknown.
+   * The scaling comes from GivTCP and the external library and hasn't been checked against
+   * the app. Three-phase IR 1068 is not exposed: its scaling is unknown.
    */
   powerFactor: number;
   /** Current at the inverter's AC terminal (doc `i_grid_port`), A. IR 58 ÷100. */
@@ -630,13 +635,11 @@ export interface Load {
 
 export type SinglePhaseLoad = Load;
 
-export interface ThreePhaseLoad extends Load {
-  /** Per-phase load. Only power is reported. */
-  phases: ThreePhase<{
-    /** Phase load power, W. IR 1083–1085 signed (not ÷10). */
-    power: number;
-  }>;
-}
+/**
+ * Three-phase load. Per-phase load is not exposed: research C names IR 1083–1085 per-phase
+ * load, but on the three-phase capture they read 0 / −536 / 533 W against a 1636 W total.
+ */
+export type ThreePhaseLoad = Load;
 
 // ── Schedules ────────────────────────────────────────────────────────────────
 
