@@ -81,6 +81,11 @@ test('the inverter has no power factor: IR 16 fits no decoding on the captures',
   expectTypeOf<ThreePhaseSnapshot['inverter']>().not.toHaveProperty('powerFactor');
 });
 
+test('single-phase consumption is optional: it cannot be derived on AC-coupled models', () => {
+  expectTypeOf<{ power: number }>().toExtend<SinglePhaseSnapshot['load']>();
+  expectTypeOf<{ power: number }>().not.toExtend<ThreePhaseSnapshot['load']>();
+});
+
 test('energy fields end in Kwh', () => {
   expectTypeOf<SinglePhaseSnapshot['battery']['energy']>().toHaveProperty('throughputTotalKwh');
   expectTypeOf<SinglePhaseSnapshot['grid']['energy']>().toHaveProperty('importTodayKwh');

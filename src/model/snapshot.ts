@@ -638,26 +638,36 @@ export interface Load {
    * including any EPS load, so don't add `eps.power`. Three-phase IR 1089–1090 uint32 ÷10 (GivTCP's scaling, unverified).
    */
   power: number;
-  /**
-   * Energy consumed today, kWh. Single-phase is derived as the app does: grid import − grid
-   * export + inverter output (IR 44) − AC charge (IR 35). Three-phase IR 1396–1397 uint32 ÷10.
-   */
-  energyTodayKwh: number;
-  /**
-   * Lifetime energy consumed, kWh. Single-phase is derived: import total − export total +
-   * IR 45–46 − IR 27–28 (matches the app exactly on the reference unit). Three-phase
-   * IR 1398–1399 uint32 ÷10.
-   */
-  energyTotalKwh: number;
 }
 
-export type SinglePhaseLoad = Load;
+export interface SinglePhaseLoad extends Load {
+  /**
+   * Energy consumed today, kWh, derived as the app does: grid import − grid export + inverter
+   * output (IR 44) − AC charge (IR 35), clamped at 0.
+   *
+   * Absent on AC-coupled models (`ac`): the PV inverter's generation never reaches IR 44, so the
+   * formula under-reads. The AC capture gives −30.9 kWh today and 963.6 kWh in total against
+   * 12,292 kWh imported.
+   */
+  energyTodayKwh?: number;
+  /**
+   * Lifetime energy consumed, kWh, derived: import total − export total + IR 45–46 − IR 27–28
+   * (matches the app exactly on the reference unit). Absent on AC-coupled models, as
+   * `energyTodayKwh`.
+   */
+  energyTotalKwh?: number;
+}
 
 /**
  * Three-phase load. Per-phase load is not exposed: research C names IR 1083–1085 per-phase
  * load, but on the three-phase capture they read 0 / −536 / 533 W against a 1636 W total.
  */
-export type ThreePhaseLoad = Load;
+export interface ThreePhaseLoad extends Load {
+  /** Energy consumed today, kWh. IR 1396–1397 uint32 ÷10, read directly (on `ac_3ph` too). */
+  energyTodayKwh: number;
+  /** Lifetime energy consumed, kWh. IR 1398–1399 uint32 ÷10. */
+  energyTotalKwh: number;
+}
 
 // ── Schedules ────────────────────────────────────────────────────────────────
 

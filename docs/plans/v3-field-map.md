@@ -99,8 +99,8 @@ Input for `website/migration-v3.md` (Task 19). Every field of the 2.x `InverterS
 | `epsBackupVoltage` | `s.eps.voltage` | Single-phase. Three-phase: `s.eps.phases[n].voltage`. |
 | `epsBackupFrequency` | `s.eps.frequency` | |
 | `loadPower` | `s.load.power` | |
-| `consumptionEnergyTodayKwh` | `s.load.energyTodayKwh` | |
-| `consumptionEnergyTotalKwh` | `s.load.energyTotalKwh` | |
+| `consumptionEnergyTodayKwh` | `s.load.energyTodayKwh` | Single-phase: optional, absent on `ac`. The derived formula (import − export + IR 44 − AC charge) under-reads there because the PV inverter's generation never reaches IR 44: the AC capture gives −30.9 kWh today (2.x clamped it to 0) and 963.6 kWh in total against 12,292 kWh imported. Three-phase reads IR 1396–1397 directly and keeps it on `ac_3ph`. |
+| `consumptionEnergyTotalKwh` | `s.load.energyTotalKwh` | As above (three-phase IR 1398–1399). |
 | `powerFlows` | `s.powerFlows` | `PowerFlows` is unchanged. |
 
 ## Settings

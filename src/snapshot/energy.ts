@@ -5,6 +5,7 @@
  *
  * The result holds only the energy fields; `power.ts` builds the rest of each group.
  */
+import type { InverterModel } from '../model/models.js';
 import type { BatteryEnergy, GridEnergy, InverterEnergy } from '../model/snapshot.js';
 import { toDeci, toUint32 } from '../model/converters.js';
 import {
@@ -21,6 +22,14 @@ interface LoadEnergy {
   energyTotalKwh: number;
 }
 
+/**
+ * Single-phase models whose consumption can't be derived: on AC-coupled units the PV inverter's
+ * generation never reaches IR 44–46, so the app's formula under-reads (the AC capture gives
+ * −30.9 kWh today and 963.6 kWh in total against 12,292 kWh imported). Three-phase models,
+ * `ac_3ph` included, read load energy directly from IR 1396–1399.
+ */
+const NO_DERIVED_CONSUMPTION_MODELS: ReadonlySet<InverterModel> = new Set<InverterModel>(['ac']);
+
 interface SolarEnergy {
   energyTodayKwh: number;
   energyTotalKwh: number;
@@ -30,7 +39,8 @@ export interface SinglePhaseEnergy {
   solar: SolarEnergy & { diverterEnergyKwh: number };
   grid: GridEnergy;
   inverter: InverterEnergy;
-  load: LoadEnergy;
+  /** Empty on AC-coupled models (see `NO_DERIVED_CONSUMPTION_MODELS`). */
+  load: Partial<LoadEnergy>;
   battery: BatteryEnergy;
 }
 
@@ -167,10 +177,12 @@ export function buildEnergy(registers: RegisterCaches, context: BuildContext): S
     },
     grid,
     inverter,
-    load: {
-      energyTodayKwh: consumption(grid.importTodayKwh, grid.exportTodayKwh, inverter.outputTodayKwh, inverter.acChargeTodayKwh),
-      energyTotalKwh: consumption(grid.importTotalKwh, grid.exportTotalKwh, inverter.outputTotalKwh, inverter.acChargeTotalKwh),
-    },
+    load: NO_DERIVED_CONSUMPTION_MODELS.has(context.model)
+      ? {}
+      : {
+          energyTodayKwh: consumption(grid.importTodayKwh, grid.exportTodayKwh, inverter.outputTodayKwh, inverter.acChargeTodayKwh),
+          energyTotalKwh: consumption(grid.importTotalKwh, grid.exportTotalKwh, inverter.outputTotalKwh, inverter.acChargeTotalKwh),
+        },
     battery: {
       chargeTodayKwh: deci(gen1 ? 183 : 36),
       dischargeTodayKwh: deci(gen1 ? 182 : 37),

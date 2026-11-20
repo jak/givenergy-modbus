@@ -132,6 +132,19 @@ describe('consumption quirks', () => {
     const registers = registersOf({ 0: 0x2001, 21: 316 }, { 25: 100, 35: 50 });
     expect(buildEnergy(registers, singlePhaseContextFor(registers)).load.energyTodayKwh).toBe(0);
   });
+
+  it('is left out on AC-coupled models, where the PV inverter\'s generation never reaches IR 44', () => {
+    // AC capture: import 0 − export 28.7 + output 7.7 − AC charge 9.9 = −30.9 kWh today (2.x
+    // clamped it to 0), and 12292.2 − 9575.6 + 8261.9 − 10014.9 = 963.6 kWh in total against
+    // 12,292 kWh imported. The formula leaves out the PV inverter's output, so it under-reads.
+    const registers = capture('ac_arm282.log');
+    const energy = buildEnergy(registers, singlePhaseContextFor(registers));
+    const { grid, inverter } = energy;
+    expect(grid.importTodayKwh - grid.exportTodayKwh + inverter.outputTodayKwh - inverter.acChargeTodayKwh).toBeCloseTo(-30.9, 5);
+    expect(grid.importTotalKwh - grid.exportTotalKwh + inverter.outputTotalKwh - inverter.acChargeTotalKwh).toBeCloseTo(963.6, 5);
+    expect(grid.importTotalKwh).toBe(12292.2);
+    expect(energy.load).toEqual({});
+  });
 });
 
 describe('buildEnergy on three-phase (IR 1360–1413)', () => {
@@ -152,7 +165,8 @@ describe('buildEnergy on three-phase (IR 1360–1413)', () => {
       acChargeTodayKwh: 11.1,
       acChargeTotalKwh: 14501.8,
     });
-    // Three-phase reports load energy directly instead of deriving it.
+    // Three-phase reports load energy directly instead of deriving it, so even the AC-coupled
+    // three-phase model keeps it.
     expect(energy.load).toEqual({ energyTodayKwh: 19.4, energyTotalKwh: 12582 });
     expect(energy.battery).toEqual({
       chargeTodayKwh: 9.1,
@@ -160,6 +174,13 @@ describe('buildEnergy on three-phase (IR 1360–1413)', () => {
       chargeTotalKwh: 12229.2,
       dischargeTotalKwh: 11099.4,
     });
+  });
+});
+
+describe('three-phase load energy', () => {
+  it('keeps the directly read IR 1396–1399 on the AC-coupled three-phase model: nothing is derived', () => {
+    const registers = registersOf({ 0: 0x6001 }, { 1396: 0, 1397: 194, 1398: 1, 1399: 0 });
+    expect(buildEnergy(registers, threePhaseContextFor(registers)).load).toEqual({ energyTodayKwh: 19.4, energyTotalKwh: 6553.6 });
   });
 });
 
@@ -184,7 +205,7 @@ describe.each(INVERTER_CAPTURES)('buildEnergy on capture $name', ({ name, inject
     const counters = [
       energy.solar.energyTodayKwh, energy.solar.energyTotalKwh,
       ...Object.values(energy.grid), ...Object.values(energy.inverter),
-      energy.load.energyTodayKwh, energy.load.energyTotalKwh,
+      ...Object.values(energy.load),
       ...Object.values(energy.battery),
     ];
     for (const value of counters) {
