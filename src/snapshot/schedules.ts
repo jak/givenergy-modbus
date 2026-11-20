@@ -1,0 +1,105 @@
+/**
+ * Schedules group: charge and discharge slots, and (single-phase) battery pause.
+ *
+ * Slot registers come from src/timeslot-registers.ts (research B):
+ * - Ten-slot firmware (`capabilities.tenSlots`): charge slot 1 HR 94/95, slot 2 HR 243/244, slots
+ *   3–10 HR 246–269; discharge slot 1 HR 56/57, slot 2 HR 44/45, slots 3–10 HR 276–299. Targets
+ *   follow each slot (HR 242, 245, …; HR 272, 275, …) when `capabilities.perSlotTargets`.
+ * - Legacy firmware: charge slots HR 94/95 and HR 31/32, discharge slots HR 56/57 and HR 44/45,
+ *   no targets. HR 31/32 is not slot 2 on ten-slot firmware (writes there return an error).
+ * - Three-phase: slots 1/2 at HR 1113–1116 (charge) and HR 1118–1121 (discharge), slots 3–10 and
+ *   their targets in HR 246–299 as on single-phase. No source gives targets for slots 1/2.
+ *
+ * As in 2.x, an unread slot register reads as 0, so an unset slot is `00:00`–`00:00`, and 2400
+ * is normalised to 00:00.
+ */
+import type { BatteryPause, SinglePhaseSchedules, ThreePhaseSchedules, TimeSlotConfig } from '../model/snapshot.js';
+import { toTimeslot } from '../model/converters.js';
+import {
+  CHARGE_SLOT_REGISTERS,
+  DISCHARGE_SLOT_REGISTERS,
+  THREE_PHASE_CHARGE_SLOT_REGISTERS,
+  THREE_PHASE_DISCHARGE_SLOT_REGISTERS,
+  type SimpleTimeslotRegisters,
+  type TimeslotRegisters,
+} from '../timeslot-registers.js';
+import {
+  readHolding,
+  type BuildContext,
+  type RegisterCaches,
+  type SinglePhaseBuildContext,
+  type ThreePhaseBuildContext,
+} from './read.js';
+
+/** Legacy (pre-ten-slot) single-phase slot 2 for charging. */
+const LEGACY_CHARGE_SLOT_2: SimpleTimeslotRegisters = { start: 31, end: 32 };
+
+/** HR 318: 0 off, 1 pause charging, 2 pause discharging, 3 pause both. */
+const PAUSE_MODES: readonly BatteryPause['mode'][] = ['off', 'charge', 'discharge', 'both'];
+
+type SlotRegisters = SimpleTimeslotRegisters | TimeslotRegisters;
+
+function slots(registers: RegisterCaches, table: readonly SlotRegisters[], withTargets: boolean): TimeSlotConfig[] {
+  const hr = (address: number) => readHolding(registers, address) ?? 0;
+  return table.map((slot) => ({
+    ...toTimeslot(hr(slot.start), hr(slot.end)),
+    ...(withTargets && 'targetStateOfCharge' in slot ? { targetStateOfCharge: hr(slot.targetStateOfCharge) } : {}),
+  }));
+}
+
+/** Battery pause from HR 318–320, read as the app shows it: HR 319 start, HR 320 end. */
+function batteryPause(registers: RegisterCaches, context: SinglePhaseBuildContext): BatteryPause | undefined {
+  if (!context.capabilities.pauseMode) return undefined;
+  const mode = readHolding(registers, 318);
+  if (mode === undefined) return undefined;
+  // 2.x read an unnamed HR 318 value as off ('disabled'); kept.
+  const pause: BatteryPause = { mode: PAUSE_MODES[mode] ?? 'off' };
+  const start = readHolding(registers, 319);
+  const end = readHolding(registers, 320);
+  // Gen1 accepts the mode but rejects any access touching HR 319/320 (capabilities.pauseWindow).
+  if (context.capabilities.pauseWindow && start !== undefined && end !== undefined) {
+    // No swap: 2.x reported HR 320 as the start and HR 319 as the end.
+    const window = toTimeslot(start, end);
+    pause.start = window.start;
+    pause.end = window.end;
+  }
+  return pause;
+}
+
+export function buildSchedules(registers: RegisterCaches, context: SinglePhaseBuildContext): SinglePhaseSchedules;
+export function buildSchedules(registers: RegisterCaches, context: ThreePhaseBuildContext): ThreePhaseSchedules;
+export function buildSchedules(
+  registers: RegisterCaches,
+  context: BuildContext,
+): SinglePhaseSchedules | ThreePhaseSchedules;
+export function buildSchedules(
+  registers: RegisterCaches,
+  context: BuildContext,
+): SinglePhaseSchedules | ThreePhaseSchedules {
+  const { tenSlots, perSlotTargets } = context.capabilities;
+
+  if (context.layout === 'three_phase') {
+    const extra = (table: TimeslotRegisters[]) => (tenSlots ? table.slice(2) : []);
+    return {
+      charge: [
+        ...slots(registers, THREE_PHASE_CHARGE_SLOT_REGISTERS, false),
+        ...slots(registers, extra(CHARGE_SLOT_REGISTERS), perSlotTargets),
+      ],
+      discharge: [
+        ...slots(registers, THREE_PHASE_DISCHARGE_SLOT_REGISTERS, false),
+        ...slots(registers, extra(DISCHARGE_SLOT_REGISTERS), perSlotTargets),
+      ],
+    };
+  }
+
+  const chargeTable: readonly SlotRegisters[] = tenSlots
+    ? CHARGE_SLOT_REGISTERS
+    : [CHARGE_SLOT_REGISTERS[0], LEGACY_CHARGE_SLOT_2];
+  const dischargeTable = tenSlots ? DISCHARGE_SLOT_REGISTERS : DISCHARGE_SLOT_REGISTERS.slice(0, 2);
+  const pause = batteryPause(registers, context);
+  return {
+    charge: slots(registers, chargeTable, perSlotTargets),
+    discharge: slots(registers, dischargeTable, perSlotTargets),
+    ...(pause ? { batteryPause: pause } : {}),
+  };
+}

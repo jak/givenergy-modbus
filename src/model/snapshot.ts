@@ -34,7 +34,8 @@ export interface TimeSlotConfig {
   /** Slot end, `"HH:MM"`. */
   end: string;
   /**
-   * Target state of charge for the slot, %. Present only when `capabilities.perSlotTargets`.
+   * Target state of charge for the slot, %. Present only when `capabilities.perSlotTargets`,
+   * and never on three-phase slots 1/2 (HR 1113–1121), for which no source gives a target.
    * Charge slots stop at this upper limit; discharge slots stop at this lower limit.
    * On 10-slot firmware charging stops at min(HR 116, slot target) (GivTCP #576).
    */
@@ -677,13 +678,14 @@ export interface Schedules {
    * AC charge slots, slot 1 first. 10 slots when `capabilities.tenSlots`, otherwise 2.
    * Single-phase: slot 1 HR 94/95; slot 2 HR 243/244 on 10-slot firmware (HR 31/32 before);
    * slots 3–10 HR 246–269, three registers each (start, end, target); slot 1/2 targets HR 242/245.
-   * Three-phase: slots 1/2 HR 1113–1116, slots 3–10 as single-phase.
+   * Three-phase: slots 1/2 HR 1113–1116 (no targets), slots 3–10 as single-phase.
+   * An unset slot reads `00:00`–`00:00`.
    */
   charge: TimeSlotConfig[];
   /**
    * DC discharge slots, slot 1 first. 10 slots when `capabilities.tenSlots`, otherwise 2.
    * Single-phase: slot 1 HR 56/57, slot 2 HR 44/45, slots 3–10 HR 276–299; slot 1/2 targets
-   * HR 272/275. Three-phase: slots 1/2 HR 1118–1121, slots 3–10 as single-phase.
+   * HR 272/275. Three-phase: slots 1/2 HR 1118–1121 (no targets), slots 3–10 as single-phase.
    */
   discharge: TimeSlotConfig[];
 }
