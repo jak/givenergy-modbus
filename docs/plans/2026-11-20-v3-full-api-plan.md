@@ -40,7 +40,7 @@ type-level tests), VitePress docs.
   - Conventional commits, with no co-author or Claude attribution (user preference).
   - The first breaking commit uses `feat!:` and a `BREAKING CHANGE:` footer, so release-please cuts 3.0.0.
   - Commit after each task.
-- **The real inverter** at 10.29.0.197 is a Gen3, ARM 316.
+- **The real inverter** (on the LAN, at 192.168.1.x here) is a Gen3, ARM 316.
   - Read-only scripts are allowed. Save their output to `dumps/` and grep that file rather than re-running.
   - **Never write to it** without the user's explicit permission in chat.
   - `dumps/` is gitignored and contains serials, so never commit anything from it except via Task 3's
@@ -837,7 +837,7 @@ Commit: `feat!: v3 public exports`
 - `scripts/identify.mjs`: show `model` and `layout`.
 - Then run against the real inverter, read only:
   ```bash
-  npm run build && node scripts/snapshot.mjs 10.29.0.197 > dumps/2026-11-xx-v3-snapshot.txt 2>&1
+  npm run build && node scripts/snapshot.mjs 192.168.1.x > dumps/2026-11-xx-v3-snapshot.txt 2>&1
   ```
   Compare the output with `website/register-map.md` sections 1–2. Check every ✅ row's value, allowing
   for live drift. List any mismatch in the PR description.

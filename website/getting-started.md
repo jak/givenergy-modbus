@@ -28,14 +28,14 @@ const devices = await discover();
 Discovery scans your local subnet for devices with port 8899 open, then verifies each candidate with a Modbus probe. Devices this library doesn't support (an Energy Management System, a Gateway or an unknown device type) are left out. You can also specify a subnet:
 
 ```ts
-const devices = await discover('10.29.0.0/24');
+const devices = await discover('192.168.1.0/24');
 ```
 
 For progress reporting (e.g. a pairing UI), use the callbacks:
 
 ```ts
 const devices = await discover({
-  subnet: '10.29.0.0/24',
+  subnet: '192.168.1.0/24',
   onScanProgress(host, portOpen) {
     // Fires after each host is TCP-scanned (Phase 1)
     console.log(`${host}: port ${portOpen ? 'open' : 'closed'}`);
@@ -55,7 +55,7 @@ If you just need to know what's at a given IP — without starting a full pollin
 import { GivEnergyInverter } from 'givenergy-modbus';
 
 const identity = await GivEnergyInverter.identify({ host: '192.168.1.100' });
-console.log(identity.serialNumber);   // e.g. "SD2227G895"
+console.log(identity.serialNumber);   // e.g. "FD0000A000"
 console.log(identity.model);          // e.g. "hybrid_gen3"
 console.log(identity.layout);         // "single_phase" or "three_phase"
 console.log(identity.deviceTypeCode); // raw device type code (HR 0)
