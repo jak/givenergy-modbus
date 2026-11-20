@@ -12,6 +12,7 @@
   "scripts": {
     "build": "tsc",
     "test": "vitest run",
+    "test:types": "vitest run --typecheck.only",
     "test:watch": "vitest",
     "prepublishOnly": "npm test && npm run build",
     "script:discover": "node scripts/discover.mjs",
