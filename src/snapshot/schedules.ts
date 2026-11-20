@@ -71,10 +71,11 @@ function batteryPause(registers: RegisterCaches, context: SinglePhaseBuildContex
   if (mode === undefined) return undefined;
   // An unnamed value is 'unknown', as the catalogue enums decode them (2.x read it as off).
   const pause: BatteryPause = { mode: PAUSE_MODES[mode] ?? 'unknown' };
+  // Gen1 accepts the mode but rejects any access touching HR 319/320 (capabilities.pauseWindow).
+  if (!context.capabilities.pauseWindow) return pause;
   const start = readHolding(registers, 319);
   const end = readHolding(registers, 320);
-  // Gen1 accepts the mode but rejects any access touching HR 319/320 (capabilities.pauseWindow).
-  if (context.capabilities.pauseWindow && start !== undefined && end !== undefined) {
+  if (start !== undefined && end !== undefined) {
     // No swap: 2.x reported HR 320 as the start and HR 319 as the end.
     const window = toTimeslot(start, end);
     pause.start = window.start;
