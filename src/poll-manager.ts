@@ -24,6 +24,7 @@ import {
   type RegisterBlock,
 } from './poll-blocks.js';
 import { buildSnapshot } from './snapshot/index.js';
+import { isSanityCheckPassing } from './validation.js';
 import { armFirmwareVersionOf } from './snapshot/identity.js';
 import type { BatteryStackCaches, BuildContext, MeterCaches, RegisterCaches } from './snapshot/read.js';
 
@@ -110,6 +111,19 @@ interface ReceivedRange {
   count: number;
 }
 
+/**
+ * The holding half of the sanity check (GivTCP read.py): Modbus version (HR 34 ÷100) ≤ 2, Modbus
+ * address (HR 30) and user code (HR 33) ≤ 100. A device answering all zeros passes.
+ */
+function holdingBlockLooksSane(holding: Map<number, number>): boolean {
+  return isSanityCheckPassing({
+    modbusVersion: (holding.get(34) ?? 0) / 100,
+    modbusAddress: holding.get(30) ?? 0,
+    userCode: holding.get(33) ?? 0,
+    heatsinkTemp: 0,
+  });
+}
+
 const blockKey = (type: RegisterType, base: number) => `${type}:${base}`;
 const blockLabel = (type: RegisterType, { base, count }: RegisterBlock) =>
   `${type === 'holding' ? 'HR' : 'IR'} ${base}–${base + count - 1}`;
@@ -128,6 +142,8 @@ export class PollManager extends EventEmitter {
   private _reconnecting = false;
   private _reconnectAbort = false;
   private _identified: Identified | null = null;
+  /** Set once a snapshot built with `_identified` passes the sanity check; the model is then fixed. */
+  private _modelConfirmed = false;
   /** Set when the device turned out not to be a supported inverter; `start()` rethrows it. */
   private _unsupported: UnsupportedDeviceError | null = null;
 
@@ -295,20 +311,32 @@ export class PollManager extends EventEmitter {
   // ── Model, capabilities and context ────────────────────────────────────────
 
   /**
-   * Resolve the model from HR 0 and HR 21, once. Returns null while HR 0 hasn't been read.
-   * Throws `UnsupportedDeviceError` for a plant controller or an unknown device type code.
+   * Resolve the model from HR 0 and HR 21. Returns null while HR 0 hasn't been read, or while the
+   * HR 0 block itself looks corrupt.
+   *
+   * Until a snapshot built with the model passes the sanity check (`_modelConfirmed`), the model
+   * is resolved again from each new HR 0 block, so a corrupt first block doesn't stick.
+   *
+   * Throws `UnsupportedDeviceError` for a plant controller or an unknown device type code, but
+   * only from a block whose own sanity registers (HR 30/33/34) look plausible.
    */
   private _identify(): Identified | null {
-    if (this._identified) return this._identified;
+    if (this._modelConfirmed) return this._identified;
     const holding = this._inverter().holding;
     const deviceTypeCode = holding.get(0);
     if (deviceTypeCode === undefined) return null;
+    if (!holdingBlockLooksSane(holding)) {
+      this.emit('debug', 'HR 0 block fails its sanity registers; not resolving the model from it');
+      this._identified = null;
+      return null;
+    }
     const model = resolveModel(deviceTypeCode, holding.get(21) ?? 0);
     if (model === 'unknown' || isPlantController(model)) throw new UnsupportedDeviceError(model, deviceTypeCode);
-    const layout: Layout = layoutOf(model);
-    // layoutOf decides the layout from the model, so the pair is consistent.
-    this._identified = { model, layout } as Identified;
-    this.emit('debug', `identified ${model} (${layout}, device type code 0x${deviceTypeCode.toString(16)})`);
+    if (this._identified?.model !== model) {
+      // layoutOf decides the layout from the model, so the pair is consistent.
+      this._identified = { model, layout: layoutOf(model) } as Identified;
+      this.emit('debug', `identified ${model} (${this._identified.layout}, device type code 0x${deviceTypeCode.toString(16)})`);
+    }
     return this._identified;
   }
 
@@ -461,8 +489,8 @@ export class PollManager extends EventEmitter {
         return;
       }
 
-      // HR 0 may have arrived as push data during the soak.
-      identified ??= this._identify();
+      // HR 0 may have arrived (or changed) as push data during the soak.
+      identified = this._identify();
       if (!identified) {
         this._handlePollResult(null, new Error('inverter not identified yet (HR 0 not read)'));
         return;
@@ -478,6 +506,10 @@ export class PollManager extends EventEmitter {
       }
 
       const snapshot = buildSnapshot(this._registerCaches(), this._context()!);
+      if (snapshot && !this._modelConfirmed) {
+        this._modelConfirmed = true;
+        this.emit('debug', `model confirmed: ${snapshot.model}`);
+      }
       this._handlePollResult(snapshot, snapshot ? null : new Error('sanity check failed'));
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
