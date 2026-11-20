@@ -234,7 +234,7 @@ describe('Register Converters', () => {
   });
 
   describe('toOffsetPowerFactor', () => {
-    it('decodes the inverter power factor as raw ÷10000 − 1 (offset-unsigned, IR 16 and HR 52)', () => {
+    it('decodes a power factor as raw ÷10000 − 1 (offset-unsigned, the CT meter IR 80–83), so raw 10000 is 0, not unity', () => {
       expect(toOffsetPowerFactor(10000)).toBe(0);
       expect(toOffsetPowerFactor(19980)).toBe(0.998);
       expect(toOffsetPowerFactor(1000)).toBe(-0.9);

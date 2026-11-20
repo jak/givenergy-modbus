@@ -139,7 +139,7 @@ Settings come from the catalogue. Names follow the official app.
 | `importReactiveEnergy` | `importReactiveEnergyKvarh` | Unit suffix added. |
 | `exportReactiveEnergy` | `exportReactiveEnergyKvarh` | Unit suffix added. |
 | `apparentPower`, `apparentPowerTotal` | same | Still raw VA, as in 2.x, but now unsigned (2.x read them signed, which wraps above 32767 VA). "Apparent power ÷10" (research C, the external library) was considered and rejected: on every capture single-phase V × I matches the raw value, and ÷10 would put three-phase apparent power below the active power. |
-| `powerFactor`, `powerFactorTotal` | same | **Fixed (2.x bug, contradicts research C):** now raw ÷10000 − 1 (offset-unsigned). Research C and 2.x read signed ÷10000, which gives values above 1 on every capture (e.g. 1.998); the offset decoding matches \|active ÷ apparent\|. |
+| `powerFactor`, `powerFactorTotal` | same | **Fixed (2.x bug, contradicts research C):** now raw ÷10000 − 1 (offset-unsigned). Research C and 2.x read signed ÷10000, which gives values above 1 on every capture (e.g. 1.998); the offset decoding matches \|active ÷ apparent\|. On a single-phase meter (phase 2 and 3 voltage 0) phases 2 and 3 are 0, not the −1 that raw 0 decodes to. |
 | `current` | same | Unchanged (÷100). Quirk: the three-phase capture's meter 0x01 only fits ÷10; not special-cased. |
 | `ThreePhase<T>` (mutable tuple) | `ThreePhase<T>` (readonly tuple) | |
 
@@ -173,6 +173,7 @@ Settings come from the catalogue. Names follow the official app.
 | Register | Why |
 |---|---|
 | Three-phase IR 1083–1085 (per-phase load in research C) | On the three-phase capture they read 0 / −536 / 533 W against a 1636 W total, so they can't be per-phase load. `ThreePhaseLoad` has no `phases`. |
+| Single-phase IR 16 (power factor) | No decoding fits the captures. GivTCP's raw ÷10000 − 1 gives 0.098 on Gen1 while IR 24 delivers 3371 W, and −0.9 on AC and the All in One (raw 1000), where the All in One's IR 24 / IR 43 = 371 W / 369 VA put it near unity. Raw 10000 is 0, not unity, so an unread register can't default to 1 either. Exposed as `inverter.powerFactor` earlier in Phase C; removed. The CT meter's `powerFactor` is exposed. |
 | Three-phase IR 1068 (power factor) | Scaling unknown. |
 | Three-phase IR 1240–1241 (export power), IR 1244–1245 (meter 2 power), IR 1400–1403 (export 2 energy) | Meaning unknown. |
 | LV battery IR 115 | Meaning unknown. |

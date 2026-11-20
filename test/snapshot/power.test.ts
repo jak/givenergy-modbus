@@ -42,7 +42,6 @@ describe('power groups on the Gen3 reference unit', () => {
     expect(buildInverterOutput(registers, context)).toEqual({
       outputPower: -49, // IR 24 = 65487: a different node from the grid CT's −360 W
       apparentPower: 733,
-      powerFactor: -0.498, // IR 16 = 5020
       heatsinkTemperature: 28.9, // register map "Inverter temperature 28.9 °C"
       current: 0.7,
       terminalCurrent: 3.1,
@@ -94,6 +93,17 @@ describe('single-phase quirks', () => {
 
   it('reads the heatsink temperature as signed', () => {
     expect(build({ 41: 65536 - 52 }).inverter.heatsinkTemperature).toBe(-5.2);
+  });
+
+  it('does not expose IR 16 as a power factor: no decoding fits the captures', () => {
+    // GivTCP and the external library read IR 16 as raw ÷10000 − 1. On the captures that gives
+    // 0.098 on Gen1 while delivering 3371 W (IR 24) at 1553 VA (IR 43), and −0.9 on AC and the
+    // All in One, whose All in One IR 24/IR 43 = 371 W / 369 VA say it is close to unity.
+    const raw = (name: string) => capture(name).input.get(16);
+    expect(raw('hybrid_gen1_arm449.log')).toBe(10980); // 0.098
+    expect(raw('ac_arm282.log')).toBe(1000); // −0.9
+    expect(raw('all_in_one_arm620.log')).toBe(1000); // −0.9
+    expect(build({ 16: 10980, 24: 3371, 43: 1553 }).inverter).not.toHaveProperty('powerFactor');
   });
 
   it('leaves out combined generation power when IR 247–248 are unread (pre-Gen3)', () => {
@@ -209,9 +219,6 @@ describe.each(INVERTER_CAPTURES)('power groups on capture $name', ({ name, injec
       expect(grid.voltage).toBeGreaterThan(200);
       expect(grid.voltage).toBeLessThan(260);
     }
-    if ('powerFactor' in inverter) {
-      expect(inverter.powerFactor).toBeGreaterThanOrEqual(-1);
-      expect(inverter.powerFactor).toBeLessThanOrEqual(1);
-    }
+    expect(inverter).not.toHaveProperty('powerFactor');
   });
 });

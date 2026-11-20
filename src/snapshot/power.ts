@@ -32,7 +32,6 @@ import {
   toDeci,
   toInt16,
   toInt32,
-  toOffsetPowerFactor,
   toSignedDeci,
   toUint32,
 } from '../model/converters.js';
@@ -189,8 +188,6 @@ export function buildInverterOutput(
   return {
     outputPower: toInt16(ir(24)),
     apparentPower: ir(43),
-    // An unread IR 16 would decode as −1, so treat it as unity (raw 10000).
-    powerFactor: toOffsetPowerFactor(readInput(registers, 16) ?? 10000),
     heatsinkTemperature: toSignedDeci(ir(41)),
     current: toDeci(ir(10)),
     terminalCurrent: toCenti(ir(58)),
