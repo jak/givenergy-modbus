@@ -121,7 +121,7 @@ Settings come from the catalogue. Names follow the official app.
 
 | 2.x | 3.x | Notes |
 |---|---|---|
-| `chargeSlots` | `s.schedules.charge` | Always `TimeSlotConfig[]`; `targetStateOfCharge` is optional and present when `capabilities.perSlotTargets`. |
+| `chargeSlots` | `s.schedules.charge` | Always `TimeSlotConfig[]`; `targetStateOfCharge` is optional and present when `capabilities.perSlotTargets` (never on three-phase slots 1/2). Slot counts follow `capabilities.tenSlots`, not generation: 10, or 2 on legacy firmware (2.x Gen2 had 1 charge slot; slot 2 is HR 31/32). Three-phase now has 10 slots when `tenSlots` (2.x had 2). |
 | `dischargeSlots` | `s.schedules.discharge` | As above. |
 | `batteryPauseMode` (Gen3) | `s.schedules.batteryPause.mode` | Single-phase only, optional (`capabilities.pauseMode`). Values renamed: `disabled` → `off`, `pause_charge` → `charge`, `pause_discharge` → `discharge`, `pause_both` → `both`. |
 | `timedDischargeSlot` (Gen3) | `s.schedules.batteryPause.start` / `.end` | Optional (`capabilities.pauseWindow`). **Fixed:** 2.x had HR 319/320 swapped; 3.x reads HR 319 as start and HR 320 as end, as the app shows them. |
