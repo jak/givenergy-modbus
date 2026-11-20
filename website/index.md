@@ -17,9 +17,9 @@ features:
   - title: Real-time Monitoring
     details: Poll solar, battery, and grid power every 15 seconds with automatic push-mode data collection from the inverter.
   - title: Inverter Control
-    details: Set operating modes, charge/discharge schedules, battery reserves, and rate limits with type-safe methods per generation.
+    details: Write any setting in the catalogue, charge/discharge schedules and battery pause, type-checked per layout and gated by model and firmware.
   - title: Auto-discovery
-    details: Find GivEnergy inverters on your local network automatically. Detects Gen2, Gen3, and three-phase models.
+    details: Find GivEnergy inverters on your local network automatically. Identifies the model (Gen1–Gen4 hybrids, AC, All in One, three-phase and more) from the inverter itself.
 ---
 
 ## Install
@@ -30,6 +30,8 @@ npm install givenergy-modbus
 
 Requires Node.js 22+. TypeScript types included.
 
+Upgrading from 2.x? See the [migration guide](./migration-v3).
+
 ## Quick Example
 
 ```ts
@@ -38,8 +40,8 @@ import { GivEnergyInverter } from 'givenergy-modbus';
 const inverter = await GivEnergyInverter.connect({ host: '192.168.1.100' });
 
 inverter.on('data', (snapshot) => {
-  console.log(`Solar: ${snapshot.solarPower}W`);
-  console.log(`Battery: ${snapshot.stateOfCharge}%`);
-  console.log(`Grid: ${snapshot.gridPower}W`);
+  console.log(`Solar: ${snapshot.solar.power}W`);
+  console.log(`Battery: ${snapshot.battery.stateOfCharge}%`);
+  console.log(`Grid: ${snapshot.grid.power}W`);
 });
 ```
