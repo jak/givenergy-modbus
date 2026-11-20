@@ -135,7 +135,7 @@ export const SETTINGS = {
   MSB-first decoding or the IR 56 battery-warning bug.
 - Bug fixes found in research: HR 4109–4112 are write-only seeds, not live totals, so they
   drop out of the battery-total fallback chain; temperatures IR 41/55/56 and battery
-  IR 76–81/103/104 are signed; meter apparent power is ÷10; HR 313/314 range is 1–100.
+  IR 76–81/103/104 are signed; HR 313/314 range is 1–100.
 - Tests: catalogue round-trip and validation for every entry; type-level tests that each
   layout's settings type has only its keys and that unsafe keys don't compile in
   `setSetting`; capability tests per model/firmware; fixture snapshot tests per model from
