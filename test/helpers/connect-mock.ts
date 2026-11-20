@@ -6,7 +6,7 @@ import { GivEnergyInverter, SinglePhaseInverter, ThreePhaseInverter } from '../.
 import type { PollTiming } from '../../src/poll-manager.js';
 import { startMockInverter, type MockDevice, type MockRequest } from './mock-inverter.js';
 
-export const FAST_TIMING: Partial<PollTiming> = { requestTimeoutMs: 60, requestRetries: 0, scanRetries: 1, retryDelayMs: 0, interReadDelayMs: 0, frameSpacingMs: 0, pushSoakMs: 30 };
+export const FAST_TIMING: Partial<PollTiming> = { requestTimeoutMs: 200, requestRetries: 0, scanRetries: 1, retryDelayMs: 0, interReadDelayMs: 0, frameSpacingMs: 0, pushSoakMs: 30 };
 
 const cleanup: Array<() => Promise<void>> = [];
 

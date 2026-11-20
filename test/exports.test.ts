@@ -3,6 +3,7 @@ import * as library from '../src/index.js';
 import type {
   BatteryPauseInput,
   Capabilities,
+  DeviceModel,
   DiscoveredDevice,
   GivEnergyInverterOptions,
   InverterIdentity,
@@ -12,6 +13,7 @@ import type {
   Meter,
   ModelOf,
   NumberedTimeSlotInput,
+  PowerFlows,
   SettingDefinition,
   SettingKey,
   Settings,
@@ -26,6 +28,7 @@ import type {
   TimeSlotConfig,
   TimeSlotInput,
   UnsafeSettingKey,
+  WritableOnBothLayouts,
   WritableSettingKey,
 } from '../src/index.js';
 
@@ -77,5 +80,9 @@ describe('public exports', () => {
     expectTypeOf<BatteryPauseInput['mode']>().toEqualTypeOf<'off' | 'charge' | 'discharge' | 'both'>();
     expectTypeOf<GivEnergyInverterOptions['host']>().toEqualTypeOf<string>();
     expectTypeOf<Meter['slaveAddress']>().toEqualTypeOf<number>();
+    expectTypeOf<PowerFlows['gridToHouse']>().toEqualTypeOf<number>();
+    expectTypeOf<InverterModel>().toExtend<DeviceModel>();
+    expectTypeOf<'ems'>().toExtend<DeviceModel>();
+    expectTypeOf<'batteryReserve'>().toExtend<WritableOnBothLayouts>();
   });
 });

@@ -65,6 +65,9 @@ export interface BatteryPauseInput {
   end?: string;
 }
 
+/** Settings `setSetting` accepts on either layout, so on an inverter not yet narrowed by `layout`. */
+export type WritableOnBothLayouts = WritableSettingKey<'single_phase'> & WritableSettingKey<'three_phase'>;
+
 /** The model type for layout `L`. */
 export type ModelOf<L extends Layout> = L extends 'three_phase' ? ThreePhaseModel : SinglePhaseModel;
 /** The snapshot type for layout `L`. */
@@ -125,7 +128,15 @@ export abstract class GivEnergyInverter<L extends Layout = Layout> extends Event
       timing: options.timing,
     });
     await pollManager.start();
-    const snapshot = pollManager.getData();
+    let snapshot: InverterSnapshot;
+    try {
+      snapshot = pollManager.getData();
+    } catch {
+      // The first poll gave no snapshot (no reply, or the sanity check failed): don't leave the
+      // poll manager running behind a rejected connect().
+      await pollManager.stop();
+      throw new Error(`No valid snapshot from ${options.host} after the first poll`);
+    }
 
     if (trimSerial(snapshot.identity.serialNumber) === '') {
       await pollManager.stop();
@@ -182,6 +193,16 @@ export abstract class GivEnergyInverter<L extends Layout = Layout> extends Event
     return this.pollManager.capabilities;
   }
 
+  /**
+   * Whether this inverter supports `key`: the setting exists on its layout and passes its model
+   * and firmware gate, with the capabilities as they are now (after any runtime downgrade). A
+   * supported setting can still be missing from `getData().settings` if its register hasn't been
+   * read.
+   */
+  supports(key: keyof typeof SETTINGS): boolean {
+    return isSupported(key, this.layout, this.capabilities);
+  }
+
   getData(): SnapshotOf<L> {
     return this.pollManager.getData() as SnapshotOf<L>;
   }
@@ -198,10 +219,15 @@ export abstract class GivEnergyInverter<L extends Layout = Layout> extends Event
    * echoes writes with 0x86 instead of 6, so 0x86 can't be told apart from a Modbus error reply
    * to a write (as in 2.x). Any other error reply never matches the write, so it times out.
    *
+   * The first signature lets `setSetting` be called on the result of `connect()` before
+   * narrowing on `layout`, for settings writable on both layouts; the rest need narrowing.
+   *
    * @throws UnsupportedSettingError when the model or firmware doesn't support the setting.
    * @throws RangeError or TypeError for a value the setting doesn't accept.
    */
-  async setSetting<K extends WritableSettingKey<L>>(key: K, value: SettingWriteValue<K>): Promise<void> {
+  setSetting<K extends WritableOnBothLayouts>(key: K, value: SettingWriteValue<K>): Promise<void>;
+  setSetting<K extends WritableSettingKey<L>>(key: K, value: SettingWriteValue<K>): Promise<void>;
+  async setSetting(key: WritableSettingKey<L>, value: unknown): Promise<void> {
     await this._write(key, value, false);
   }
 
@@ -272,8 +298,11 @@ export abstract class GivEnergyInverter<L extends Layout = Layout> extends Event
     await this._writeSlots('discharge', positional(configs), true);
   }
 
-  /** Set the inverter clock (HR 35–40). */
+  /** Set the inverter clock (HR 35–40) to `date`'s local time. Throws `RangeError` for an invalid date or a year outside 2000–2099. */
   async setDateTime(date: Date): Promise<void> {
+    if (Number.isNaN(date.getTime())) throw new RangeError('invalid date');
+    const year = date.getFullYear();
+    if (year < 2000 || year > 2099) throw new RangeError(`year must be 2000-2099 (HR 35 holds year - 2000), got ${year}`);
     const fields = [
       date.getFullYear() - 2000,
       date.getMonth() + 1,

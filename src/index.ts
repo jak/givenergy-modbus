@@ -8,6 +8,7 @@ export type {
   NumberedTimeSlotInput,
   SnapshotOf,
   TimeSlotInput,
+  WritableOnBothLayouts,
 } from './inverter.js';
 
 // Snapshot
@@ -33,7 +34,8 @@ export type {
 
 // Models and capabilities
 export type { Capabilities } from './model/capabilities.js';
-export type { InverterModel, Layout, SinglePhaseModel, ThreePhaseModel } from './model/models.js';
+export type { DeviceModel, InverterModel, Layout, SinglePhaseModel, ThreePhaseModel } from './model/models.js';
+export type { PowerFlows } from './power-flow.js';
 
 // Errors
 export { UnsupportedDeviceError, UnsupportedSettingError } from './errors.js';

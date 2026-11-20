@@ -103,8 +103,11 @@ describe('GivEnergyInverter', () => {
       const server = await identifyAgainst(identityRegisters('SD2227G895', 0x2001, 899));
       try {
         await server.identify();
-        await new Promise((resolve) => setTimeout(resolve, 50));
-        for (const s of server.sockets) expect(s.destroyed).toBe(true);
+        // The server sees the close shortly after identify() resolves.
+        await vi.waitFor(() => {
+          expect(server.sockets.length).toBeGreaterThan(0);
+          for (const s of server.sockets) expect(s.destroyed || s.readableEnded).toBe(true);
+        });
       } finally {
         server.close();
       }

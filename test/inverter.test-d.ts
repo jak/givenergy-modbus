@@ -75,3 +75,18 @@ test('setBatteryPause is single-phase only and takes only writable modes', () =>
   // @ts-expect-error three-phase has no battery pause
   void three.setBatteryPause({ mode: 'off' });
 });
+
+test('setSetting works on the un-narrowed result of connect() for settings on both layouts', async () => {
+  const inverter = await GivEnergyInverter.connect({ host: 'x' });
+  void inverter.setSetting('batteryReserve', 20); // HR 110 / HR 1109
+  void inverter.setSetting('ecoMode', true); // HR 27 on both layouts
+  void inverter.setSetting('acCharge', false); // HR 96 / HR 1112
+  // @ts-expect-error the value type still follows the key
+  void inverter.setSetting('batteryReserve', '20');
+  // @ts-expect-error single-phase only: narrow on layout first
+  void inverter.setSetting('batteryChargeRate', 1000);
+  // @ts-expect-error three-phase only: narrow on layout first
+  void inverter.setSetting('forceCharge', true);
+  if (inverter.layout === 'three_phase') void inverter.setSetting('forceCharge', true);
+  else void inverter.setSetting('batteryChargeRate', 1000);
+});

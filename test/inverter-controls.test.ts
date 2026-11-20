@@ -43,6 +43,41 @@ describe('connect', { timeout: 20_000 }, () => {
   });
 });
 
+describe('connect without a valid first snapshot', { timeout: 20_000 }, () => {
+  it('stops the poll manager and rejects when the first poll fails the sanity check (corrupt HR 34)', async () => {
+    const registers = reference();
+    registers.holding.set(34, 9999); // Modbus version 99.99: the block is corrupt
+    const mock = await startMockInverter({ devices: devicesOf(registers) });
+    onDisconnect(() => mock.close());
+    const result = GivEnergyInverter.connect({ host: '127.0.0.1', port: mock.port, autoReconnect: false, timing: FAST_TIMING });
+    await expect(result).rejects.toThrow('No valid snapshot from 127.0.0.1 after the first poll');
+    await vi.waitFor(() => expect(mock.connections()).toBe(0));
+  });
+});
+
+describe('supports', { timeout: 20_000 }, () => {
+  it('follows the layout and the effective capabilities', async () => {
+    const { inverter: gen3Inverter } = await gen3();
+    expect(gen3Inverter.supports('exportPriority')).toBe(true);
+    expect(gen3Inverter.supports('forceCharge')).toBe(false); // three-phase only
+    const { inverter: gen2Inverter } = await gen2();
+    expect(gen2Inverter.supports('exportPriority')).toBe(false); // no HR 300 block
+    expect(gen2Inverter.supports('batteryReserve')).toBe(true);
+    const { inverter: threePhaseInverter } = await threePhase();
+    expect(threePhaseInverter.supports('batteryChargeRate')).toBe(false); // single-phase only
+    expect(threePhaseInverter.supports('inverterChargePowerPercent')).toBe(true); // HR 1110, ungated
+  });
+
+  it('turns false when the block holding the setting goes unanswered', async () => {
+    const { inverter } = await connectSinglePhase(devicesOf(reference()), (request) =>
+      request.slaveAddress === 0x11 && request.functionCode === 0x03 && request.baseRegister === 300);
+    const poll = () => (inverter as unknown as { pollManager: { _executePoll(full: boolean): Promise<void> } }).pollManager._executePoll(true);
+    await poll();
+    await poll();
+    expect(inverter.supports('exportPriority')).toBe(false);
+  });
+});
+
 describe('setSetting', { timeout: 20_000 }, () => {
   it('writes HR 110 for the battery reserve and shows it in the snapshot straight away, with no poll', async () => {
     const { mock, inverter } = await gen3();
@@ -161,6 +196,23 @@ describe('unsafe_setSetting', { timeout: 20_000 }, () => {
 });
 
 describe('other writes', { timeout: 20_000 }, () => {
+  it('rejects an invalid date, or a year outside 2000–2099, before writing anything', async () => {
+    const { mock, inverter } = await gen3();
+    await expect(inverter.setDateTime(new Date('not a date'))).rejects.toThrow(RangeError);
+    await expect(inverter.setDateTime(new Date(1999, 11, 31))).rejects.toThrow(RangeError);
+    await expect(inverter.setDateTime(new Date(2100, 0, 1))).rejects.toThrow(RangeError);
+    expect(mock.writes).toEqual([]);
+  });
+
+  it('does not let a throwing data listener replace a write error', async () => {
+    const { mock, inverter } = await gen3();
+    inverter.on('data', () => { throw new Error('listener bug'); });
+    // HR 318 is accepted (and applied, emitting data); HR 319 times out.
+    mock.silent = (request) => request.functionCode === 0x06 && request.baseRegister === 319;
+    await expect(inverter.setBatteryPause({ mode: 'both', start: '16:00', end: '19:00' })).rejects.toThrow(/timeout/);
+    expect(inverter.getData().schedules.batteryPause?.mode).toBe('both');
+  });
+
   it('sets the clock in HR 35–40, with the year as an offset from 2000', async () => {
     const { mock, inverter } = await gen3();
     await inverter.setDateTime(new Date(2026, 10, 20, 13, 45, 30));
