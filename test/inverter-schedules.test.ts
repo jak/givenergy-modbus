@@ -223,3 +223,32 @@ describe('setBatteryPause', { timeout: 20_000 }, () => {
     expect(mock.writes).toEqual([]);
   });
 });
+
+describe('data events', { timeout: 20_000 }, () => {
+  it('emits one data event per call, however many registers it writes', async () => {
+    const { mock, inverter } = await gen3();
+    let events = 0;
+    inverter.on('data', () => { events++; });
+    await inverter.setChargeSlots([{ start: '00:30', end: '04:30', targetStateOfCharge: 100 }]);
+    expect(mock.writes).toHaveLength(21); // slot 1 with its target, then 9 slots cleared
+    expect(events).toBe(1);
+    await inverter.setBatteryPause({ mode: 'discharge', start: '16:00', end: '19:00' });
+    expect(events).toBe(2);
+  });
+
+  it('still applies the writes the inverter accepted when a later one fails', async () => {
+    const { mock, inverter } = await gen3();
+    mock.silent = (request) => request.functionCode === 0x06 && request.baseRegister === 319;
+    let events = 0;
+    inverter.on('data', () => { events++; });
+    const before = inverter.getData().schedules.batteryPause;
+
+    await expect(inverter.setBatteryPause({ mode: 'both', start: '16:00', end: '19:00' })).rejects.toThrow(/timeout/);
+
+    // HR 318 was accepted, HR 319 timed out and HR 320 was never sent.
+    expect(mock.writes).toEqual([{ register: 318, value: 3 }]);
+    expect(events).toBe(1);
+    expect(inverter.getData().schedules.batteryPause).toEqual({ ...before, mode: 'both' });
+  });
+});
+

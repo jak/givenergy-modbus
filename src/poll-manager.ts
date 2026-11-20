@@ -250,7 +250,7 @@ export class PollManager extends EventEmitter {
   /**
    * Write one holding register on the inverter (function 6), as 2.x did: the request is retried
    * on timeout and resolves when the inverter echoes it. Rejects on timeout or a matched error
-   * reply. Doesn't touch the caches; call `applyWrite` once it resolves.
+   * reply. Doesn't touch the caches; call `applyWrites` once it resolves.
    */
   async writeHoldingRegister(register: number, value: number): Promise<void> {
     const frame = encodeWriteHoldingRegisterRequest({
@@ -264,23 +264,29 @@ export class PollManager extends EventEmitter {
   }
 
   /**
-   * Record a holding register write the inverter accepted: update the cached register and
-   * rebuild the snapshot from the caches, without a network read. Emits `data` with the new
-   * snapshot.
+   * Record holding register writes the inverter accepted: update the cached registers and
+   * rebuild the snapshot once from the caches, without a network read. Emits one `data` event.
    */
-  applyWrite(register: number, raw: number): void {
+  applyWrites(writes: ReadonlyArray<readonly [register: number, raw: number]>): void {
     const context = this._context();
     if (!this._started || !context) throw new Error('not started');
-    this._inverter().holding.set(register, raw);
+    if (writes.length === 0) return;
+    for (const [register, raw] of writes) this._inverter().holding.set(register, raw);
     const snapshot = buildSnapshot(this._registerCaches(), context);
     if (!snapshot) {
       // Only a corrupt sanity register (HR 30/33/34) could fail the check after a good poll.
-      this.emit('debug', `snapshot rebuild after writing HR ${register} failed the sanity check; keeping the last one`);
+      const registers = writes.map(([register]) => register).join(', ');
+      this.emit('debug', `snapshot rebuild after writing HR ${registers} failed the sanity check; keeping the last one`);
       return;
     }
     this._previousSnapshot = snapshot;
     this._cache = snapshot;
     this.emit('data', snapshot);
+  }
+
+  /** `applyWrites` for one register. */
+  applyWrite(register: number, raw: number): void {
+    this.applyWrites([[register, raw]]);
   }
 
   // ── Register store ─────────────────────────────────────────────────────────
