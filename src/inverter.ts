@@ -260,7 +260,8 @@ export abstract class GivEnergyInverter<L extends Layout = Layout> extends Event
   /**
    * Write all charge slots: `configs[i]` to slot i + 1, and clear every slot after the last one
    * to 00:00–00:00. Clearing writes the times only and leaves targets as they are, as the external
-   * library's `reset_charge_slot` does. An entry's `slot`, when given, must match its position.
+   * library's `reset_charge_slot` does, so a cleared slot keeps its old target (and the snapshot
+   * shows it on the empty slot). An entry's `slot`, when given, must match its position.
    */
   async setChargeSlots(configs: readonly (TimeSlotInput | NumberedTimeSlotInput)[]): Promise<void> {
     await this._writeSlots('charge', positional(configs), true);
@@ -301,10 +302,21 @@ export abstract class GivEnergyInverter<L extends Layout = Layout> extends Event
     await this.pollManager.writeHoldingRegister(register, value);
   }
 
-  /** Write a register, then show it in the snapshot. A failed write leaves the cache alone. */
-  protected async _writeAndApply(register: number, raw: number): Promise<void> {
-    await this.pollManager.writeHoldingRegister(register, raw);
-    this.pollManager.applyWrite(register, raw);
+  /**
+   * Write registers in order, then show them in the snapshot with one `data` event. If a write
+   * fails, the ones before it (which the inverter accepted) are still applied, and the error is
+   * rethrown; the failed one and those after it leave the cache alone.
+   */
+  protected async _writeAll(writes: ReadonlyArray<readonly [register: number, raw: number]>): Promise<void> {
+    const accepted: Array<readonly [number, number]> = [];
+    try {
+      for (const write of writes) {
+        await this.pollManager.writeHoldingRegister(write[0], write[1]);
+        accepted.push(write);
+      }
+    } finally {
+      if (accepted.length > 0) this.pollManager.applyWrites(accepted);
+    }
   }
 
   protected _unsupported(key: string): UnsupportedSettingError {
@@ -322,7 +334,7 @@ export abstract class GivEnergyInverter<L extends Layout = Layout> extends Event
     if (clearRest) {
       for (const registers of table.slice(entries.length)) writes.push([registers.start, 0], [registers.end, 0]);
     }
-    for (const [register, raw] of writes) await this._writeAndApply(register, raw);
+    await this._writeAll(writes);
   }
 
   private _slotWrites(kind: 'charge' | 'discharge', table: SlotRegisters[], entry: NumberedTimeSlotInput): Array<[number, number]> {
@@ -356,7 +368,7 @@ export abstract class GivEnergyInverter<L extends Layout = Layout> extends Event
     // isSupported checked that the setting has a register on this layout.
     const register = registerFor(settingKey, this.layout)!;
     const raw = encodeSetting(definition, value as never);
-    await this._writeAndApply(register, raw);
+    await this._writeAll([[register, raw]]);
   }
 }
 
@@ -403,11 +415,12 @@ export class SinglePhaseInverter extends GivEnergyInverter<'single_phase'> {
       validateTime(pause.start);
       validateTime(pause.end);
     }
-    await this._writeAndApply(PAUSE_MODE_REGISTER, mode);
-    if (hasWindow) {
-      await this._writeAndApply(PAUSE_START_REGISTER, timeToInt(pause.start!));
-      await this._writeAndApply(PAUSE_END_REGISTER, timeToInt(pause.end!));
-    }
+    await this._writeAll([
+      [PAUSE_MODE_REGISTER, mode],
+      ...(hasWindow
+        ? [[PAUSE_START_REGISTER, timeToInt(pause.start!)], [PAUSE_END_REGISTER, timeToInt(pause.end!)]] as const
+        : []),
+    ]);
   }
 }
 
