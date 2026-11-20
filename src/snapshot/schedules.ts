@@ -41,16 +41,26 @@ const PAUSE_MODES: readonly BatteryPause['mode'][] = ['off', 'charge', 'discharg
 type SlotRegisters = SimpleTimeslotRegisters | TimeslotRegisters;
 
 /**
- * The slots in `table` whose start and end registers were read. A target is included when
- * `withTargets`, the slot has a target register, and that register was read.
+ * The slots in `table` whose start and end registers were read, numbered from `firstSlot`. A
+ * target is included when `withTargets`, the slot has a target register, and that register was
+ * read.
  */
-function slots(registers: RegisterCaches, table: readonly SlotRegisters[], withTargets: boolean): TimeSlotConfig[] {
-  return table.flatMap((slot) => {
+function slots(
+  registers: RegisterCaches,
+  table: readonly SlotRegisters[],
+  withTargets: boolean,
+  firstSlot = 1,
+): TimeSlotConfig[] {
+  return table.flatMap((slot, position) => {
     const start = readHolding(registers, slot.start);
     const end = readHolding(registers, slot.end);
     if (start === undefined || end === undefined) return [];
     const target = withTargets && 'targetStateOfCharge' in slot ? readHolding(registers, slot.targetStateOfCharge) : undefined;
-    return [{ ...toTimeslot(start, end), ...(target !== undefined ? { targetStateOfCharge: target } : {}) }];
+    return [{
+      slot: firstSlot + position,
+      ...toTimeslot(start, end),
+      ...(target !== undefined ? { targetStateOfCharge: target } : {}),
+    }];
   });
 }
 
@@ -86,11 +96,11 @@ export function buildSchedules(
     return {
       charge: [
         ...slots(registers, THREE_PHASE_CHARGE_SLOT_REGISTERS, false),
-        ...slots(registers, extra(CHARGE_SLOT_REGISTERS), perSlotTargets),
+        ...slots(registers, extra(CHARGE_SLOT_REGISTERS), perSlotTargets, 3),
       ],
       discharge: [
         ...slots(registers, THREE_PHASE_DISCHARGE_SLOT_REGISTERS, false),
-        ...slots(registers, extra(DISCHARGE_SLOT_REGISTERS), perSlotTargets),
+        ...slots(registers, extra(DISCHARGE_SLOT_REGISTERS), perSlotTargets, 3),
       ],
     };
   }

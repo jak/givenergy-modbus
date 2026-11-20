@@ -95,7 +95,9 @@ test('energy fields end in Kwh', () => {
 });
 
 test('time slot target is optional (present only with capabilities.perSlotTargets)', () => {
-  expectTypeOf<{ start: string; end: string }>().toExtend<TimeSlotConfig>();
+  expectTypeOf<{ slot: number; start: string; end: string }>().toExtend<TimeSlotConfig>();
+  // The slot number is required: array position doesn't give it when a slot is left out.
+  expectTypeOf<{ start: string; end: string }>().not.toExtend<TimeSlotConfig>();
   expectTypeOf<SinglePhaseSnapshot['schedules']['charge']>().toEqualTypeOf<TimeSlotConfig[]>();
 });
 
