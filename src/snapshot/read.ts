@@ -21,7 +21,7 @@ export interface RegisterCaches {
    * order. Only modules that answered are listed.
    */
   batteryModules?: Map<number, number>[];
-  /** Each high-voltage battery stack that answered, in address order (stack n at 0x70 + n). */
+  /** Each high-voltage battery stack that answered, in address order. */
   batteryStacks?: BatteryStackCaches[];
   /** Each CT meter that answered (0x01–0x08), in address order. */
   meters?: MeterCaches[];
@@ -30,22 +30,35 @@ export interface RegisterCaches {
 /** Registers of one CT meter. */
 export interface MeterCaches {
   /** Device address, 1–8. */
-  address: number;
+  slaveAddress: number;
   /** Input registers IR 60–88 (function 4). */
   input: Map<number, number>;
   /** Product registers 60–68 (function 22); empty when the meter didn't answer them. */
   product: Map<number, number>;
 }
 
-/** Input registers of one high-voltage battery stack. */
+/**
+ * Input registers of one high-voltage battery stack. Only devices that answered are listed, so
+ * each carries its own index, taken from its device address rather than its list position.
+ */
 export interface BatteryStackCaches {
-  /** The battery control unit (BCU) at 0x70 + n, IR 60–119. */
+  /** Stack index: the battery control unit's device address − 0x70. */
+  index: number;
+  /** The battery control unit (BCU) at 0x70 + `index`, IR 60–119. */
   controlUnit: Map<number, number>;
-  /**
-   * Its battery modules (BMUs) at 0x50 + k, in address order. Stack n's registers are read at
-   * IR 60 + 120 × n but stored here from IR 60, as the 2.x poll manager stores them.
-   */
-  modules: Map<number, number>[];
+  /** Its battery modules (BMUs) that answered, in address order. */
+  modules: HighVoltageModuleCaches[];
+}
+
+/**
+ * Input registers of one high-voltage battery module (BMU). Every stack's modules share the
+ * device addresses 0x50 + k; stack n's are read at IR 60 + 120 × n but stored here from IR 60,
+ * as the 2.x poll manager stores them.
+ */
+export interface HighVoltageModuleCaches {
+  /** Module index within its stack: the device address − 0x50. */
+  index: number;
+  input: Map<number, number>;
 }
 
 interface BuildContextBase {

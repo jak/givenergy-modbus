@@ -68,7 +68,7 @@ Input for `website/migration-v3.md` (Task 19). Every field of the 2.x `InverterS
 | `temperatureMin` | `temperatureMin` | `temperatureMin` | Now signed. HV: as `temperatureMax`. |
 | `cycleCount` | `cycleCount` | `s.battery.stacks[stack].cycleCount` | 2.x copied the stack's count onto every HV module. |
 | `cellVoltages` | `cellVoltages` | `cellVoltages` | |
-| `stack?` | — | `stack` | Required on HV modules, absent on LV. |
+| `stack?` | — | `stack` | Required on HV modules, absent on LV. `stack` is the control unit's device address − 0x70 and `index` the module's address − 0x50, so a device that didn't answer leaves a gap instead of shifting the indexes after it (the register caches carry each device's index). |
 
 ## Grid
 

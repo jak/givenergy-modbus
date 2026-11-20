@@ -6,7 +6,7 @@ import type { Meter, ThreePhase } from '../model/snapshot.js';
 import { registersToString, toCenti, toDeci, toInt16, toOffsetPowerFactor, toUint32 } from '../model/converters.js';
 import type { MeterCaches, RegisterCaches } from './read.js';
 
-function meter({ address, input, product }: MeterCaches): Meter | null {
+function meter({ slaveAddress, input, product }: MeterCaches): Meter | null {
   const get = (register: number) => input.get(register) ?? 0;
   const getProduct = (register: number) => product.get(register) ?? 0;
   const phases = (from: number, decode: (raw: number) => number): ThreePhase<number> =>
@@ -41,7 +41,7 @@ function meter({ address, input, product }: MeterCaches): Meter | null {
   }
 
   return {
-    slaveAddress: address,
+    slaveAddress,
     serialNumber: toUint32(getProduct(60), getProduct(61)),
     factoryCode: registersToString([getProduct(62), getProduct(63)]).replace(/\0/g, ''),
     meterType: getProduct(64),

@@ -115,7 +115,7 @@ describe('battery total fallback', () => {
   it('sums high-voltage stacks, which are separate packs (All in One capture)', () => {
     const aio = capture('all_in_one_arm620.log');
     expect(build(aio)).toMatchObject({ chargeTotalKwh: 2060.5, dischargeTotalKwh: 1401.4 });
-    const twoStacks: RegisterCaches = { ...aio, batteryStacks: [...aio.batteryStacks!, ...aio.batteryStacks!] };
+    const twoStacks: RegisterCaches = { ...aio, batteryStacks: [aio.batteryStacks![0], { ...aio.batteryStacks![0], index: 1 }] };
     expect(build(twoStacks)).toMatchObject({ chargeTotalKwh: 4121, dischargeTotalKwh: 2802.8 });
   });
 

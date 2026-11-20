@@ -183,16 +183,16 @@ export function buildBatteryStacks(registers: RegisterCaches): {
 } {
   const stacks: BatteryStack[] = [];
   const modules: HighVoltageBatteryModule[] = [];
-  (registers.batteryStacks ?? []).forEach(({ controlUnit, modules: moduleCaches }, stackIndex) => {
+  for (const { index: stackIndex, controlUnit, modules: moduleCaches } of registers.batteryStacks ?? []) {
     const stack = batteryStack(controlUnit, stackIndex);
     stacks.push(stack);
     const cells = perModule(stack.cellVoltageCount, stack.moduleCount, 24);
     const sensors = perModule(stack.cellTemperatureCount, stack.moduleCount, 24);
-    moduleCaches.forEach((cache, moduleIndex) => {
-      if (isPresentHighVoltageModule(cache)) {
-        modules.push(highVoltageModule(cache, stackIndex, moduleIndex, Math.min(cells, 24), Math.min(sensors, 24)));
+    for (const { index: moduleIndex, input } of moduleCaches) {
+      if (isPresentHighVoltageModule(input)) {
+        modules.push(highVoltageModule(input, stackIndex, moduleIndex, Math.min(cells, 24), Math.min(sensors, 24)));
       }
-    });
-  });
+    }
+  }
   return { stacks, modules };
 }

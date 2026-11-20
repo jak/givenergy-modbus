@@ -372,9 +372,15 @@ export interface LowVoltageBatteryModule {
  */
 export interface HighVoltageBatteryModule {
   kind: 'high_voltage';
-  /** Index of the stack (battery control unit) the module belongs to, from 0. */
+  /**
+   * Index of the stack (battery control unit) the module belongs to: its control unit's device
+   * address − 0x70. Taken from the address, so a stack that didn't answer leaves a gap.
+   */
   stack: number;
-  /** Index of the module within its stack, from 0. */
+  /**
+   * Index of the module within its stack: its device address − 0x50. Taken from the address,
+   * so a module that didn't answer leaves a gap rather than shifting the ones after it.
+   */
   index: number;
   /**
    * Module serial number, IR 114–118 (10 ASCII characters). On the All in One capture IR 114
@@ -415,7 +421,7 @@ export type BatteryStackStatus =
 
 /** A high-voltage battery stack, read from its battery control unit at device address 0x70 + n. */
 export interface BatteryStack {
-  /** Stack index, from 0. */
+  /** Stack index: the battery control unit's device address − 0x70. */
   index: number;
   /** Status, IR 70: 0 initialising, 1 precharge, 2 standby, 3 charging, 4 discharging, 5 error, 6 updating, 7 off, 8 production. */
   status: BatteryStackStatus;
