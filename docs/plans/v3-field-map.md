@@ -51,7 +51,7 @@ Input for `website/migration-v3.md` (Task 19). Every field of the 2.x `InverterS
 | `batteryChargeEnergyTodayKwh` | `s.battery.energy.chargeTodayKwh` | Gen1 now reads IR 183 instead of IR 36. |
 | `batteryDischargeEnergyTodayKwh` | `s.battery.energy.dischargeTodayKwh` | Gen1 now reads IR 182 instead of IR 37. |
 | `batteryChargeEnergyTotalKwh` | `s.battery.energy.chargeTotalKwh` | Now optional: absent when every battery source reads 0. No longer reads HR 4109–4112 (write-only seeds) or falls back to IR 27–28 (the AC charge total), and LV module totals are no longer summed across packs. |
-| `batteryDischargeEnergyTotalKwh` | `s.battery.energy.dischargeTotalKwh` | As above (no IR 29 fallback). Three-phase (IR 1390–1395) is optional the same way: absent when unread or when both read 0. Also no longer reads HR 180, which 2.x used as `discharge_total_2`: on the reference Gen3 HR 180–186 read 0x5858 ("XX"). The inverter fallback is IR 180 (input). |
+| `batteryDischargeEnergyTotalKwh` | `s.battery.energy.dischargeTotalKwh` | As above (no IR 29 fallback). Three-phase (IR 1390–1391 discharge, IR 1394–1395 charge; IR 1392–1393 aren't used) is optional the same way: absent when unread or when both read 0. Also no longer reads HR 180, which 2.x used as `discharge_total_2`: on the reference Gen3 HR 180–186 read 0x5858 ("XX"). The inverter fallback is IR 180 (input). |
 | `batteryThroughputTotalKwh` | `s.battery.energy.throughputTotalKwh` | Optional: single-phase only. |
 | `batteries: BatterySnapshot[]` | `s.battery.modules: BatteryModule[]` | `BatteryModule` is discriminated on `kind: 'low_voltage' \| 'high_voltage'`. |
 
@@ -106,6 +106,8 @@ Input for `website/migration-v3.md` (Task 19). Every field of the 2.x `InverterS
 ## Settings
 
 Settings come from the catalogue. Names follow the official app.
+
+Every gated setting (one with a `supported` gate in the catalogue) is optional in `Settings<L>` on both layouts, because the type marks a key optional when its definition has a gate, whatever the layout. On three-phase the HR 300-block twins (HR 1108, HR 1110) always pass their gate, so they are always present at runtime, but the type still has them optional.
 
 | 2.x | 3.x | Notes |
 |---|---|---|

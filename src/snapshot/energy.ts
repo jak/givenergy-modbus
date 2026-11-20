@@ -70,7 +70,7 @@ interface Totals {
  *
  * `undefined` when every source reads 0 or is missing. Not used, although 2.x read them:
  * HR 4109–4112 are write-only seed registers, not live totals; HR 180 is not a battery total
- * (it reads 0x5858 on the reference Gen3); and IR 27–28 is the AC charge total.
+ * (HR 180–186 all read 0x5858, "XX", on the reference Gen3); and IR 27–28 is the AC charge total.
  */
 function batteryTotals(registers: RegisterCaches): Totals | undefined {
   const { get: ir } = zeroFilledReader(registers.input);
