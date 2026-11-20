@@ -90,6 +90,18 @@ describe('meter scaling quirks', () => {
     expect(gen2.powerFactor).toEqual([0.005, 0, 0]);
   });
 
+  it('signs the meter total differently from grid power on three-phase, but the same on Gen2', () => {
+    // Three-phase: meter 0x01 IR 71 reads +3 W while grid.power (export − import) is −3 W.
+    // Gen2: meter 0x01 reads −4 W and the grid CT IR 30 is negative too (both importing).
+    // Not normalised: the meter values are as the meter reports them.
+    const threePhaseRegisters = capture('hybrid_3ph.log');
+    expect(threePhase.activePowerTotal).toBe(3);
+    expect(threePhaseRegisters.input.get(1079)).toBe(0);
+    expect(threePhaseRegisters.input.get(1080)).toBe(30); // import 3.0 W, so grid.power = −3
+    expect(gen2.activePowerTotal).toBe(-4);
+    expect(capture('hybrid_gen2_arm920.log').input.get(30)! > 0x7fff).toBe(true); // IR 30 negative
+  });
+
   it('reads current ÷100, although the three-phase meter 0x01 only fits V × I = S at ÷10', () => {
     // Quirk, not special-cased: phase 2 reads IR 64 = 32. At ÷100 that is 0.32 A, and
     // 231.2 V × 0.32 A = 74 VA against S = 741 VA; at ÷10 (3.2 A) it would be 740 VA.

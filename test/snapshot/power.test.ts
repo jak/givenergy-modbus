@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildEps, buildGrid, buildInverterOutput, buildLoad, buildSolar } from '../../src/snapshot/power.js';
+import { buildMeters } from '../../src/snapshot/meters.js';
 import {
   capture,
   contextFor,
@@ -125,16 +126,16 @@ describe('power groups on three-phase (hybrid_3ph capture)', () => {
     ]);
   });
 
-  it('grid: net of meter export and import, per-phase voltage and current', () => {
+  it('grid: net of meter export and import, per-phase voltage, current and power', () => {
     const grid = buildGrid(registers, context);
     expect(grid.power).toBe(-3); // import IR 1079–1080 = 30 (÷10)
     expect(grid.frequency).toBe(49.98);
     // Quirk: the per-phase grid voltages read about 400 V on this capture, the line-to-line
     // voltage, while the inverter's per-phase output voltages (IR 1094–1096) read about 232 V.
     expect(grid.phases).toEqual([
-      { voltage: 401.7, current: 2.8 },
-      { voltage: 401.3, current: 2.6 },
-      { voltage: 404, current: 2.8 },
+      { voltage: 401.7, current: 2.8, power: 0 },
+      { voltage: 401.3, current: 2.6, power: -536 },
+      { voltage: 404, current: 2.8, power: 533 },
     ]);
   });
 
@@ -157,15 +158,22 @@ describe('power groups on three-phase (hybrid_3ph capture)', () => {
     });
   });
 
-  it('load: total from IR 1089–1090; per-phase IR 1083–1085 is not exposed', () => {
-    const load = buildLoad(registers, context);
-    expect(load).toEqual({ power: 1636 }); // IR 1089–1090 = 16360, ÷10
-    // Quirk: research C names IR 1083–1085 per-phase load (signed W), but on this capture they
-    // read 0, −536 (65000 signed) and 533 W, which can't add up to the 1636 W total. The data
-    // contradicts the name, so `load.phases` doesn't exist.
-    const perPhase = [1083, 1084, 1085].map((a) => registers.input.get(a));
-    expect(perPhase).toEqual([0, 65000, 533]);
-    expect(0 + -536 + 533).not.toBeCloseTo(load.power, -2);
+  it('reads IR 1083–1085 as per-phase grid power, not per-phase load as research C names them', () => {
+    // On this capture they read 0, −536 (65000 signed) and 533 W. That can't be load (the total
+    // is 1636 W), but it sums exactly to grid.power (−3 W), and each phase is the negation of
+    // meter 0x01's per-phase active power (0 / 537 / −534 W, ±1 W of rounding).
+    expect([1083, 1084, 1085].map((a) => registers.input.get(a))).toEqual([0, 65000, 533]);
+    const grid = buildGrid(registers, context);
+    const phasePower = grid.phases.map((phase) => phase.power);
+    expect(phasePower.reduce((sum, power) => sum + power, 0)).toBe(grid.power);
+    const [meter] = buildMeters(registers);
+    expect(meter.slaveAddress).toBe(1);
+    expect(meter.activePower).toEqual([0, 537, -534]);
+    phasePower.forEach((power, phase) => expect(Math.abs(power + meter.activePower[phase])).toBeLessThanOrEqual(1));
+  });
+
+  it('load: total from IR 1089–1090, with no per-phase load', () => {
+    expect(buildLoad(registers, context)).toEqual({ power: 1636 }); // IR 1089–1090 = 16360, ÷10
   });
 
   it('eps: per-phase values from IR 1181–1192, power is their sum', () => {
