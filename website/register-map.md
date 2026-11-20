@@ -472,7 +472,7 @@ of them either.
 13. GivEnergy, *All in One Installation Manual*, June 2023, p. 15 (copy hosted by Plug in Solar):
     <https://pluginsolar.co.uk/wp-content/uploads/2023/06/all-in-one-installation-manual-june-2023-.pdf>
 14. `smartPower`, a captured GivEnergy cloud API inverter settings list:
-    <https://github.com/Alex-Skelton/smartPower/blob/main/project/example_responses/inverter_settings.json>
+    <https://github.com/Alex-Skelton/smartPower/blob/master/project/example_responses/inverter_settings.json>
 15. GivEnergy Community Forum, *RCD trips in AIO off-grid mode* (Wayback Machine snapshot):
     <https://web.archive.org/web/20260412201931/https://community-beta.givenergy.cloud/t/rcd-trips-in-aio-off-grid-mode/1049>
 16. GivEnergy Community Forum, *AIO Gateway force startup* (Wayback Machine snapshot):
