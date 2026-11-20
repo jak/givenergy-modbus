@@ -110,7 +110,7 @@ export const SETTINGS = {
   (see research doc, section B). Settings not in it are read-only.
 - **Unsafe settings.** Registers the official app exposes but no reference implementation
   has verified writing (HR 104 battery self-heating, HR 172 manual battery heater, HR 199
-  parallel mode, HR 331 force off grid) are marked `unsafe: true`. `setSetting` does not
+  parallel mode as an integer 0–4, HR 331 force off grid; risk notes in research doc section F) are marked `unsafe: true`. `setSetting` does not
   accept them at compile time; they are written only through
   `unsafe_setSetting(key, value)`, whose JSDoc carries the risk notes.
 - `setSetting` validates, encodes, writes one holding register, then updates the local
