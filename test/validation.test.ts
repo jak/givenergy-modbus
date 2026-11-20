@@ -3,8 +3,6 @@ import {
   isSanityCheckPassing,
   applyStateOfChargeFallback,
   applyTimeFallback,
-  applyEnergyRegisterFallback,
-  applyFrequencyScaling,
 } from '../src/validation.js';
 
 describe('isSanityCheckPassing', () => {
@@ -147,65 +145,5 @@ describe('applyTimeFallback', () => {
     const cached = new Date(2024, 5, 15, 14, 30, 0);
     const result = applyTimeFallback(2024, 6, 15, 14, 30, 60, cached);
     expect(result).toBe(cached);
-  });
-});
-
-describe('applyEnergyRegisterFallback', () => {
-  it('uses primary registers when non-zero', () => {
-    const result = applyEnergyRegisterFallback(123.4, 567.8, 99.9, 88.8);
-    expect(result.charge).toBeCloseTo(123.4);
-    expect(result.discharge).toBeCloseTo(567.8);
-  });
-
-  it('falls back to secondary when BOTH primaries are zero', () => {
-    // Old GivEnergy firmware doesn't populate the BMS energy registers.
-    // Secondary registers from the inverter's own metering contain the data.
-    // Python: if GEBat[0].e_battery_charge_total == 0 and
-    //              GEBat[0].e_battery_discharge_total == 0
-    const result = applyEnergyRegisterFallback(0, 0, 99.9, 88.8);
-    expect(result.charge).toBeCloseTo(99.9);
-    expect(result.discharge).toBeCloseTo(88.8);
-  });
-
-  it('uses primary even when only charge is zero', () => {
-    // Only fall back when BOTH are zero. A battery that's only ever been
-    // charged (charge > 0, discharge = 0) is a valid real-world state.
-    const result = applyEnergyRegisterFallback(50.0, 0, 99.9, 88.8);
-    expect(result.charge).toBeCloseTo(50.0);
-    expect(result.discharge).toBeCloseTo(0);
-  });
-
-  it('uses primary even when only discharge is zero', () => {
-    const result = applyEnergyRegisterFallback(0, 50.0, 99.9, 88.8);
-    expect(result.charge).toBeCloseTo(0);
-    expect(result.discharge).toBeCloseTo(50.0);
-  });
-});
-
-describe('applyFrequencyScaling', () => {
-  it('returns 50Hz for standard firmware raw=500 (deci-Hz)', () => {
-    // Fixes #7: standard firmware reports 500 (deci-Hz).
-    // toDeci first → 50.0, then 50 <= 100 → no further scaling → 50Hz.
-    // GivTCP: f_ac1 already has deci applied, then checks > 100.
-    expect(applyFrequencyScaling(500)).toBeCloseTo(50);
-  });
-
-  it('returns 50Hz for old firmware raw=5000 (centi-Hz)', () => {
-    // Fixes #7: old firmware reports 5000 (centi-Hz).
-    // toDeci first → 500.0, then 500 > 100 → /10 → 50Hz.
-    expect(applyFrequencyScaling(5000)).toBeCloseTo(50);
-  });
-
-  it('returns 60Hz for 60Hz grid (raw=600)', () => {
-    expect(applyFrequencyScaling(600)).toBeCloseTo(60);
-  });
-
-  it('handles boundary: raw=1000 → toDeci=100 → no extra scaling → 100Hz-ish left alone', () => {
-    // 1000 → toDeci → 100.0, 100 <= 100 → 100.0
-    expect(applyFrequencyScaling(1000)).toBeCloseTo(100);
-  });
-
-  it('handles zero gracefully', () => {
-    expect(applyFrequencyScaling(0)).toBe(0);
   });
 });

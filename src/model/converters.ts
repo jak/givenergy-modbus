@@ -7,7 +7,11 @@
  * Reference: GivTCP/givenergy_modbus_async/model/register.py Converter class
  */
 
-import type { TimeSlot } from './register-types.js';
+/** A start and end time of day, `"HH:MM"`. */
+export interface TimeSlot {
+  start: string;
+  end: string;
+}
 
 /** Divide by 1000 — millivolt, milliamp registers (e.g. battery cell voltages IR 60-75) */
 export function toMilli(raw: number): number {
@@ -78,7 +82,7 @@ export function toDuint8(raw: number): [number, number] {
 }
 
 /**
- * Convert a pair of raw register values to a TimeSlot.
+ * Convert a pair of raw register values to a start and end time.
  *
  * Register format: integer HHMM (e.g. 0 = 00:00, 30 = 00:30, 1630 = 16:30, 2359 = 23:59).
  * Used for charge/discharge time slots (e.g. HR 94-95, 56-57).
