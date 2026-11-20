@@ -163,6 +163,20 @@ describe('buildEnergy on three-phase (IR 1360–1413)', () => {
   });
 });
 
+describe('three-phase battery totals', () => {
+  const threePhase = (input: Record<number, number>) => {
+    const registers = registersOf({ 0: 0x4001 }, input);
+    return buildEnergy(registers, threePhaseContextFor(registers)).battery;
+  };
+
+  it('leaves the lifetime totals out when IR 1390–1395 are unread or read 0, as single-phase does', () => {
+    expect(threePhase({})).not.toHaveProperty('chargeTotalKwh');
+    expect(threePhase({})).not.toHaveProperty('dischargeTotalKwh');
+    expect(threePhase({ 1390: 0, 1391: 0, 1394: 0, 1395: 0 })).not.toHaveProperty('chargeTotalKwh');
+    expect(threePhase({ 1390: 0, 1391: 10, 1394: 0, 1395: 20 })).toMatchObject({ chargeTotalKwh: 2, dischargeTotalKwh: 1 });
+  });
+});
+
 describe.each(INVERTER_CAPTURES)('buildEnergy on capture $name', ({ name, inject }) => {
   it('decodes without throwing and gives plausible values', () => {
     const registers = capture(name, inject);

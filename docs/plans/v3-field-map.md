@@ -24,7 +24,7 @@ Input for `website/migration-v3.md` (Task 19). Every field of the 2.x `InverterS
 | 2.x | 3.x | Notes |
 |---|---|---|
 | `systemTime` | `s.status.systemTime` | |
-| `hoursOfOperation` | `s.status.hoursOfOperation` | Single-phase only (IR 47–48). Optional: absent when over 100 years, which marks a bad read (the HV Gen3 capture reads 723 million hours). |
+| `hoursOfOperation` | `s.status.hoursOfOperation` | Single-phase only (IR 47–48). Optional: absent unless IR 47 and IR 48 were both read, and when over 100 years, which marks a bad read (the HV Gen3 capture reads 723 million hours). |
 
 ## Solar
 
@@ -51,7 +51,7 @@ Input for `website/migration-v3.md` (Task 19). Every field of the 2.x `InverterS
 | `batteryChargeEnergyTodayKwh` | `s.battery.energy.chargeTodayKwh` | Gen1 now reads IR 183 instead of IR 36. |
 | `batteryDischargeEnergyTodayKwh` | `s.battery.energy.dischargeTodayKwh` | Gen1 now reads IR 182 instead of IR 37. |
 | `batteryChargeEnergyTotalKwh` | `s.battery.energy.chargeTotalKwh` | Now optional: absent when every battery source reads 0. No longer reads HR 4109–4112 (write-only seeds) or falls back to IR 27–28 (the AC charge total), and LV module totals are no longer summed across packs. |
-| `batteryDischargeEnergyTotalKwh` | `s.battery.energy.dischargeTotalKwh` | As above (no IR 29 fallback). Also no longer reads HR 180, which 2.x used as `discharge_total_2`: on the reference Gen3 HR 180–186 read 0x5858 ("XX"). The inverter fallback is IR 180 (input). |
+| `batteryDischargeEnergyTotalKwh` | `s.battery.energy.dischargeTotalKwh` | As above (no IR 29 fallback). Three-phase (IR 1390–1395) is optional the same way: absent when unread or when both read 0. Also no longer reads HR 180, which 2.x used as `discharge_total_2`: on the reference Gen3 HR 180–186 read 0x5858 ("XX"). The inverter fallback is IR 180 (input). |
 | `batteryThroughputTotalKwh` | `s.battery.energy.throughputTotalKwh` | Optional: single-phase only. |
 | `batteries: BatterySnapshot[]` | `s.battery.modules: BatteryModule[]` | `BatteryModule` is discriminated on `kind: 'low_voltage' \| 'high_voltage'`. |
 
@@ -121,7 +121,7 @@ Settings come from the catalogue. Names follow the official app.
 
 | 2.x | 3.x | Notes |
 |---|---|---|
-| `chargeSlots` | `s.schedules.charge` | Always `TimeSlotConfig[]`; `targetStateOfCharge` is optional and present when `capabilities.perSlotTargets` (never on three-phase slots 1/2). Slot counts follow `capabilities.tenSlots`, not generation: 10, or 2 on legacy firmware (2.x Gen2 had 1 charge slot; slot 2 is HR 31/32). Three-phase now has 10 slots when `tenSlots` (2.x had 2). |
+| `chargeSlots` | `s.schedules.charge` | Always `TimeSlotConfig[]`; `targetStateOfCharge` is optional and present when `capabilities.perSlotTargets` (never on three-phase slots 1/2). Slot counts follow `capabilities.tenSlots`, not generation: 10, or 2 on legacy firmware (2.x Gen2 had 1 charge slot; slot 2 is HR 31/32). Three-phase now has 10 slots when `tenSlots` (2.x had 2). **Changed:** a slot whose start or end register is unread is left out, and so is an unread target; 2.x zero-filled them into `00:00`–`00:00` slots with 0 % targets (three-phase slots 3–10 and AC charge slot 1 on the captures). The full poll reads every slot register, so this only happens with partial data, and then array position no longer matches the slot number. |
 | `dischargeSlots` | `s.schedules.discharge` | As above. |
 | `batteryPauseMode` (Gen3) | `s.schedules.batteryPause.mode` | Single-phase only, optional (`capabilities.pauseMode`). Values renamed: `disabled` → `off`, `pause_charge` → `charge`, `pause_discharge` → `discharge`, `pause_both` → `both`. An unnamed HR 318 value is now `unknown` (2.x read it as `disabled`). |
 | `timedDischargeSlot` (Gen3) | `s.schedules.batteryPause.start` / `.end` | Optional (`capabilities.pauseWindow`). **Fixed:** 2.x had HR 319/320 swapped; 3.x reads HR 319 as start and HR 320 as end, as the app shows them. |
@@ -135,6 +135,7 @@ Settings come from the catalogue. Names follow the official app.
 
 | 2.x | 3.x | Notes |
 |---|---|---|
+| `serialNumber`, `factoryCode`, `meterType`, `hardwareVersion`, `softwareVersion` | same | Now optional: each is absent when its function 22 product registers (60–66) weren't read. 2.x zero-filled them (the Gen2 capture's meter never answers function 22). |
 | `importReactiveEnergy` | `importReactiveEnergyKvarh` | Unit suffix added. |
 | `exportReactiveEnergy` | `exportReactiveEnergyKvarh` | Unit suffix added. |
 | `apparentPower`, `apparentPowerTotal` | same | Still raw VA, as in 2.x, but now unsigned (2.x read them signed, which wraps above 32767 VA). "Apparent power ÷10" (research C, the external library) was considered and rejected: on every capture single-phase V × I matches the raw value, and ÷10 would put three-phase apparent power below the active power. |

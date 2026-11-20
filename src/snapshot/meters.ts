@@ -6,9 +6,33 @@ import type { Meter, ThreePhase } from '../model/snapshot.js';
 import { registersToString, toCenti, toDeci, toInt16, toOffsetPowerFactor, toUint32 } from '../model/converters.js';
 import type { MeterCaches, RegisterCaches } from './read.js';
 
+type ProductInformation = Pick<Meter, 'serialNumber' | 'factoryCode' | 'meterType' | 'hardwareVersion' | 'softwareVersion'>;
+
+/**
+ * The function 22 product fields whose registers were read. A meter that didn't answer
+ * function 22 (the Gen2 capture's) has none, rather than zero-filled ones.
+ */
+function productInformation(product: Map<number, number>): ProductInformation {
+  const read = (...registers: number[]) => {
+    const values = registers.map((register) => product.get(register));
+    return values.every((value) => value !== undefined) ? (values as number[]) : undefined;
+  };
+  const serial = read(60, 61);
+  const factory = read(62, 63);
+  const [meterType] = read(64) ?? [];
+  const [hardwareVersion] = read(65) ?? [];
+  const [softwareVersion] = read(66) ?? [];
+  return {
+    ...(serial ? { serialNumber: toUint32(serial[0], serial[1]) } : {}),
+    ...(factory ? { factoryCode: registersToString(factory).replace(/\0/g, '') } : {}),
+    ...(meterType !== undefined ? { meterType } : {}),
+    ...(hardwareVersion !== undefined ? { hardwareVersion } : {}),
+    ...(softwareVersion !== undefined ? { softwareVersion } : {}),
+  };
+}
+
 function meter({ slaveAddress, input, product }: MeterCaches): Meter | null {
   const get = (register: number) => input.get(register) ?? 0;
-  const getProduct = (register: number) => product.get(register) ?? 0;
   const phases = (from: number, decode: (raw: number) => number): ThreePhase<number> =>
     [decode(get(from)), decode(get(from + 1)), decode(get(from + 2))];
   const signed = (raw: number) => toInt16(raw);
@@ -42,11 +66,7 @@ function meter({ slaveAddress, input, product }: MeterCaches): Meter | null {
 
   return {
     slaveAddress,
-    serialNumber: toUint32(getProduct(60), getProduct(61)),
-    factoryCode: registersToString([getProduct(62), getProduct(63)]).replace(/\0/g, ''),
-    meterType: getProduct(64),
-    hardwareVersion: getProduct(65),
-    softwareVersion: getProduct(66),
+    ...productInformation(product),
     voltage,
     current: phases(63, toCenti),
     activePower,

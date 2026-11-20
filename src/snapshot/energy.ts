@@ -94,6 +94,18 @@ function batteryTotals(registers: RegisterCaches): Totals | undefined {
   return undefined;
 }
 
+/**
+ * Three-phase lifetime battery charge (IR 1394–1395) and discharge (IR 1390–1391), uint32 ÷10.
+ * Absent when either is unread or both read 0, as `batteryTotals` treats single-phase.
+ */
+function threePhaseBatteryTotals(registers: RegisterCaches): Pick<BatteryEnergy, 'chargeTotalKwh' | 'dischargeTotalKwh'> {
+  const read = [1390, 1391, 1394, 1395].every((address) => readInput(registers, address) !== undefined);
+  if (!read) return {};
+  const charge = deciUint32(registers.input, 1394);
+  const discharge = deciUint32(registers.input, 1390);
+  return charge !== 0 || discharge !== 0 ? { chargeTotalKwh: charge, dischargeTotalKwh: discharge } : {};
+}
+
 export function buildEnergy(registers: RegisterCaches, context: SinglePhaseBuildContext): SinglePhaseEnergy;
 export function buildEnergy(registers: RegisterCaches, context: ThreePhaseBuildContext): ThreePhaseEnergy;
 export function buildEnergy(registers: RegisterCaches, context: BuildContext): SinglePhaseEnergy | ThreePhaseEnergy;
@@ -121,8 +133,7 @@ export function buildEnergy(registers: RegisterCaches, context: BuildContext): S
       battery: {
         chargeTodayKwh: counter(1392),
         dischargeTodayKwh: counter(1388),
-        chargeTotalKwh: counter(1394),
-        dischargeTotalKwh: counter(1390),
+        ...threePhaseBatteryTotals(registers),
       },
     };
   }
