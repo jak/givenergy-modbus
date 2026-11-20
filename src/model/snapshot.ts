@@ -240,16 +240,17 @@ export interface BatteryEnergy {
    * Lifetime energy charged, kWh. Single-phase, the first source where charge and discharge
    * aren't both 0: HV battery stacks summed (BCU IR 82–83 uint32 ÷10); the first LV battery
    * module's IR 106 ÷10 (a stack-level value every pack repeats, so not summed; wraps at
-   * 6553.5); inverter IR 181 ÷10; IR 27–28 uint32 ÷10. HR 4109–4112 are write-only seed
-   * registers, not live totals, and are not used. Three-phase IR 1394–1395 uint32 ÷10.
+   * 6553.5); inverter IR 181 ÷10. Absent when every source reads 0 or is missing. Not used:
+   * HR 4109–4112 (write-only seed registers, not live totals) and IR 27–28 (the AC charge
+   * total, which 2.x fell back to). Three-phase IR 1394–1395 uint32 ÷10.
    */
-  chargeTotalKwh: number;
+  chargeTotalKwh?: number;
   /**
    * Lifetime energy discharged, kWh. Same fallback chain as `chargeTotalKwh`, using BCU
-   * IR 84–85, module IR 105, inverter IR 180, then IR 29 (all ÷10). Not HR 180, which 2.x
-   * used: it reads 0x5858 ("XX") on the reference Gen3. Three-phase IR 1390–1391 uint32 ÷10.
+   * IR 84–85, module IR 105, then inverter IR 180 (all ÷10). Not HR 180 or IR 29, which 2.x
+   * used: HR 180 reads 0x5858 ("XX") on the reference Gen3. Three-phase IR 1390–1391 uint32 ÷10.
    */
-  dischargeTotalKwh: number;
+  dischargeTotalKwh?: number;
   /** Lifetime battery throughput, kWh. Single-phase IR 6–7 uint32 ÷10. Absent on three-phase. */
   throughputTotalKwh?: number;
 }

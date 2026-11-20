@@ -50,8 +50,8 @@ Input for `website/migration-v3.md` (Task 19). Every field of the 2.x `InverterS
 | `chargerTemperature` | `s.battery.chargerTemperature` | Single-phase only. Now read as signed. |
 | `batteryChargeEnergyTodayKwh` | `s.battery.energy.chargeTodayKwh` | Gen1 now reads IR 183 instead of IR 36. |
 | `batteryDischargeEnergyTodayKwh` | `s.battery.energy.dischargeTodayKwh` | Gen1 now reads IR 182 instead of IR 37. |
-| `batteryChargeEnergyTotalKwh` | `s.battery.energy.chargeTotalKwh` | No longer reads HR 4109–4112 (write-only seeds), and LV module totals are no longer summed across packs. |
-| `batteryDischargeEnergyTotalKwh` | `s.battery.energy.dischargeTotalKwh` | As above. Also no longer reads HR 180, which 2.x used as `discharge_total_2`: on the reference Gen3 HR 180–186 read 0x5858 ("XX"). The inverter fallback is IR 180 (input). |
+| `batteryChargeEnergyTotalKwh` | `s.battery.energy.chargeTotalKwh` | Now optional: absent when every battery source reads 0. No longer reads HR 4109–4112 (write-only seeds) or falls back to IR 27–28 (the AC charge total), and LV module totals are no longer summed across packs. |
+| `batteryDischargeEnergyTotalKwh` | `s.battery.energy.dischargeTotalKwh` | As above (no IR 29 fallback). Also no longer reads HR 180, which 2.x used as `discharge_total_2`: on the reference Gen3 HR 180–186 read 0x5858 ("XX"). The inverter fallback is IR 180 (input). |
 | `batteryThroughputTotalKwh` | `s.battery.energy.throughputTotalKwh` | Optional: single-phase only. |
 | `batteries: BatterySnapshot[]` | `s.battery.modules: BatteryModule[]` | `BatteryModule` is discriminated on `kind: 'low_voltage' \| 'high_voltage'`. |
 

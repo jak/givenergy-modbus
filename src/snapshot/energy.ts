@@ -68,12 +68,12 @@ interface Totals {
  * 2. The first low-voltage battery module with a serial: IR 106 charge, IR 105 discharge, ÷10.
  *    These are stack totals that every pack repeats, so they are not summed. They wrap at 6553.5.
  * 3. Inverter IR 181 charge, IR 180 discharge, ÷10 (Gen1; read 0 on Gen2).
- * 4. IR 27–28 charge (uint32 ÷10), IR 29 discharge (÷10), as 2.x did.
  *
- * Not used: HR 4109–4112 are write-only seed registers, not live totals, and HR 180 is not a
- * battery total (it reads 0x5858 on the reference Gen3); 2.x read both.
+ * `undefined` when every source reads 0 or is missing. Not used, although 2.x read them:
+ * HR 4109–4112 are write-only seed registers, not live totals; HR 180 is not a battery total
+ * (it reads 0x5858 on the reference Gen3); and IR 27–28 is the AC charge total.
  */
-function batteryTotals(registers: RegisterCaches): Totals {
+function batteryTotals(registers: RegisterCaches): Totals | undefined {
   const ir = (address: number) => readInput(registers, address) ?? 0;
   const candidates: Array<() => Totals | undefined> = [
     () => {
@@ -95,7 +95,7 @@ function batteryTotals(registers: RegisterCaches): Totals {
     const totals = candidate();
     if (totals && (totals.charge !== 0 || totals.discharge !== 0)) return totals;
   }
-  return { charge: toDeci(toUint32(ir(27), ir(28))), discharge: toDeci(ir(29)) };
+  return undefined;
 }
 
 export function buildEnergy(registers: RegisterCaches, context: SinglePhaseBuildContext): SinglePhaseEnergy;
@@ -167,8 +167,7 @@ export function buildEnergy(registers: RegisterCaches, context: BuildContext): S
     battery: {
       chargeTodayKwh: deci(gen1 ? 183 : 36),
       dischargeTodayKwh: deci(gen1 ? 182 : 37),
-      chargeTotalKwh: totals.charge,
-      dischargeTotalKwh: totals.discharge,
+      ...(totals ? { chargeTotalKwh: totals.charge, dischargeTotalKwh: totals.discharge } : {}),
       throughputTotalKwh: counter(6),
     },
   };

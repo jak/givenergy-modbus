@@ -64,7 +64,8 @@ describe('buildEnergy on the Gen3 reference unit', () => {
     withoutHr180.holding.delete(180);
     const context = singlePhaseContextFor(registers);
     expect(buildEnergy(withoutModule, context).battery).toEqual(buildEnergy(withoutHr180, context).battery);
-    expect(buildEnergy(withoutModule, context).battery.dischargeTotalKwh).toBe(0); // IR 29 = 0
+    // IR 180/181 read 0 on this unit, so with no module there is no battery total at all.
+    expect(buildEnergy(withoutModule, context).battery).not.toHaveProperty('dischargeTotalKwh');
   });
 });
 
@@ -102,11 +103,13 @@ describe('battery total fallback', () => {
     expect(build(gen1)).toMatchObject({ chargeTotalKwh: 1843, dischargeTotalKwh: 1571.1 });
   });
 
-  it('falls back to IR 27–28 / IR 29 last', () => {
-    expect(build(registersOf(base, { 27: 1, 28: 4, 29: 70 }))).toMatchObject({
-      chargeTotalKwh: 6554,
-      dischargeTotalKwh: 7,
-    });
+  it('leaves the totals out rather than show IR 27–28, which is the AC charge total, not a battery total', () => {
+    // 2.x fell back to IR 27–28 / IR 29 last. IR 27–28 is "AC charge total" in the app
+    // (website/register-map.md section 2), so the totals are absent when every battery source is 0.
+    const battery = build(registersOf(base, { 27: 1, 28: 4, 29: 70 }));
+    expect(battery).not.toHaveProperty('chargeTotalKwh');
+    expect(battery).not.toHaveProperty('dischargeTotalKwh');
+    expect(build(registersOf(base))).not.toHaveProperty('chargeTotalKwh');
   });
 
   it('sums high-voltage stacks, which are separate packs (All in One capture)', () => {
