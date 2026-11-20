@@ -94,7 +94,12 @@ export class Client {
     });
   }
 
-  async sendRequest(frame: Buffer): Promise<number[]> {
+  /**
+   * Send a request and resolve with the matched reply's register values. A timed-out attempt is
+   * retried `options.retries` times (default: the client's `retries`), 500 ms apart.
+   */
+  async sendRequest(frame: Buffer, options: { retries?: number } = {}): Promise<number[]> {
+    const retries = options.retries ?? this.retries;
     if (!this.socket) throw new Error('not connected');
 
     // Frame layout: header(8) + serial(10) + padding(8) + slave(1) + fc(1) + base(2) + count/value(2) + crc(2)
@@ -109,12 +114,12 @@ export class Client {
       : shapeHash(slave, fc, base, count);
 
     let lastError: Error = new Error('timeout');
-    for (let attempt = 0; attempt <= this.retries; attempt++) {
+    for (let attempt = 0; attempt <= retries; attempt++) {
       // Re-check on every attempt: the socket can die mid-cycle (a 'close'/'error'
       // handler nulls it), and there's no point retrying writes into a dead socket.
       if (!this.socket) throw new Error('not connected');
       if (attempt > 0) {
-        this.onDebug(`retry ${attempt}/${this.retries} for ${key}`);
+        this.onDebug(`retry ${attempt}/${retries} for ${key}`);
         await new Promise(r => setTimeout(r, 500)); // inter-retry delay
       }
       try {

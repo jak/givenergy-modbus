@@ -246,7 +246,7 @@ describe('PollManager', () => {
  * Short timeouts, no retries and no inter-read delay. A full refresh still waits out a timeout for
  * each empty battery and meter slot (13 on the reference unit), about a second.
  */
-const FAST: PollTiming = { requestTimeoutMs: 60, requestRetries: 0, interReadDelayMs: 0, pushSoakMs: 30 };
+const FAST: PollTiming = { requestTimeoutMs: 60, requestRetries: 0, scanRetries: 1, retryDelayMs: 0, interReadDelayMs: 0, pushSoakMs: 30 };
 
 const isInverterRead = (request: MockRequest, functionCode: number, base: number) =>
   request.slaveAddress === 0x11 && request.functionCode === functionCode && request.baseRegister === base;
@@ -260,7 +260,10 @@ describe('PollManager against a mock inverter', { timeout: 20_000 }, () => {
     for (const step of cleanup.splice(0).reverse()) await step();
   });
 
-  async function setUp(devices: Map<number, MockDevice>, options: { silent?: (request: MockRequest) => boolean; fullRefreshIntervalMs?: number } = {}) {
+  async function setUp(
+    devices: Map<number, MockDevice>,
+    options: { silent?: (request: MockRequest) => boolean; fullRefreshIntervalMs?: number; timing?: Partial<PollTiming> } = {},
+  ) {
     const mock = await startMockInverter({ devices, silent: options.silent });
     cleanup.push(() => mock.close());
     const pm = new PollManager({
@@ -269,7 +272,7 @@ describe('PollManager against a mock inverter', { timeout: 20_000 }, () => {
       pollIntervalMs: 3_600_000, // the tests poll by hand
       fullRefreshIntervalMs: options.fullRefreshIntervalMs ?? 0, // every poll is a full refresh
       autoReconnect: false,
-      timing: FAST,
+      timing: { ...FAST, ...options.timing },
     });
     cleanup.push(() => pm.stop());
     const debug: string[] = [];
@@ -328,7 +331,7 @@ describe('PollManager against a mock inverter', { timeout: 20_000 }, () => {
       await pm.start();
       expect(pm.getData().battery.modules).toHaveLength(2);
       const scanned = mock.requests.filter((request) => request.slaveAddress >= 0x32 && request.slaveAddress <= 0x37);
-      expect(scanned.map((request) => request.slaveAddress)).toEqual([0x32, 0x33, 0x34, 0x35, 0x36, 0x37]);
+      expect([...new Set(scanned.map((request) => request.slaveAddress))]).toEqual([0x32, 0x33, 0x34, 0x35, 0x36, 0x37]);
     });
   });
 
@@ -536,6 +539,91 @@ describe('PollManager against a mock inverter', { timeout: 20_000 }, () => {
       await poll();
       expect(data).toHaveLength(1);
       expect((pm as unknown as { _failCount: number })._failCount).toBe(0);
+    });
+  });
+
+  describe('slow and pushed replies', () => {
+    const isRead = (request: MockRequest, slave: number, functionCode: number, base: number) =>
+      request.slaveAddress === slave && request.functionCode === functionCode && request.baseRegister === base;
+    const count = (mock: MockInverter, slave: number, functionCode: number, base: number) =>
+      mock.requests.filter((request) => isRead(request, slave, functionCode, base)).length;
+
+    /** The reference unit plus the Gen2 capture's single-phase meter at 0x01. */
+    function devicesWithMeter() {
+      const devices = referenceDevices();
+      const [meter] = capture('hybrid_gen2_arm920.log').meters!;
+      devices.set(0x01, { input: meter.input, product: new Map([[60, 1], [61, 2], [62, 0x4142]]) });
+      return devices;
+    }
+
+    it('quirk: does not request a block the inverter pushed this poll, which it would not answer', async () => {
+      // Seen on a Gen3: IR 0 and IR 180 arrive as push data before they are requested, and the
+      // explicit IR 0 request then times out on every attempt (42 s on the real device).
+      const devices = referenceDevices();
+      const inverter = devices.get(0x11)!;
+      const { mock, pm, debug } = await setUp(devices, {
+        silent: (request) => {
+          if (isRead(request, 0x11, 0x03, 0)) {
+            mock.push(0x11, 0x04, 0, mock.valuesOf(inverter, 0x04, 0, 60)!);
+            mock.push(0x11, 0x04, 180, mock.valuesOf(inverter, 0x04, 180, 60)!);
+          }
+          return isRead(request, 0x11, 0x04, 0) || isRead(request, 0x11, 0x04, 180);
+        },
+      });
+      await pm.start();
+      expect(count(mock, 0x11, 0x04, 0)).toBe(0);
+      expect(count(mock, 0x11, 0x04, 180)).toBe(0);
+      expect(debug).toContain('IR 0–59 filled from push data; not requesting it');
+      expect(pm.getData().battery.stateOfCharge).toBe(reference().input.get(59));
+    });
+
+    it('quirk: takes a reply that arrives after its attempt timed out, instead of retrying', async () => {
+      // Seen on a Gen3: meter replies arrive just after the client's timeout, when no request is
+      // pending for them, and 2.x sent yet another retry.
+      const devices = devicesWithMeter();
+      const meter = devices.get(0x01)!;
+      let first = true;
+      const { mock, pm } = await setUp(devices, {
+        // The reply arrives 20 ms after the 60 ms timeout, during the 100 ms before the retry.
+        timing: { retryDelayMs: 100 },
+        silent: (request) => {
+          if (!isRead(request, 0x01, 0x04, 60) || !first) return false;
+          first = false;
+          setTimeout(() => mock.push(0x01, 0x04, 60, mock.valuesOf(meter, 0x04, 60, 29)!), 80);
+          return true;
+        },
+      });
+      await pm.start();
+      expect(count(mock, 0x01, 0x04, 60)).toBe(1);
+      expect(pm.getData().meters.map((m) => m.slaveAddress)).toEqual([1]);
+    });
+
+    it('stops requesting silent meter addresses and battery slots after three full refreshes', async () => {
+      const { mock, pm, poll, debug } = await setUp(devicesWithMeter());
+      await pm.start();
+      await poll();
+      await poll();
+      // Two attempts (one scan retry) on each of three full refreshes.
+      expect(count(mock, 0x02, 0x04, 60)).toBe(6);
+      expect(count(mock, 0x33, 0x04, 60)).toBe(6);
+      expect(debug).toContain('slave 0x02 IR 60–88 unanswered 3 polls in a row; no longer requesting it');
+
+      mock.requests.length = 0;
+      await poll();
+      const scanned = [...new Set(mock.requests.filter((request) => request.slaveAddress !== 0x11).map((request) => request.slaveAddress))];
+      expect(scanned).toEqual([0x32, 0x01]);
+      expect(pm.getData().meters).toHaveLength(1);
+      expect(pm.getData().battery.modules).toHaveLength(1);
+    });
+
+    it('reads meter product registers once per session, and only for meters that answered', async () => {
+      const { mock, pm, poll } = await setUp(devicesWithMeter());
+      await pm.start();
+      await poll();
+      await poll();
+      expect(count(mock, 0x01, 0x16, 60)).toBe(1);
+      expect(mock.requests.filter((request) => request.functionCode === 0x16 && request.slaveAddress !== 0x01)).toEqual([]);
+      expect(pm.getData().meters[0]).toMatchObject({ serialNumber: 0x10002, factoryCode: 'AB' });
     });
   });
 
