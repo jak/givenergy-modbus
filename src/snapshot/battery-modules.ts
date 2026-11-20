@@ -36,16 +36,11 @@ export function isPresentModule(cache: Cache): boolean {
 }
 
 /**
- * IR 95 (average pack current) is only meaningful on Gen3 and AC inverters with ARM firmware
- * ≥ 214 and BMS firmware 3020–3999 or ≥ 4009 (research C); elsewhere it reports noise.
+ * IR 95 (average pack current) is not exposed: a Gen3 ARM 316 with BMS 4009, which research C's
+ * rule trusts, read 6132 (61.32 A) while the inverter's battery current was 13.77 A. See
+ * docs/plans/v3-field-map.md, "Registers not exposed".
  */
-function trustsModuleCurrent(context: BuildContext, bmsFirmwareVersion: number): boolean {
-  if (context.model !== 'hybrid_gen3' && context.model !== 'ac') return false;
-  if (context.armFirmwareVersion < 214) return false;
-  return (bmsFirmwareVersion >= 3020 && bmsFirmwareVersion <= 3999) || bmsFirmwareVersion >= 4009;
-}
-
-function lowVoltageModule(cache: Cache, trustCurrent: (bms: number) => boolean): LowVoltageBatteryModule {
+function lowVoltageModule(cache: Cache): LowVoltageBatteryModule {
   const { get, uint32, text } = zeroFilledReader(cache);
   const firmwareVersion = get(98);
   const mosfetFlags = toDuint8(get(91))[0];
@@ -56,7 +51,6 @@ function lowVoltageModule(cache: Cache, trustCurrent: (bms: number) => boolean):
     stateOfCharge: get(100),
     voltage: toMilli(get(80)),
     outputVoltage: toMilli(uint32(82)),
-    ...(trustCurrent(firmwareVersion) ? { current: toCenti(toInt16(get(95))) } : {}),
     cycleCount: get(96),
     cellCount: get(97),
     cellVoltages: range(60, 16).map((address) => toMilli(get(address))),
@@ -83,7 +77,7 @@ function lowVoltageModule(cache: Cache, trustCurrent: (bms: number) => boolean):
 export function buildLowVoltageModules(registers: RegisterCaches, context: BuildContext): LowVoltageBatteryModule[] {
   return (registers.batteryModules ?? [])
     .filter(isPresentModule)
-    .map((cache) => lowVoltageModule(cache, (bms) => trustsModuleCurrent(context, bms)));
+    .map((cache) => lowVoltageModule(cache));
 }
 
 const STACK_STATUS: readonly BatteryStackStatus[] = [

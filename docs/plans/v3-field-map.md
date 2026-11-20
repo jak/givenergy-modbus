@@ -191,6 +191,7 @@ Settings come from the catalogue. Names follow the official app.
 | Three-phase IR 1068 (power factor) | Scaling unknown. |
 | Three-phase IR 1240–1241 (export power), IR 1244–1245 (meter 2 power), IR 1400–1403 (export 2 energy) | Meaning unknown. |
 | LV battery IR 115 | Meaning unknown. |
+| LV battery IR 95 (average pack current) | Wrong where research C says to trust it. The reference Gen3 (ARM 316, BMS 4009 at IR 98) read IR 95 = 6132, which is 61.32 A at ÷100, while the inverter's IR 51 read 13.77 A at 53.3 V and 744 W. No scaling fits. Exposed as `modules[].current` earlier in Phase C; removed. |
 | Meter product registers 67–68 (function 22) | The 2.x poll reads 60–68, but neither 2.x nor 3.x decodes 67–68; meaning unknown. |
 | HV battery control unit IR 79 (stack power) | Unit unknown: GivTCP shows it ÷1000 as kW, but the captures read −3 and −16 while voltage × current is about −380 W and −1750 W. `voltage` and `current` are exposed. |
 | HR 4141–4142 (inverter export total) | Not in any polled block. |

@@ -45,7 +45,6 @@ describe('buildBattery on the Gen3 reference unit', () => {
         stateOfCharge: 5,
         voltage: 50.112,
         outputVoltage: 49.881,
-        current: 0.34, // trusted: Gen3 ARM 316, BMS 4009
         cycleCount: 563,
         cellCount: 16,
         // Register map section 3: "16 cell voltages in mV (3.104–3.144 V)".
@@ -107,17 +106,13 @@ describe('battery quirks', () => {
     expect(modulesOf({ 0: 0x2001, 21: 316 }, [lvModule({ 103: EMPTY_SLOT_TEMPERATURE }), lvModule()])).toHaveLength(1);
   });
 
-  it('trusts the IR 95 current only on Gen3/AC ARM ≥ 214 with BMS 3020–3999 or ≥ 4009', () => {
-    const current = (holding: Record<number, number>, bms: number) =>
-      modulesOf(holding, [lvModule({ 95: 65536 - 150, 98: bms })])[0].current;
-    expect(current({ 0: 0x2001, 21: 316 }, 4009)).toBe(-1.5);
-    expect(current({ 0: 0x2001, 21: 316 }, 3020)).toBe(-1.5);
-    expect(current({ 0: 0x3001, 21: 214 }, 3999)).toBe(-1.5); // AC
-    expect(current({ 0: 0x2001, 21: 316 }, 4000)).toBeUndefined(); // BMS 4000–4008 excluded
-    expect(current({ 0: 0x2001, 21: 316 }, 3019)).toBeUndefined();
-    expect(current({ 0: 0x3001, 21: 213 }, 4009)).toBeUndefined(); // ARM too old
-    expect(current({ 0: 0x2001, 21: 920 }, 4009)).toBeUndefined(); // Gen2
-    expect(current({ 0: 0x2001, 21: 449 }, 4009)).toBeUndefined(); // Gen1
+  it('quirk: leaves out the IR 95 pack current, which disagreed with the inverter on a unit research C trusts', () => {
+    // Research C (from GivTCP's patch notes) trusted IR 95 on Gen3/AC ARM ≥ 214 with BMS
+    // 3020–3999 or ≥ 4009. The reference Gen3 (ARM 316, BMS 4009) later read IR 95 = 6132
+    // (61.32 A at ÷100) while IR 51 gave 13.77 A at 53.3 V, 744 W. No scaling fits, so the
+    // module current isn't exposed on any firmware.
+    const [module] = modulesOf({ 0: 0x2001, 21: 316 }, [lvModule({ 95: 6132, 98: 4009 })]);
+    expect(module).not.toHaveProperty('current');
   });
 
   it('reads capacities as uint32 ÷100 Ah', () => {
@@ -155,7 +150,7 @@ describe('LV captures', () => {
     expect(registers.batteryModules?.[2].get(105)).toBe(22003);
     const battery = buildBattery(registers, singlePhaseContextFor(registers));
     expect(battery.modules).toHaveLength(2);
-    expect(battery.modules.every((m) => m.kind === 'low_voltage' && m.current !== undefined)).toBe(true);
+    expect(battery.modules.every((m) => m.kind === 'low_voltage')).toBe(true);
   });
 });
 
