@@ -140,6 +140,31 @@ Settings come from the catalogue. Names follow the official app.
 | `apparentPower`, `apparentPowerTotal` | same | **Fixed:** now ÷10 (2.x read them raw). |
 | `ThreePhase<T>` (mutable tuple) | `ThreePhase<T>` (readonly tuple) | |
 
+## Design choices the migration guide should explain
+
+- **Per-phase values are exact per group.** Three-phase `grid.phases` is `{ voltage, current }`
+  (IR 1061–1066), `inverter.phases` is `{ voltage, power }` (IR 1091–1096), `eps.phases` is
+  `{ voltage, current, power }` (IR 1181–1192) and `load.phases` is `{ power }` (IR 1083–1085).
+  The inverter reports nothing else per phase, so no field is zero-filled. `ThreePhase<T>` is
+  `readonly [T, T, T]` (L1, L2, L3), the same shape as the meter's per-phase values.
+- **Battery modules are a union on `kind`.** `'low_voltage'` modules come from each BMS
+  (0x32–0x37); `'high_voltage'` modules (BMUs) carry `stack`, `index`, 24 cell voltages and
+  24 cell temperatures. Pack-level HV data (status, voltage, current, power, state of charge
+  min/max, state of health, energy, capacities, cycles, alarm words) lives in
+  `s.battery.stacks[]`, one per battery control unit. 2.x copied the stack's state of charge,
+  voltage and cycle count onto every HV module; 3.x copies nothing.
+- **Three-phase battery voltage** is IR 1133, the inverter side, matching single-phase IR 50.
+  The BMS reading, IR 1131, is `s.battery.batteryManagementSystemVoltage`. Three-phase has no
+  battery temperature register: IR 1128/1129/1130 are `s.inverter.heatsinkTemperature`,
+  `boostTemperature` and `buckBoostTemperature`.
+- **Grid vs inverter terminal.** On single-phase, `s.grid` holds only the grid CT power
+  (IR 30), voltage (IR 5, measured at the inverter terminal on the same AC bus), frequency
+  (IR 13) and energy. IR 43 (apparent power) and IR 58 (current) are measured at the
+  inverter's AC terminal, so they are `s.inverter.apparentPower` and
+  `s.inverter.terminalCurrent`. There is no `grid.current`; the CT meter has per-phase current.
+- **IR 44–46** are `s.inverter.energy.outputTodayKwh` / `outputTotalKwh`. On DC hybrids they
+  count PV generation; on AC and All in One models they echo the AC side.
+
 ## Dropped
 
 | 2.x | Why |

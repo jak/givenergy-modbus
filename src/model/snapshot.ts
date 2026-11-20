@@ -486,7 +486,10 @@ export interface Grid {
 }
 
 export interface SinglePhaseGrid extends Grid {
-  /** Grid voltage, V. IR 5 ÷10. */
+  /**
+   * Grid voltage, V. IR 5 ÷10. Measured at the inverter's AC terminal, which is on the same
+   * AC bus as the grid connection.
+   */
   voltage: number;
 }
 
@@ -510,9 +513,9 @@ export interface InverterEnergy {
   acChargeTotalKwh: number;
   /**
    * Energy out of the inverter's AC side today, kWh. Single-phase IR 44 ÷10; three-phase
-   * IR 1360–1361 uint32 ÷10. On single-phase DC hybrids this register counts PV generation,
-   * on AC and All in One models inverter output (research C); the app's consumption figure
-   * uses it either way.
+   * IR 1360–1361 uint32 ÷10. On single-phase DC hybrids this register counts PV generation;
+   * on AC and All in One models it echoes the AC side (inverter output) instead (research C).
+   * The app's consumption figure uses it either way.
    */
   outputTodayKwh: number;
   /** Lifetime inverter output energy, kWh. Single-phase IR 45–46 uint32 ÷10 (same caveat as `outputTodayKwh`); three-phase IR 1362–1363 uint32 ÷10. */
