@@ -356,6 +356,21 @@ protection settings (G98/G99, EN50549) that an installer sets, and they should n
   time, with the battery at 100 %. Another poster guesses PV only continues off-grid while the battery is
   under 80 %, and a third says off-grid running is limited to 6 kW sustained and that reconnecting to
   the grid was not always seamless.<sup>[8]</sup> Nothing confirms how it behaves on a Gen3 Hybrid.
+- **[manual]** It is an intended end-user feature for All in One systems with a Gateway. The AIO
+  installation manual lists "Off Grid Operation" as a work mode that remotely disconnects the home
+  from the grid from the app or portal.<sup>[13]</sup> GivEnergy's cloud API also exposed it to API-key
+  holders as setting 258, "Force Off Grid".<sup>[14]</sup> The v4.1.6 document calls the register
+  `GatewayOnOff`, range 0–255,<sup>[11]</sup> between HR 330 (Gateway command) and HR 332 (micro grid).
+- **[forum]** One AIO owner found forcing off-grid tripped an RCD. Replies pointed at the AIO's
+  neutral–earth bond, which isn't enabled by default; another owner fixed a similar trip with
+  RCBOs.<sup>[15]</sup>
+- **[forum]** In a power cut, an AIO + Gateway site ran its batteries down to the cutoff overnight.
+  The Gateway then shut down, PV couldn't restart without grid voltage, and the settings couldn't be
+  changed because the Gateway was off.<sup>[16]</sup> A forced off-grid state that is never cleared
+  could end the same way.
+- Nothing says whether it clears itself. On a Gen3 Hybrid without a Gateway it is unknown whether it
+  does anything; if it opens the grid relay, only the EPS output (HR 317) would stay powered. This
+  library treats it as unsafe to write.
 
 ### Smart Load, General Load and Generator (HR 540–573)
 
@@ -396,6 +411,29 @@ which doesn't fit a 20 % default. That remains unresolved.
 - **[maintainer]** This is for All in One units running in parallel with a Gateway. On a standalone
   Gen3 Hybrid it reads 0 (off). This contradicts GivTCP's label, `enable_standard_self_consumption_logic`.
   The app itself shows only the toggle, with no description.
+- **[manual]** The v4.1.6 document calls it `ParaOutputMode` with values **0–4**, so it isn't a simple
+  on/off setting despite the app's toggle.<sup>[11]</sup> HR 198 is `BatParaMode` (0–1) and IR 29 also
+  carries a parallel output mode.
+- **[manual]** GivEnergy's AIO parallel guide says all configuration is done at the Gateway: its
+  "Configure Inverter" step puts the AIOs into parallel mode and reboots them. AIO firmware D612-A612+
+  and Gateway firmware v10+ are required, up to 3 AIOs.<sup>[17]</sup>
+- Values 2–4 are undocumented, and nobody has reported writing this on a standalone inverter.
+  This library treats it as unsafe to write.
+
+### Battery heaters (HR 104 / HR 172)
+
+- **[manual]** GivEnergy says its batteries "do not have active internal heating".<sup>[18]</sup>
+  No GivEnergy battery datasheet lists a heater.
+- **HR 104** "Enable Battery Self-Heating": the v4.1.6 document marks HR 104–107 reserved and
+  read-only.<sup>[11]</sup> On three-phase models HR 104 is a grid power adjustment (calibration) value.
+  **[library]** On one AC-coupled system the inverter answered a write of 1 to HR 104 with an
+  error, and the owner couldn't change it from the app or portal either.<sup>[19]</sup>
+- **HR 172** "Enable Manual Battery Heater": the v4.1.6 document marks HR 165–173 reserved, and the
+  installer app doesn't list it. **[library]** On the same system the write was accepted but read
+  back off.<sup>[19]</sup> HR 174/175 are "wake battery" and "activate battery".
+- Both read 0 on the reference unit. No successful write of either has been reported. This library
+  treats both as unsafe to write: if a manual heater did exist, nothing documents an automatic
+  cut-off.
 
 ### Not found in any source
 
@@ -431,6 +469,20 @@ of them either.
     <https://github.com/britkat1980/givenergy-modbus/blob/a556333bb7ac1589d7c266ed9cdf5cdfafba44e8/docs/reference/registers/v4.1.6_inventory.json>
 12. `givenergy-modbus`, holding register block 300–359 decode:
     <https://github.com/britkat1980/givenergy-modbus/blob/a556333bb7ac1589d7c266ed9cdf5cdfafba44e8/givenergy_modbus/model/inverter.py#L747-L823>
+13. GivEnergy, *All in One Installation Manual*, June 2023, p. 15 (copy hosted by Plug in Solar):
+    <https://pluginsolar.co.uk/wp-content/uploads/2023/06/all-in-one-installation-manual-june-2023-.pdf>
+14. `smartPower`, a captured GivEnergy cloud API inverter settings list:
+    <https://github.com/Alex-Skelton/smartPower/blob/main/project/example_responses/inverter_settings.json>
+15. GivEnergy Community Forum, *RCD trips in AIO off-grid mode* (Wayback Machine snapshot):
+    <https://web.archive.org/web/20260412201931/https://community-beta.givenergy.cloud/t/rcd-trips-in-aio-off-grid-mode/1049>
+16. GivEnergy Community Forum, *AIO Gateway force startup* (Wayback Machine snapshot):
+    <https://web.archive.org/web/20260412202055/https://community-beta.givenergy.cloud/t/aio-gateway-force-startup/4332>
+17. GivEnergy, *AIO Parallel Connection Guide*:
+    <https://givenergy.com/resource-hub/installer-guides/aio-parallel-connection-guide/>
+18. GivEnergy, *Cold weather troubleshooting guide for GivEnergy batteries*:
+    <https://givenergy2025.zohodesk.eu/portal/en/kb/articles/cold-weather-troubleshooting-guide-for-givenergy-batteries>
+19. `givenergy-hass` issue #52, *Add EMS device support* (comments on self heating and the manual battery heater on an AC-coupled system):
+    <https://github.com/dewet22/givenergy-hass/issues/52>
 
 ---
 
