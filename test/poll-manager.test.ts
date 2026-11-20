@@ -4,7 +4,7 @@ import { UnsupportedDeviceError } from '../src/errors.js';
 import type { InverterSnapshot } from '../src/model/snapshot.js';
 import { buildSnapshot } from '../src/snapshot/index.js';
 import { capture, contextFor, reference } from './helpers/snapshot-fixtures.js';
-import { inverterReads, startMockInverter, type MockDevice, type MockInverter, type MockRequest } from './helpers/mock-inverter.js';
+import { devicesOf, inverterReads, startMockInverter, type MockDevice, type MockInverter, type MockRequest } from './helpers/mock-inverter.js';
 
 // A real v3 snapshot of the reference unit, for the tests that drive the result handling directly.
 const mockSnapshot: InverterSnapshot = buildSnapshot(reference(), contextFor(reference()))!;
@@ -252,13 +252,7 @@ const isInverterRead = (request: MockRequest, functionCode: number, base: number
   request.slaveAddress === 0x11 && request.functionCode === functionCode && request.baseRegister === base;
 
 /** The reference unit: the inverter at 0x11 and its one battery module at 0x32. */
-function referenceDevices(): Map<number, MockDevice> {
-  const registers = reference();
-  return new Map<number, MockDevice>([
-    [0x11, { holding: registers.holding, input: registers.input }],
-    [0x32, { input: registers.batteryModules[0] }],
-  ]);
-}
+const referenceDevices = () => devicesOf(reference());
 
 describe('PollManager against a mock inverter', { timeout: 20_000 }, () => {
   const cleanup: Array<() => Promise<void>> = [];

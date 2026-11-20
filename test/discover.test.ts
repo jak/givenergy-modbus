@@ -83,8 +83,9 @@ describe('discover verification', () => {
       expect(results).toEqual([{
         host: '127.0.0.1',
         serialNumber: 'CE1234G567',
-        generation: 'gen2',
-        modelCode: 0x2001,
+        deviceTypeCode: 0x2001,
+        model: 'hybrid_gen2',
+        layout: 'single_phase',
       }]);
     } finally {
       server.close();
@@ -193,7 +194,7 @@ describe('discover verification', () => {
       expect(found).toHaveLength(1);
       expect(found[0].host).toBe('127.0.0.1');
       expect(found[0].serialNumber).toBe('CE1234G567');
-      expect(found[0].generation).toBe('gen2');
+      expect(found[0].model).toBe('hybrid_gen2');
     } finally {
       server.close();
     }

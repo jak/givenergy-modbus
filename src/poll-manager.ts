@@ -5,8 +5,9 @@ import {
   encodeReadHoldingRegistersRequest,
   encodeReadInputRegistersRequest,
   encodeReadMeterProductRegistersRequest,
+  encodeWriteHoldingRegisterRequest,
 } from './pdu/encode.js';
-import { capabilitiesFor } from './model/capabilities.js';
+import { capabilitiesFor, type Capabilities } from './model/capabilities.js';
 import {
   isPlantController,
   layoutOf,
@@ -219,6 +220,47 @@ export class PollManager extends EventEmitter {
     await this.client.close();
     this._started = false;
     this._reconnecting = false;
+  }
+
+  /** The resolved model. Throws before the first snapshot. */
+  get model(): SinglePhaseModel | ThreePhaseModel {
+    return this._requireContext().model;
+  }
+
+  get layout(): Layout {
+    return this._requireContext().layout;
+  }
+
+  /** The capabilities the snapshot is built with: resolved from the model and firmware, minus runtime downgrades. */
+  get capabilities(): Capabilities {
+    return this._requireContext().capabilities;
+  }
+
+  /** ARM firmware version: HR 21 on single-phase, IR 1327 on three-phase. */
+  get armFirmwareVersion(): number {
+    return this._requireContext().armFirmwareVersion;
+  }
+
+  private _requireContext(): BuildContext {
+    const context = this._context();
+    if (!this._started || !context || !this._cache) throw new Error('not started');
+    return context;
+  }
+
+  /**
+   * Write one holding register on the inverter (function 6), as 2.x did: the request is retried
+   * on timeout and resolves when the inverter echoes it. Rejects on timeout or a matched error
+   * reply. Doesn't touch the caches; call `applyWrite` once it resolves.
+   */
+  async writeHoldingRegister(register: number, value: number): Promise<void> {
+    const frame = encodeWriteHoldingRegisterRequest({
+      dataAdapterSerial: this.client.dataAdapterSerial,
+      slaveAddress: INVERTER_SLAVE,
+      register,
+      value,
+    });
+    this.emit('debug', `writing HR ${register} = ${value}`);
+    await this.client.sendRequest(frame);
   }
 
   /**
