@@ -147,12 +147,15 @@ describe('power groups on three-phase (hybrid_3ph capture)', () => {
     });
   });
 
-  it('load: per-phase IR 1083–1085 is signed W, not ÷10', () => {
+  it('load: total from IR 1089–1090; per-phase IR 1083–1085 is not exposed', () => {
     const load = buildLoad(registers, context);
-    expect(load.power).toBe(1636); // IR 1089–1090 = 16360, ÷10
-    // Quirk: IR 1084 = 65000 is −536 W signed. On this capture the per-phase values
-    // (0, −536, 533) do not sum to the total; research C names them per-phase load anyway.
-    expect(load.phases).toEqual([{ power: 0 }, { power: -536 }, { power: 533 }]);
+    expect(load).toEqual({ power: 1636 }); // IR 1089–1090 = 16360, ÷10
+    // Quirk: research C names IR 1083–1085 per-phase load (signed W), but on this capture they
+    // read 0, −536 (65000 signed) and 533 W, which can't add up to the 1636 W total. The data
+    // contradicts the name, so `load.phases` doesn't exist.
+    const perPhase = [1083, 1084, 1085].map((a) => registers.input.get(a));
+    expect(perPhase).toEqual([0, 65000, 533]);
+    expect(0 + -536 + 533).not.toBeCloseTo(load.power, -2);
   });
 
   it('eps: per-phase values from IR 1181–1192, power is their sum', () => {

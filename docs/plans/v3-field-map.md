@@ -165,6 +165,16 @@ Settings come from the catalogue. Names follow the official app.
 - **IR 44–46** are `s.inverter.energy.outputTodayKwh` / `outputTotalKwh`. On DC hybrids they
   count PV generation; on AC and All in One models they echo the AC side.
 
+## Registers not exposed
+
+| Register | Why |
+|---|---|
+| Three-phase IR 1083–1085 (per-phase load in research C) | On the three-phase capture they read 0 / −536 / 533 W against a 1636 W total, so they can't be per-phase load. `ThreePhaseLoad` has no `phases`. |
+| Three-phase IR 1068 (power factor) | Scaling unknown. |
+| Three-phase IR 1240–1241 (export power), IR 1244–1245 (meter 2 power), IR 1400–1403 (export 2 energy) | Meaning unknown. |
+| LV battery IR 115 | Meaning unknown. |
+| HR 4141–4142 (inverter export total) | Not in any polled block. |
+
 ## Dropped
 
 | 2.x | Why |

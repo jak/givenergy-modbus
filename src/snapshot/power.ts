@@ -237,14 +237,11 @@ export function buildLoad(
   registers: RegisterCaches,
   context: BuildContext,
 ): SinglePhaseLoadPower | ThreePhaseLoadPower {
-  const { ir, uint32, phases } = reader(registers);
+  const { ir, uint32 } = reader(registers);
 
   if (context.layout === 'three_phase') {
-    return {
-      power: toDeci(uint32(1089)),
-      // Per-phase load IR 1083–1085 is signed W, not ÷10 (research C).
-      phases: phases((p) => ({ power: toInt16(ir(1083 + p)) })),
-    };
+    // IR 1083–1085 (per-phase load in research C) are not exposed: they don't sum to this total.
+    return { power: toDeci(uint32(1089)) };
   }
 
   // IR 42 already includes the EPS load; don't add IR 31.
