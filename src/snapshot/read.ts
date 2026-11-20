@@ -33,7 +33,10 @@ export interface MeterCaches {
   slaveAddress: number;
   /** Input registers IR 60–88 (function 4). */
   input: Map<number, number>;
-  /** Product registers 60–68 (function 22); empty when the meter didn't answer them. */
+  /**
+   * Product registers (function 22); empty when the meter didn't answer them. The 2.x poll
+   * reads 60–68, but only 60–66 are decoded (as in 2.x): 67–68 are not exposed.
+   */
   product: Map<number, number>;
 }
 

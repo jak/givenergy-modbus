@@ -149,7 +149,8 @@ Settings come from the catalogue. Names follow the official app.
   `{ voltage, current, power }` (IR 1061–1066, IR 1083–1085), `inverter.phases` is
   `{ voltage, power }` (IR 1091–1096) and `eps.phases` is `{ voltage, current, power }`
   (IR 1181–1192). There is no `load.phases`. The inverter reports nothing else per phase, so no
-  field is zero-filled.
+  field is zero-filled. `ThreePhase<T>` is `readonly [T, T, T]` (L1, L2, L3), the same shape as
+  the meter's per-phase values.
 - **IR 1083–1085 are per-phase grid power, not load.** Research C names them per-phase load.
   An earlier Phase C decision dropped them because, on the three-phase capture, they read
   0 / −536 / +533 W against a 1636 W load. New evidence reverses that: they sum exactly to
@@ -158,13 +159,15 @@ Settings come from the catalogue. Names follow the official app.
   (positive is export).
 - **Meter sign is as the meter reports it.** On the three-phase capture meter 0x01's total is
   +3 W while `grid.power` is −3 W; on Gen2 the meter (−4 W) and the grid CT are both negative.
-  Meter values are not normalised to the grid sign convention. `ThreePhase<T>` is
-  `readonly [T, T, T]` (L1, L2, L3), the same shape as the meter's per-phase values.
+  Meter values are not normalised to the grid sign convention.
 - **Battery modules are a union on `kind`.** `'low_voltage'` modules come from each BMS
-  (0x32–0x37); `'high_voltage'` modules (BMUs) carry `stack`, `index`, 24 cell voltages and
-  24 cell temperatures. Pack-level HV data (status, voltage, current, power, state of charge
-  min/max, state of health, energy, capacities, cycles, alarm words) lives in
-  `s.battery.stacks[]`, one per battery control unit. 2.x copied the stack's state of charge,
+  (0x32–0x37); `'high_voltage'` modules (BMUs) carry `stack`, `index`, cell voltages and cell
+  temperatures. The counts come from the stack's battery control unit: IR 67 ÷ IR 64 cell
+  voltages (24 on every capture) and IR 68 ÷ IR 64 temperatures (12 on every capture; 2.x read
+  24, including IR 102–113). Pack-level HV data (status, voltage, current, state of charge
+  min/max, state of health, energy, capacities, cycles, alarm words; not power, see
+  "Registers not exposed") lives in `s.battery.stacks[]`, one per battery control unit.
+  `stack` and `index` come from device addresses, so a silent device leaves a gap. 2.x copied the stack's state of charge,
   voltage and cycle count onto every HV module; 3.x copies nothing.
 - **Three-phase battery voltage** is IR 1133, the inverter side, matching single-phase IR 50.
   The BMS reading, IR 1131, is `s.battery.batteryManagementSystemVoltage`. Three-phase has no
@@ -176,7 +179,8 @@ Settings come from the catalogue. Names follow the official app.
   inverter's AC terminal, so they are `s.inverter.apparentPower` and
   `s.inverter.terminalCurrent`. There is no `grid.current`; the CT meter has per-phase current.
 - **IR 44–46** are `s.inverter.energy.outputTodayKwh` / `outputTotalKwh`. On DC hybrids they
-  count PV generation; on AC and All in One models they echo the AC side.
+  count PV generation; on AC and All in One models they echo the AC side. On `ac` they miss the
+  PV inverter's generation, so single-phase consumption isn't derived there (see EPS and load).
 
 ## Registers not exposed
 
@@ -186,6 +190,7 @@ Settings come from the catalogue. Names follow the official app.
 | Three-phase IR 1068 (power factor) | Scaling unknown. |
 | Three-phase IR 1240–1241 (export power), IR 1244–1245 (meter 2 power), IR 1400–1403 (export 2 energy) | Meaning unknown. |
 | LV battery IR 115 | Meaning unknown. |
+| Meter product registers 67–68 (function 22) | The 2.x poll reads 60–68, but neither 2.x nor 3.x decodes 67–68; meaning unknown. |
 | HV battery control unit IR 79 (stack power) | Unit unknown: GivTCP shows it ÷1000 as kW, but the captures read −3 and −16 while voltage × current is about −380 W and −1750 W. `voltage` and `current` are exposed. |
 | HR 4141–4142 (inverter export total) | Not in any polled block. |
 
