@@ -18,6 +18,7 @@ import type {
   SinglePhaseBuildContext,
   ThreePhaseBuildContext,
 } from '../../src/snapshot/read.js';
+import { armFirmwareVersionOf } from '../../src/snapshot/identity.js';
 import { loadCapture } from './capture.js';
 
 interface ReferenceFile {
@@ -83,7 +84,7 @@ export function contextFor(registers: RegisterCaches): BuildContext {
   const model = resolveModel(deviceTypeCode, singlePhaseArm);
   if (model === 'unknown' || isPlantController(model)) throw new Error(`not an inverter: ${model}`);
   const layout = layoutOf(model);
-  const armFirmwareVersion = layout === 'three_phase' ? registers.input.get(1327) ?? 0 : singlePhaseArm;
+  const armFirmwareVersion = armFirmwareVersionOf(registers, layout) ?? 0;
   const capabilities = capabilitiesFor(model, armFirmwareVersion);
   return { model, layout, capabilities, armFirmwareVersion } as BuildContext;
 }

@@ -2,7 +2,7 @@
  * Identity group: what the inverter is and how it is configured (HR 0–55).
  * Three-phase units keep their firmware versions in IR 1325–1327 and battery type in IR 1121.
  */
-import type { SinglePhaseModel } from '../model/models.js';
+import type { Layout, SinglePhaseModel } from '../model/models.js';
 import type { Certification, Identity, ThreePhaseIdentity } from '../model/snapshot.js';
 import {
   readHolding,
@@ -48,6 +48,14 @@ const CERTIFICATIONS: Readonly<Record<number, Certification>> = {
   16: 'g98_northern_ireland',
   17: 'g99_northern_ireland',
 };
+
+/**
+ * The ARM firmware version: HR 21 on single-phase, IR 1327 on three-phase (HR 21 reads 0 there).
+ * `undefined` while that register hasn't been read.
+ */
+export function armFirmwareVersionOf(registers: RegisterCaches, layout: Layout): number | undefined {
+  return layout === 'three_phase' ? readInput(registers, 1327) : readHolding(registers, 21);
+}
 
 function hexCode(deviceTypeCode: number): string {
   return deviceTypeCode.toString(16).padStart(4, '0');

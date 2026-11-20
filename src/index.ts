@@ -5,6 +5,7 @@ export { Gen3Inverter } from './inverters/gen3.js';
 export { ThreePhaseInverter } from './inverters/three-phase.js';
 export { detectGeneration, modelToGeneration } from './generation.js';
 export type { InverterGeneration } from './generation.js';
+export { UnsupportedDeviceError, UnsupportedSettingError } from './errors.js';
 export { discover, getLocalSubnet, parseSubnet } from './discover.js';
 export type { DiscoveredDevice, DiscoverOptions } from './discover.js';
 export type {

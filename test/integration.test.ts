@@ -140,8 +140,8 @@ function makeHoldingRegisters(): number[] {
 }
 
 function makeInputRegisters(): number[] {
-  // 240 registers to cover IR 0-59 and 180-239 ranges
-  const regs = new Array(240).fill(0);
+  // 300 registers to cover the IR 0-59, 180-239 and 240-299 blocks
+  const regs = new Array(300).fill(0);
 
   // IR(41) = 350 (heatsink temp → toDeci = 35°C, passes sanity check)
   regs[41] = 350;
@@ -309,8 +309,8 @@ describe('Integration: GivEnergyInverter with mock inverter', () => {
     try {
       const snapshot = inv.getData();
       expect(snapshot).toBeDefined();
-      expect(snapshot.serialNumber).toBe('SA1234B567');
-      expect(snapshot.stateOfCharge).toBe(75);
+      expect(snapshot.identity.serialNumber).toBe('SA1234B567');
+      expect(snapshot.battery.stateOfCharge).toBe(75);
     } finally {
       await inv.stop();
       await mock.close();
@@ -385,7 +385,7 @@ describe('Integration: GivEnergyInverter with mock inverter', () => {
 
     try {
       // Baseline: live data.
-      expect(inv.getData().serialNumber).toBe('SA1234B567');
+      expect(inv.getData().identity.serialNumber).toBe('SA1234B567');
 
       // Inverter reboots — the TCP connection drops. The server stays listening so the
       // reconnect can succeed once the client detects the dead transport and retries.
@@ -402,7 +402,7 @@ describe('Integration: GivEnergyInverter with mock inverter', () => {
         expect(events.reconnected).toBeGreaterThanOrEqual(1);
       }, { timeout: 20000, interval: 50 });
 
-      expect(inv.getData().serialNumber).toBe('SA1234B567');
+      expect(inv.getData().identity.serialNumber).toBe('SA1234B567');
     } finally {
       clearInterval(pin);
       await inv.stop();

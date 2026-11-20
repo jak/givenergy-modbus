@@ -8,12 +8,6 @@ import type { Layout } from '../src/model/models.js';
 const entries = Object.entries(SETTINGS) as [keyof typeof SETTINGS, SettingDefinition][];
 const layouts: Layout[] = ['single_phase', 'three_phase'];
 
-/** Holding-register block bases read on a full refresh. Each block covers 60 registers from its base. */
-const POLLED_HOLDING_BASES: Record<Layout, number[]> = {
-  single_phase: [0, 60, 120, 180, 240, 300],
-  three_phase: [0, 60, 120, 1000, 1060, 1120],
-};
-
 const noCapabilities: Capabilities = {
   tenSlots: false,
   perSlotTargets: false,
@@ -35,12 +29,7 @@ describe.each(entries)('%s', (key, definition) => {
     expect(layouts.some((layout) => registerFor(key, layout) !== undefined)).toBe(true);
   });
 
-  it.each(layouts)('sits inside a polled holding block on %s', (layout) => {
-    const register = registerFor(key, layout);
-    if (register === undefined) return;
-    const bases = POLLED_HOLDING_BASES[layout];
-    expect(bases.some((base) => register >= base && register < base + 60)).toBe(true);
-  });
+  // That every register sits inside a polled block is tested in poll-blocks.test.ts.
 
   it('has a risk text when it is unsafe', () => {
     if (definition.unsafe) expect(definition.risk).toBeTruthy();

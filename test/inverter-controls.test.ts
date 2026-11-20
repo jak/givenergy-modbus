@@ -111,18 +111,25 @@ function makeHoldingRegisters(serial: string): number[] {
   // HR(116) = 100 (charge_target_soc)
   regs[116] = 100;
 
-  // Gen3 detection: HR(0) = 0x2003 (HYBRID_GEN3), HR(21) = 300 (ARM firmware v300)
+  // The model comes from HR 0 (device type code) and HR 21 (ARM firmware), not the serial prefix.
   if (serial.startsWith('EE')) {
-    regs[0] = 0x2003;
+    regs[0] = 0x2003; // hybrid_gen3 at ARM 300
     regs[21] = 300;
+  } else if (serial.startsWith('SA')) {
+    regs[0] = 0x4004; // hybrid_3ph
+  } else {
+    regs[0] = 0x2003; // hybrid_gen2 at ARM 920
+    regs[21] = 920;
   }
 
   return regs;
 }
 
 function makeInputRegisters(): number[] {
-  const regs = new Array(240).fill(0);
+  // Up to IR 1419 for the three-phase blocks.
+  const regs = new Array(1420).fill(0);
   regs[41] = 350; // heatsink temp → toDeci = 35°C
+  regs[1128] = 350; // three-phase heatsink temp, the three-phase sanity register
   regs[59] = 75;  // battery_percent = 75%
   regs[9] = 5000; // f_ac1 raw
   return regs;
@@ -183,6 +190,9 @@ async function startMockInverter(serial: string): Promise<MockInverterState> {
                 values = allRegs.slice(baseRegister - 60, baseRegister - 60 + registerCount);
               } else if (slaveAddress >= 0x01 && slaveAddress <= 0x08) {
                 // Meter slaves — respond with zeros (no meter connected)
+                values = new Array(registerCount).fill(0);
+              } else if (slaveAddress === 0xa0) {
+                // High-voltage battery aggregator (three-phase): zeros, so no stacks to scan
                 values = new Array(registerCount).fill(0);
               } else {
                 continue;

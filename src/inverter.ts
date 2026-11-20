@@ -6,7 +6,7 @@ import { registersToString } from './model/converters.js';
 import { detectModel } from './model/device-types.js';
 import { detectGeneration, modelToGeneration, type InverterGeneration } from './generation.js';
 
-import type { InverterSnapshot } from './model/inverter-snapshot.js';
+import type { InverterSnapshot } from './model/snapshot.js';
 
 export interface GivEnergyInverterOptions {
   host: string;
@@ -56,27 +56,24 @@ export abstract class GivEnergyInverter extends EventEmitter {
     await pollManager.start();
     const snapshot = pollManager.getData();
 
-    if (!snapshot.serialNumber || snapshot.serialNumber.replace(/[\x00\s]/g, '') === '') {
+    const { serialNumber } = snapshot.identity;
+    if (!serialNumber || serialNumber.replace(/[\x00\s]/g, '') === '') {
       await pollManager.stop();
       throw new Error(`No valid inverter found at ${options.host} (empty serial number)`);
     }
 
-    const generation = snapshot.generation;
-
-    switch (generation) {
-      case 'gen3': {
-        const { Gen3Inverter } = await import('./inverters/gen3.js');
-        return new Gen3Inverter(pollManager);
-      }
-      case 'three_phase': {
-        const { ThreePhaseInverter } = await import('./inverters/three-phase.js');
-        return new ThreePhaseInverter(pollManager);
-      }
-      default: {
-        const { Gen2Inverter } = await import('./inverters/gen2.js');
-        return new Gen2Inverter(pollManager);
-      }
+    // Interim, until Task 14 replaces these classes: pick the 2.x class the 2.x generation
+    // detection would have picked (modelToGeneration).
+    if (snapshot.layout === 'three_phase') {
+      const { ThreePhaseInverter } = await import('./inverters/three-phase.js');
+      return new ThreePhaseInverter(pollManager);
     }
+    if (snapshot.model === 'hybrid_gen3' || snapshot.model === 'hybrid_hv_gen3') {
+      const { Gen3Inverter } = await import('./inverters/gen3.js');
+      return new Gen3Inverter(pollManager);
+    }
+    const { Gen2Inverter } = await import('./inverters/gen2.js');
+    return new Gen2Inverter(pollManager);
   }
 
   /**

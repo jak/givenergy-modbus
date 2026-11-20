@@ -1,15 +1,31 @@
 import { EventEmitter } from 'events';
 import { Client } from './client.js';
-import { buildSnapshot, type RegisterCache } from './snapshot-builder.js';
+import { UnsupportedDeviceError } from './errors.js';
 import {
   encodeReadHoldingRegistersRequest,
   encodeReadInputRegistersRequest,
   encodeReadMeterProductRegistersRequest,
 } from './pdu/encode.js';
-import type { InverterSnapshot } from './model/inverter-snapshot.js';
-import type { InverterGeneration } from './generation.js';
-import { detectModel, isHighVoltage } from './model/device-types.js';
-import type { DeviceType } from './model/device-types.js';
+import { capabilitiesFor } from './model/capabilities.js';
+import {
+  isPlantController,
+  layoutOf,
+  resolveModel,
+  type Layout,
+  type SinglePhaseModel,
+  type ThreePhaseModel,
+} from './model/models.js';
+import type { InverterSnapshot } from './model/snapshot.js';
+import {
+  blockCovers,
+  effectiveCapabilities,
+  holdingBlocksFor,
+  inputBlocksFor,
+  type RegisterBlock,
+} from './poll-blocks.js';
+import { buildSnapshot } from './snapshot/index.js';
+import { armFirmwareVersionOf } from './snapshot/identity.js';
+import type { BatteryStackCaches, BuildContext, MeterCaches, RegisterCaches } from './snapshot/read.js';
 
 export interface PollManagerOptions {
   host: string;
@@ -19,62 +35,89 @@ export interface PollManagerOptions {
   autoReconnect?: boolean;         // default true
   reconnectBackoffMs?: number;     // initial backoff, default 5000
   reconnectMaxBackoffMs?: number;  // max backoff cap, default 300000 (5min)
+  /** @internal Request timing, shortened by tests. */
+  timing?: Partial<PollTiming>;
 }
 
+/** @internal */
+export interface PollTiming {
+  /** Per attempt. Default 10 s: the inverter takes 4–8 s to answer at first. */
+  requestTimeoutMs: number;
+  /** Retries after the first attempt. Default 3. */
+  requestRetries: number;
+  /** Pause between sequential reads. Default 250 ms, GivTCP's inter-frame delay. */
+  interReadDelayMs: number;
+  /** Wait after the reads for the rest of the push data. Default 3 s. */
+  pushSoakMs: number;
+}
+
+const DEFAULT_TIMING: PollTiming = {
+  requestTimeoutMs: 10_000,
+  requestRetries: 3,
+  interReadDelayMs: 250,
+  pushSoakMs: 3000,
+};
+
 const INVERTER_SLAVE = 0x11;
-const BATTERY_REGISTER_START = 60;
-const BATTERY_REGISTER_COUNT = 60;
-const LV_BATTERY_SLAVES = [0x32, 0x33, 0x34, 0x35, 0x36, 0x37];
+const FUNCTION_READ_HOLDING = 3;
+const FUNCTION_READ_INPUT = 4;
+const FUNCTION_READ_METER_PRODUCT = 22;
+
+/** Battery and meter devices store their registers from IR 60. */
+const DEVICE_REGISTER_START = 60;
+const DEVICE_REGISTER_COUNT = 60;
+/** Low-voltage battery management systems, one per module. */
+const LOW_VOLTAGE_BATTERY_SLAVES = [0x32, 0x33, 0x34, 0x35, 0x36, 0x37];
 const METER_SLAVES = [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08];
-/** BAMS (Battery Aggregation & Management System) slave address — reports BCU count */
-const BAMS_SLAVE = 0xa0;
-/** BAMS register containing number of BCUs */
-const BAMS_NUMBER_OF_BCUS_REGISTER = 61;
-/** BCU (Battery Control Unit) base slave address — BCU N is at 0x70 + N */
-const BCU_BASE_SLAVE = 0x70;
-/** BCU register containing number of BMUs (modules) in this BCU */
-const BCU_NUMBER_OF_MODULES_REGISTER = 64;
-/** BMU (Battery Module Unit) base slave address — BMU N is at 0x50 + N */
-const BMU_BASE_SLAVE = 0x50;
-/** BMU register read count — 60 registers per module */
-const BMU_REGISTER_COUNT = 60;
-/** BMU base register offset multiplier — each BCU adds 120 to the base */
-const BMU_BCU_OFFSET = 120;
-const METER_DATA_REGISTER_START = 60;
 const METER_DATA_REGISTER_COUNT = 29; // IR 60-88
-const METER_PRODUCT_REGISTER_START = 60;
-const METER_PRODUCT_REGISTER_COUNT = 9; // MR 60-68
-
+const METER_PRODUCT_REGISTER_COUNT = 9; // function 22, 60-68
+/** Battery aggregation and management system: IR 61 is the number of battery control units. */
+const BATTERY_AGGREGATOR_SLAVE = 0xa0;
+const BATTERY_AGGREGATOR_STACK_COUNT_REGISTER = 61;
+/** Battery control unit n (one per stack) is at 0x70 + n. IR 64 is its module count. */
+const BATTERY_CONTROL_UNIT_BASE_SLAVE = 0x70;
+const BATTERY_CONTROL_UNIT_MODULE_COUNT_REGISTER = 64;
+const MAX_BATTERY_STACKS = 8;
 /**
- * Register ranges to read per poll cycle.
- *
- * GivEnergy inverter constraints:
- *  - Max 60 registers per request (enforced by the data adapter firmware)
- *  - Base register must be a multiple of 60
- *
- * Input register layout (non-contiguous — these are the only ranges we need):
- *  - 0..59:   real-time power, battery, grid, totals
- *  - 180..239: secondary energy totals (IR 180, 181)
- *
- * Holding register layout:
- *  - 0..59:   identity, time, discharge slot 1, enable discharge
- *  - 60..119: charge slots, enable charge, charge target SOC
- *  - 4080..4139: 32-bit battery energy totals (#8)
+ * Battery module k of every stack is at 0x50 + k; stack n's modules are read at IR 60 + 120 × n
+ * and stored in `RegisterCaches` from IR 60.
  */
-const INPUT_REGISTER_RANGES = [
-  { base: 0,   count: 60 },
-  { base: 180, count: 60 },
-];
+const BATTERY_MODULE_BASE_SLAVE = 0x50;
+const BATTERY_MODULE_STACK_OFFSET = 120;
+const MAX_BATTERY_MODULES = 16;
 
-/** Pause between sequential register reads — matches GivTCP's 250ms inter-frame delay */
-const INTER_READ_DELAY_MS = 250;
+/** A block that times out this many polls in a row, with no push data covering it, is no longer requested. */
+const UNANSWERED_AFTER_MISSES = 3;
 
-/** Time to wait after all reads for remaining push data to arrive */
-const PUSH_DATA_SOAK_MS = 3000;
+type RegisterType = 'holding' | 'input';
+
+/** Every register value received from one device address, by function. */
+interface DeviceRegisters {
+  holding: Map<number, number>;
+  input: Map<number, number>;
+  product: Map<number, number>;
+}
+
+/** The model and layout, resolved once from the first HR 0 block. */
+type Identified =
+  | { model: SinglePhaseModel; layout: 'single_phase' }
+  | { model: ThreePhaseModel; layout: 'three_phase' };
+
+/** Inverter register data that arrived during one poll, matched or pushed. */
+interface ReceivedRange {
+  type: RegisterType;
+  base: number;
+  count: number;
+}
+
+const blockKey = (type: RegisterType, base: number) => `${type}:${base}`;
+const blockLabel = (type: RegisterType, { base, count }: RegisterBlock) =>
+  `${type === 'holding' ? 'HR' : 'IR'} ${base}–${base + count - 1}`;
 
 export class PollManager extends EventEmitter {
   private readonly client: Client;
-  private readonly options: Required<PollManagerOptions>;
+  private readonly options: Required<Omit<PollManagerOptions, 'timing'>>;
+  private readonly timing: PollTiming;
   private _cache: InverterSnapshot | null = null;
   private _started = false;
   private _failCount = 0;
@@ -82,23 +125,20 @@ export class PollManager extends EventEmitter {
   private _lastFullRefresh = 0;
   private _previousSnapshot: InverterSnapshot | null = null;
   private _polling = false;
-  private _generation: InverterGeneration | null = null;
   private _reconnecting = false;
   private _reconnectAbort = false;
-  // Set by the onRegisterData push callback whenever the inverter sends register data
-  // during a poll cycle. Reset at the start of each cycle. A cycle is only "dead" if
-  // BOTH the matched sendRequest responses AND the push callback produced nothing —
-  // see the liveness check in _executePoll.
-  private _pushDataReceivedThisCycle = false;
-  private _deviceType: DeviceType | null = null;
-  private _bcuList: Array<{ bcuIndex: number; moduleCount: number }> = [];
+  private _identified: Identified | null = null;
+  /** Set when the device turned out not to be a supported inverter; `start()` rethrows it. */
+  private _unsupported: UnsupportedDeviceError | null = null;
 
-  // Register caches
-  private _inputRegisters = new Map<number, number>();
-  private _holdingRegisters = new Map<number, number>();
-  private _batteryRegisters = new Map<number, Map<number, number>>();
-  private _meterDataRegisters = new Map<number, Map<number, number>>();
-  private _meterProductRegisters = new Map<number, Map<number, number>>();
+  /** Every register received, matched or pushed, by device address. */
+  private readonly _devices = new Map<number, DeviceRegisters>();
+  /** Inverter data received during the current poll; also the poll's liveness signal. */
+  private _receivedThisPoll: ReceivedRange[] = [];
+  /** Consecutive polls each block was requested and not answered, by `blockKey`. */
+  private readonly _misses = new Map<string, number>();
+  /** Blocks no longer requested, by `blockKey`. */
+  private readonly _unanswered = new Set<string>();
 
   constructor(options: PollManagerOptions) {
     super();
@@ -112,27 +152,20 @@ export class PollManager extends EventEmitter {
       reconnectBackoffMs: options.reconnectBackoffMs ?? 5_000,
       reconnectMaxBackoffMs: options.reconnectMaxBackoffMs ?? 300_000,
     };
+    this.timing = { ...DEFAULT_TIMING, ...options.timing };
     this.client = new Client({
       host: this.options.host,
       port: this.options.port,
-      timeout: 10_000, // 10s — inverter takes 4-8s to respond initially
-      retries: 3,
+      timeout: this.timing.requestTimeoutMs,
+      retries: this.timing.requestRetries,
       onDebug: (msg) => this.emit('debug', msg),
-      // Accumulate ALL register data pushed by the inverter, whether or not it
-      // matches a pending request. GivEnergy inverters enter "push mode" after
-      // receiving requests and spontaneously send all register data in 60-reg
-      // chunks. GivTCP's consumer task does the same: plant.update(message)
-      // is called unconditionally for every response.
-      onRegisterData: (slave, fc, base, values) => {
-        if (slave === INVERTER_SLAVE) {
-          const cache = fc === 4 ? this._inputRegisters : this._holdingRegisters;
-          values.forEach((v, i) => cache.set(base + i, v));
-          // Push data is proof the inverter is alive even when the matched sendRequest
-          // responses time out — count it toward this cycle's liveness.
-          this._pushDataReceivedThisCycle = true;
-          this.emit('debug', `accumulated push data: slave=0x${slave.toString(16)} fc=${fc} base=${base} count=${values.length}`);
-        }
-      },
+      // Store ALL register data the inverter sends, whether or not it matches a pending
+      // request. GivEnergy inverters enter "push mode" after receiving requests and
+      // spontaneously send register data in 60-register chunks, and the dongle relays its own
+      // cloud polls to every client. GivTCP's consumer does the same: plant.update(message)
+      // for every response. Matched responses arrive here too, so this is the one place
+      // registers enter the caches.
+      onRegisterData: (slave, fc, base, values) => this._store(slave, fc, base, values),
     });
   }
 
@@ -143,12 +176,21 @@ export class PollManager extends EventEmitter {
     return this._cache;
   }
 
+  /**
+   * Connect and run the first full poll. Rejects with `UnsupportedDeviceError` (after closing the
+   * connection) when the device is a plant controller or an unknown device type.
+   */
   async start(): Promise<void> {
     this.emit('debug', `connecting to ${this.options.host}:${this.options.port}`);
     await this.client.connect();
     this.emit('debug', 'connected');
     this._started = true;
     await this._executePoll(true);
+    if (this._unsupported) {
+      const error = this._unsupported;
+      await this.stop();
+      throw error;
+    }
     this._pollTimer = setInterval(() => this._executePoll(false), this.options.pollIntervalMs);
   }
 
@@ -164,48 +206,165 @@ export class PollManager extends EventEmitter {
   }
 
   /**
-   * Read a single register range. Returns true if the inverter sent a live matched
-   * response, false if the request failed. A failure is NOT fatal on its own — push
-   * data via onRegisterData may have already filled the cache — but the caller uses
-   * the return value to tell a live connection (some response arrived) apart from a
-   * dead one (every read failed), which is what drives reconnect detection.
+   * Record a holding register write the inverter accepted: update the cached register and
+   * rebuild the snapshot from the caches, without a network read. Emits `data` with the new
+   * snapshot.
    */
-  private async _readRange(
-    type: 'input' | 'holding',
-    base: number,
-    count: number,
-  ): Promise<boolean> {
-    const encode = type === 'input' ? encodeReadInputRegistersRequest : encodeReadHoldingRegistersRequest;
-    const label = type === 'input' ? 'input' : 'holding';
-    this.emit('debug', `reading ${label} registers (slave=0x${INVERTER_SLAVE.toString(16)}, base=${base}, count=${count})`);
-    const frame = encode({
-      dataAdapterSerial: this.client.dataAdapterSerial,
-      slaveAddress: INVERTER_SLAVE,
-      baseRegister: base,
-      registerCount: count,
-    });
-    try {
-      const values = await this.client.sendRequest(frame);
-      this.emit('debug', `${label} registers [${base}..${base + values.length - 1}] ok`);
-      return true;
-    } catch (err) {
-      // Not fatal — push data via onRegisterData may have already filled the cache.
-      // Log the failure and continue.
-      const msg = err instanceof Error ? err.message : String(err);
-      this.emit('debug', `${label} registers [${base}..${base + count - 1}] request failed: ${msg} (push data may have filled cache)`);
-      return false;
+  applyWrite(register: number, raw: number): void {
+    const context = this._context();
+    if (!this._started || !context) throw new Error('not started');
+    this._inverter().holding.set(register, raw);
+    const snapshot = buildSnapshot(this._registerCaches(), context);
+    if (!snapshot) {
+      // Only a corrupt sanity register (HR 30/33/34) could fail the check after a good poll.
+      this.emit('debug', `snapshot rebuild after writing HR ${register} failed the sanity check; keeping the last one`);
+      return;
     }
+    this._previousSnapshot = snapshot;
+    this._cache = snapshot;
+    this.emit('data', snapshot);
+  }
+
+  // ── Register store ─────────────────────────────────────────────────────────
+
+  private _deviceRegisters(slave: number): DeviceRegisters {
+    let device = this._devices.get(slave);
+    if (!device) {
+      device = { holding: new Map(), input: new Map(), product: new Map() };
+      this._devices.set(slave, device);
+    }
+    return device;
+  }
+
+  private _inverter(): DeviceRegisters {
+    return this._deviceRegisters(INVERTER_SLAVE);
+  }
+
+  private _store(slave: number, fc: number, base: number, values: number[]): void {
+    const device = this._deviceRegisters(slave);
+    const table = fc === FUNCTION_READ_HOLDING ? device.holding
+      : fc === FUNCTION_READ_INPUT ? device.input
+      : fc === FUNCTION_READ_METER_PRODUCT ? device.product
+      : undefined;
+    if (!table) return;
+    values.forEach((value, i) => table.set(base + i, value));
+    if (slave === INVERTER_SLAVE && fc !== FUNCTION_READ_METER_PRODUCT) {
+      this._receivedThisPoll.push({ type: fc === FUNCTION_READ_HOLDING ? 'holding' : 'input', base, count: values.length });
+    }
+    this.emit('debug', `stored register data: slave=0x${slave.toString(16)} fc=${fc} base=${base} count=${values.length}`);
+  }
+
+  /** The register caches the snapshot builders read, assembled from the store. */
+  private _registerCaches(): RegisterCaches {
+    const inverter = this._inverter();
+    const answered = (slave: number) => {
+      const device = this._devices.get(slave);
+      return device && device.input.size > 0 ? device : undefined;
+    };
+
+    const batteryModules = LOW_VOLTAGE_BATTERY_SLAVES.flatMap((slave) => answered(slave)?.input ?? []);
+
+    const batteryStacks: BatteryStackCaches[] = [];
+    for (let index = 0; index < MAX_BATTERY_STACKS; index++) {
+      const controlUnit = answered(BATTERY_CONTROL_UNIT_BASE_SLAVE + index);
+      if (!controlUnit) continue;
+      const offset = BATTERY_MODULE_STACK_OFFSET * index;
+      const modules: BatteryStackCaches['modules'] = [];
+      for (let module = 0; module < MAX_BATTERY_MODULES; module++) {
+        const device = answered(BATTERY_MODULE_BASE_SLAVE + module);
+        if (!device?.input.has(DEVICE_REGISTER_START + offset)) continue;
+        // Stack n's modules answer at IR 60 + 120 × n; the builders read them from IR 60.
+        const input = new Map<number, number>();
+        for (let i = 0; i < DEVICE_REGISTER_COUNT; i++) {
+          const value = device.input.get(DEVICE_REGISTER_START + offset + i);
+          if (value !== undefined) input.set(DEVICE_REGISTER_START + i, value);
+        }
+        modules.push({ index: module, input });
+      }
+      batteryStacks.push({ index, controlUnit: controlUnit.input, modules });
+    }
+
+    const meters: MeterCaches[] = METER_SLAVES.flatMap((slaveAddress) => {
+      const device = answered(slaveAddress);
+      return device ? [{ slaveAddress, input: device.input, product: device.product }] : [];
+    });
+
+    return { holding: inverter.holding, input: inverter.input, batteryModules, batteryStacks, meters };
+  }
+
+  // ── Model, capabilities and context ────────────────────────────────────────
+
+  /**
+   * Resolve the model from HR 0 and HR 21, once. Returns null while HR 0 hasn't been read.
+   * Throws `UnsupportedDeviceError` for a plant controller or an unknown device type code.
+   */
+  private _identify(): Identified | null {
+    if (this._identified) return this._identified;
+    const holding = this._inverter().holding;
+    const deviceTypeCode = holding.get(0);
+    if (deviceTypeCode === undefined) return null;
+    const model = resolveModel(deviceTypeCode, holding.get(21) ?? 0);
+    if (model === 'unknown' || isPlantController(model)) throw new UnsupportedDeviceError(model, deviceTypeCode);
+    const layout: Layout = layoutOf(model);
+    // layoutOf decides the layout from the model, so the pair is consistent.
+    this._identified = { model, layout } as Identified;
+    this.emit('debug', `identified ${model} (${layout}, device type code 0x${deviceTypeCode.toString(16)})`);
+    return this._identified;
+  }
+
+  private _unansweredHoldingBases(): Set<number> {
+    const bases = new Set<number>();
+    for (const key of this._unanswered) {
+      const [type, base] = key.split(':');
+      if (type === 'holding') bases.add(Number(base));
+    }
+    return bases;
   }
 
   /**
-   * Read input registers from a battery/BCU/BMU slave.
-   * Returns the register values, or null on failure.
+   * The build context: the resolved model with capabilities from the current ARM firmware,
+   * minus the blocks the inverter never answered. Null until the model is resolved.
    */
-  private async _readSlaveRegisters(
-    slaveAddress: number,
-    baseRegister: number,
-    registerCount: number,
-  ): Promise<number[] | null> {
+  private _context(): BuildContext | null {
+    const identified = this._identified;
+    if (!identified) return null;
+    const { holding, input } = this._inverter();
+    const armFirmwareVersion = armFirmwareVersionOf({ holding, input }, identified.layout) ?? 0;
+    const capabilities = effectiveCapabilities(
+      capabilitiesFor(identified.model, armFirmwareVersion),
+      this._unansweredHoldingBases(),
+    );
+    return { ...identified, capabilities, armFirmwareVersion, previous: this._previousSnapshot };
+  }
+
+  // ── Polling ────────────────────────────────────────────────────────────────
+
+  /** Request one inverter block. Failure isn't fatal: push data may still fill it. */
+  private async _readBlock(type: RegisterType, registerBlock: RegisterBlock): Promise<void> {
+    const encode = type === 'input' ? encodeReadInputRegistersRequest : encodeReadHoldingRegistersRequest;
+    const label = blockLabel(type, registerBlock);
+    this.emit('debug', `reading ${label} (slave=0x${INVERTER_SLAVE.toString(16)})`);
+    const frame = encode({
+      dataAdapterSerial: this.client.dataAdapterSerial,
+      slaveAddress: INVERTER_SLAVE,
+      baseRegister: registerBlock.base,
+      registerCount: registerBlock.count,
+    });
+    try {
+      await this.client.sendRequest(frame);
+      this.emit('debug', `${label} ok`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.emit('debug', `${label} request failed: ${msg} (push data may still fill it)`);
+    }
+    await this._delay(this.timing.interReadDelayMs);
+  }
+
+  /**
+   * Read input registers from a battery or meter device. Returns the values, or null on failure.
+   * As in 2.x, only the high-voltage scan pauses between these reads.
+   */
+  private async _readDeviceInput(slaveAddress: number, baseRegister: number, registerCount: number): Promise<number[] | null> {
     const frame = encodeReadInputRegistersRequest({
       dataAdapterSerial: this.client.dataAdapterSerial,
       slaveAddress,
@@ -220,230 +379,117 @@ export class PollManager extends EventEmitter {
   }
 
   /**
-   * Scan HV battery hierarchy: BAMS → BCU → BMU.
-   *
-   * 1. Read BAMS at 0xA0 to discover BCU count
-   * 2. Read each BCU at 0x70+N for pack data and module count
-   * 3. Read each BMU at 0x50+N with base register offset per BCU
+   * Whether inverter data covering `registerBlock` arrived this poll. A larger block covering it
+   * counts (the dongle relays its cloud polls, sometimes in larger blocks).
    */
-  private async _scanHvBatteries(): Promise<void> {
-    // Step 1: Read BAMS to discover BCU count
-    this.emit('debug', `reading BAMS (slave=0x${BAMS_SLAVE.toString(16)}, base=${BATTERY_REGISTER_START}, count=5)`);
-    const bamsValues = await this._readSlaveRegisters(BAMS_SLAVE, BATTERY_REGISTER_START, 5);
-    if (!bamsValues) {
-      this.emit('debug', 'BAMS did not respond, skipping HV battery scan');
-      return;
-    }
-    const numberOfBcus = bamsValues[BAMS_NUMBER_OF_BCUS_REGISTER - BATTERY_REGISTER_START] ?? 0;
-    this.emit('debug', `BAMS reports ${numberOfBcus} BCU(s)`);
+  private _answeredThisPoll(type: RegisterType, registerBlock: RegisterBlock): boolean {
+    return this._receivedThisPoll.some((range) => range.type === type && blockCovers(range, registerBlock.base));
+  }
 
-    if (numberOfBcus === 0) return;
-
-    this._bcuList = [];
-
-    // Step 2: Read each BCU
-    for (let bcuIndex = 0; bcuIndex < numberOfBcus; bcuIndex++) {
-      const bcuSlave = BCU_BASE_SLAVE + bcuIndex;
-      this.emit('debug', `reading BCU ${bcuIndex} (slave=0x${bcuSlave.toString(16)}, base=${BATTERY_REGISTER_START}, count=${BATTERY_REGISTER_COUNT})`);
-      const bcuValues = await this._readSlaveRegisters(bcuSlave, BATTERY_REGISTER_START, BATTERY_REGISTER_COUNT);
-      await this._delay(INTER_READ_DELAY_MS);
-
-      if (!bcuValues) {
-        this.emit('debug', `BCU ${bcuIndex} did not respond, continuing scan`);
+  /**
+   * Count the requested blocks that weren't answered this poll, and stop requesting a block once
+   * it misses `UNANSWERED_AFTER_MISSES` polls in a row. Only called for a live poll, so a dead
+   * link doesn't mark every block unanswered. The blocks holding the sanity registers are never
+   * dropped: without them no snapshot can be built.
+   */
+  private _recordMisses(requested: Array<{ type: RegisterType; block: RegisterBlock }>, layout: Layout): void {
+    const essential = new Set([blockKey('holding', 0), blockKey('input', layout === 'three_phase' ? 1120 : 0)]);
+    const before = this._context()?.capabilities;
+    for (const { type, block: registerBlock } of requested) {
+      const key = blockKey(type, registerBlock.base);
+      if (this._answeredThisPoll(type, registerBlock)) {
+        this._misses.delete(key);
         continue;
       }
-
-      // Store BCU registers
-      const bcuCache = new Map<number, number>();
-      bcuValues.forEach((v, i) => bcuCache.set(BATTERY_REGISTER_START + i, v));
-      this._batteryRegisters.set(bcuSlave, bcuCache);
-
-      const moduleCount = bcuValues[BCU_NUMBER_OF_MODULES_REGISTER - BATTERY_REGISTER_START] ?? 0;
-      this.emit('debug', `BCU ${bcuIndex} has ${moduleCount} module(s)`);
-      this._bcuList.push({ bcuIndex, moduleCount });
-
-      // Step 3: Read each BMU for this BCU
-      for (let bmuIndex = 0; bmuIndex < moduleCount; bmuIndex++) {
-        const bmuSlave = BMU_BASE_SLAVE + bmuIndex;
-        const bmuBase = BATTERY_REGISTER_START + (BMU_BCU_OFFSET * bcuIndex);
-        this.emit('debug', `reading BMU ${bmuIndex} (slave=0x${bmuSlave.toString(16)}, base=${bmuBase}, count=${BMU_REGISTER_COUNT})`);
-        const bmuValues = await this._readSlaveRegisters(bmuSlave, bmuBase, BMU_REGISTER_COUNT);
-        await this._delay(INTER_READ_DELAY_MS);
-
-        if (!bmuValues) {
-          this.emit('debug', `BMU ${bmuIndex} did not respond, continuing scan for BCU ${bcuIndex}`);
-          continue;
-        }
-
-        // Store BMU registers normalized to base 60 for consistent snapshot building.
-        // The BCU offset only affects the Modbus request addressing, not the register layout.
-        const bmuKey = (bcuIndex << 8) | bmuIndex;
-        const bmuCache = new Map<number, number>();
-        bmuValues.forEach((v, i) => bmuCache.set(BATTERY_REGISTER_START + i, v));
-        this._batteryRegisters.set(bmuKey, bmuCache);
-
-        this.emit('debug', `BMU ${bmuIndex} ok (${bmuValues.length} values)`);
+      if (essential.has(key)) continue;
+      const misses = (this._misses.get(key) ?? 0) + 1;
+      this._misses.set(key, misses);
+      if (misses >= UNANSWERED_AFTER_MISSES) {
+        this._unanswered.add(key);
+        this._misses.delete(key);
+        this.emit('debug', `${blockLabel(type, registerBlock)} unanswered ${misses} polls in a row; no longer requesting it`);
       }
+    }
+    const after = this._context()?.capabilities;
+    if (before && after) {
+      const lost = (Object.keys(before) as (keyof typeof before)[]).filter((flag) => before[flag] && !after[flag]);
+      if (lost.length > 0) this.emit('debug', `capabilities turned off: ${lost.join(', ')}`);
     }
   }
 
   private async _executePoll(fullRefresh = false): Promise<void> {
     if (this._polling) return;
     this._polling = true;
-    this._pushDataReceivedThisCycle = false;
+    this._receivedThisPoll = [];
     const now = Date.now();
     const doFull = fullRefresh || (now - this._lastFullRefresh >= this.options.fullRefreshIntervalMs);
 
     try {
-      // Send register reads SEQUENTIALLY with a 250ms inter-frame delay,
-      // matching GivTCP's serial producer queue approach. Each request
-      // independently retries on timeout. Even if some requests fail, the
-      // onRegisterData callback accumulates all push data unconditionally.
-
-      // Track whether the inverter answered any read this cycle. If every read fails
-      // the transport is dead — but a stale snapshot is still buildable from the cached
-      // registers, so without this signal _failCount would keep resetting to 0 and the
-      // reconnect loop would never fire. See _handlePollResult below.
-      //
-      // A matched sendRequest response is one liveness signal; unsolicited push data via
-      // onRegisterData (tracked in _pushDataReceivedThisCycle) is another. Either proves
-      // the inverter is alive, so both must be exhausted before we declare the cycle dead.
-      let liveResponses = 0;
-
-      for (const { base, count } of INPUT_REGISTER_RANGES) {
-        if (await this._readRange('input', base, count)) liveResponses++;
-        await this._delay(INTER_READ_DELAY_MS);
-      }
-
-      const holdingRanges = this._holdingRanges(doFull);
-      for (const { base, count } of holdingRanges) {
-        if (await this._readRange('holding', base, count)) liveResponses++;
-        await this._delay(INTER_READ_DELAY_MS);
-      }
-
-      // Wait for push data to settle. After receiving our requests, the inverter
-      // enters push mode and spontaneously sends all register data in 60-reg
-      // chunks. This soak period lets that data arrive and fill our caches.
-      this.emit('debug', `waiting ${PUSH_DATA_SOAK_MS}ms for remaining push data...`);
-      await this._delay(PUSH_DATA_SOAK_MS);
-
-      if (doFull) {
-        // Detect device type for HV vs LV battery scanning
-        if (this._deviceType === null) {
-          const modelCode = this._holdingRegisters.get(0) ?? 0;
-          const armFw = this._holdingRegisters.get(21) ?? 0;
-          if (modelCode !== 0) {
-            this._deviceType = detectModel(modelCode, armFw);
-            this.emit('debug', `detected device type: ${this._deviceType} (HV: ${isHighVoltage(this._deviceType)})`);
-          }
-        }
-
-        // Clear previous battery data for full refresh
-        this._batteryRegisters.clear();
-
-        if (this._deviceType !== null && isHighVoltage(this._deviceType)) {
-          await this._scanHvBatteries();
-        } else {
-          // LV battery scan — batteries can be non-contiguous (#6)
-          for (const slave of LV_BATTERY_SLAVES) {
-            try {
-              this.emit('debug', `reading battery registers (slave=0x${slave.toString(16)}, base=${BATTERY_REGISTER_START}, count=${BATTERY_REGISTER_COUNT})`);
-              const batFrame = encodeReadInputRegistersRequest({
-                dataAdapterSerial: this.client.dataAdapterSerial,
-                slaveAddress: slave,
-                baseRegister: BATTERY_REGISTER_START,
-                registerCount: BATTERY_REGISTER_COUNT,
-              });
-              const batValues = await this.client.sendRequest(batFrame);
-              this.emit('debug', `battery 0x${slave.toString(16)} ok (${batValues.length} values)`);
-              const batCache = this._batteryRegisters.get(slave) ?? new Map<number, number>();
-              batValues.forEach((v, i) => batCache.set(BATTERY_REGISTER_START + i, v));
-              this._batteryRegisters.set(slave, batCache);
-            } catch {
-              this.emit('debug', `battery 0x${slave.toString(16)} did not respond, continuing scan`);
-              continue;
-            }
-          }
-        }
-        // Scan meters on all 8 slaves — meters can be non-contiguous, so use
-        // continue (not break) when one doesn't respond.
-        for (const slave of METER_SLAVES) {
-          try {
-            this.emit('debug', `reading meter data (slave=0x${slave.toString(16)}, base=${METER_DATA_REGISTER_START}, count=${METER_DATA_REGISTER_COUNT})`);
-            const dataFrame = encodeReadInputRegistersRequest({
-              dataAdapterSerial: this.client.dataAdapterSerial,
-              slaveAddress: slave,
-              baseRegister: METER_DATA_REGISTER_START,
-              registerCount: METER_DATA_REGISTER_COUNT,
-            });
-            const dataValues = await this.client.sendRequest(dataFrame);
-            this.emit('debug', `meter 0x${slave.toString(16)} data ok (${dataValues.length} values)`);
-            const dataCache = this._meterDataRegisters.get(slave) ?? new Map<number, number>();
-            dataValues.forEach((v, i) => dataCache.set(METER_DATA_REGISTER_START + i, v));
-            this._meterDataRegisters.set(slave, dataCache);
-
-            // Read product info for meters that responded
-            this.emit('debug', `reading meter product (slave=0x${slave.toString(16)}, base=${METER_PRODUCT_REGISTER_START}, count=${METER_PRODUCT_REGISTER_COUNT})`);
-            const productFrame = encodeReadMeterProductRegistersRequest({
-              dataAdapterSerial: this.client.dataAdapterSerial,
-              slaveAddress: slave,
-              baseRegister: METER_PRODUCT_REGISTER_START,
-              registerCount: METER_PRODUCT_REGISTER_COUNT,
-            });
-            const productValues = await this.client.sendRequest(productFrame);
-            this.emit('debug', `meter 0x${slave.toString(16)} product ok (${productValues.length} values)`);
-            const productCache = this._meterProductRegisters.get(slave) ?? new Map<number, number>();
-            productValues.forEach((v, i) => productCache.set(METER_PRODUCT_REGISTER_START + i, v));
-            this._meterProductRegisters.set(slave, productCache);
-          } catch {
-            this.emit('debug', `meter 0x${slave.toString(16)} did not respond, continuing scan`);
-            continue;
-          }
-        }
-
-        this._lastFullRefresh = now;
-      }
-
-      // Build combined meter caches for snapshot builder
-      const meterRegisterCaches = new Map<number, { data: Map<number, number>; product: Map<number, number> }>();
-      for (const [slave, data] of this._meterDataRegisters) {
-        const product = this._meterProductRegisters.get(slave) ?? new Map<number, number>();
-        meterRegisterCaches.set(slave, { data, product });
-      }
-
-      const cache: RegisterCache = {
-        inputRegisters: this._inputRegisters,
-        holdingRegisters: this._holdingRegisters,
+      // Reads are SEQUENTIAL with an inter-frame delay, matching GivTCP's serial producer
+      // queue. Each request retries on timeout independently, and push data fills the
+      // caches whether or not the matched response arrives.
+      const requested: Array<{ type: RegisterType; block: RegisterBlock }> = [];
+      const read = async (type: RegisterType, registerBlock: RegisterBlock) => {
+        if (this._unanswered.has(blockKey(type, registerBlock.base))) return;
+        requested.push({ type, block: registerBlock });
+        await this._readBlock(type, registerBlock);
       };
 
-      const snapshot = buildSnapshot(cache, {
-        previousSnapshot: this._previousSnapshot,
-        batteryRegisterCaches: this._batteryRegisters,
-        meterRegisterCaches,
-        isHighVoltage: this._deviceType !== null && isHighVoltage(this._deviceType),
-        bcuList: this._bcuList,
-      });
+      // HR 0 first: it identifies the model, which decides every other block.
+      await read('holding', { base: 0, count: 60 });
+      let identified = this._identify();
+      if (identified) {
+        for (const registerBlock of inputBlocksFor(identified.layout, doFull)) await read('input', registerBlock);
+        // Capabilities need the ARM firmware, which three-phase keeps in IR 1327.
+        const capabilities = this._context()!.capabilities;
+        for (const registerBlock of holdingBlocksFor(identified.layout, capabilities, doFull)) {
+          if (registerBlock.base !== 0) await read('holding', registerBlock);
+        }
+      }
 
-      // A cycle where the inverter answered nothing — no matched response AND no push
-      // data — means the transport is dead, even though buildSnapshot() can still
-      // assemble a stale snapshot from cached registers. Count it as a failed poll so
-      // _failCount climbs toward the reconnect threshold. If push data arrived while the
-      // explicit reads timed out, the inverter is alive (push mode), so this stays a
-      // successful poll and the fresh snapshot is emitted.
-      if (liveResponses === 0 && !this._pushDataReceivedThisCycle) {
+      // Wait for push data to settle. After our requests the inverter enters push mode and
+      // sends register data in 60-register chunks; this lets it arrive and fill the caches.
+      this.emit('debug', `waiting ${this.timing.pushSoakMs}ms for remaining push data...`);
+      await this._delay(this.timing.pushSoakMs);
+
+      // A poll where the inverter sent nothing — no matched response and no push data — means
+      // the transport is dead, even though a stale snapshot could still be built from the
+      // caches. Count it as a failed poll so _failCount climbs toward the reconnect threshold.
+      if (this._receivedThisPoll.length === 0) {
         this.emit('debug', 'no live response from inverter this cycle — treating poll as failed');
         this._handlePollResult(null, new Error('no response from inverter'));
         return;
       }
 
-      if (this._generation === null && snapshot !== null) {
-        this._generation = snapshot.generation;
-        this.emit('debug', `detected inverter generation: ${this._generation}`);
+      // HR 0 may have arrived as push data during the soak.
+      identified ??= this._identify();
+      if (!identified) {
+        this._handlePollResult(null, new Error('inverter not identified yet (HR 0 not read)'));
+        return;
+      }
+      this._recordMisses(requested, identified.layout);
+
+      if (doFull) {
+        const capabilities = this._context()!.capabilities;
+        if (capabilities.highVoltageBattery) await this._scanHighVoltageBatteries();
+        else await this._scanLowVoltageBatteries();
+        await this._scanMeters();
+        this._lastFullRefresh = now;
       }
 
-      this._handlePollResult(snapshot, null);
+      const snapshot = buildSnapshot(this._registerCaches(), this._context()!);
+      this._handlePollResult(snapshot, snapshot ? null : new Error('sanity check failed'));
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
+      if (error instanceof UnsupportedDeviceError) {
+        this.emit('debug', error.message);
+        this._unsupported = error;
+        if (this._pollTimer) {
+          clearInterval(this._pollTimer);
+          this._pollTimer = null;
+        }
+        return;
+      }
       this.emit('debug', `poll failed: ${error.message}`);
       this._handlePollResult(null, error);
     } finally {
@@ -451,23 +497,90 @@ export class PollManager extends EventEmitter {
     }
   }
 
-  private _holdingRanges(full: boolean): Array<{base: number, count: number}> {
-    const gen = this._generation ?? 'gen3'; // default to gen3 until detected
-    // HR(4080-4139) contains 32-bit battery energy totals that don't overflow (#8)
-    if (gen === 'three_phase') {
-      return full
-        ? [{ base: 0, count: 60 }, { base: 60, count: 60 }, { base: 180, count: 60 }, { base: 1080, count: 60 }]
-        : [{ base: 0, count: 60 }, { base: 180, count: 60 }, { base: 1080, count: 60 }];
+  /** Forget a device's registers before a scan, so a device that stops answering drops out. */
+  private _forget(slaves: Iterable<number>): void {
+    for (const slave of slaves) this._devices.delete(slave);
+  }
+
+  /** Low-voltage battery modules. Slots can be non-contiguous (#6), so every slot is tried. */
+  private async _scanLowVoltageBatteries(): Promise<void> {
+    this._forget(LOW_VOLTAGE_BATTERY_SLAVES);
+    for (const slave of LOW_VOLTAGE_BATTERY_SLAVES) {
+      this.emit('debug', `reading battery module (slave=0x${slave.toString(16)}, base=${DEVICE_REGISTER_START}, count=${DEVICE_REGISTER_COUNT})`);
+      const values = await this._readDeviceInput(slave, DEVICE_REGISTER_START, DEVICE_REGISTER_COUNT);
+      this.emit('debug', values
+        ? `battery module 0x${slave.toString(16)} ok (${values.length} values)`
+        : `battery module 0x${slave.toString(16)} did not respond, continuing scan`);
     }
-    if (gen === 'gen2') {
-      return full
-        ? [{ base: 0, count: 60 }, { base: 60, count: 60 }, { base: 180, count: 60 }, { base: 4080, count: 60 }]
-        : [{ base: 0, count: 60 }, { base: 180, count: 60 }, { base: 4080, count: 60 }];
+  }
+
+  /**
+   * High-voltage battery stacks: the aggregator (0xA0) gives the number of control units; each
+   * control unit (0x70 + n) gives its module count; each module (0x50 + k) is read at
+   * IR 60 + 120 × n.
+   */
+  private async _scanHighVoltageBatteries(): Promise<void> {
+    const moduleSlaves = Array.from({ length: MAX_BATTERY_MODULES }, (_, k) => BATTERY_MODULE_BASE_SLAVE + k);
+    const controlUnitSlaves = Array.from({ length: MAX_BATTERY_STACKS }, (_, n) => BATTERY_CONTROL_UNIT_BASE_SLAVE + n);
+    this._forget([BATTERY_AGGREGATOR_SLAVE, ...controlUnitSlaves, ...moduleSlaves]);
+
+    this.emit('debug', `reading battery aggregator (slave=0x${BATTERY_AGGREGATOR_SLAVE.toString(16)})`);
+    const aggregator = await this._readDeviceInput(BATTERY_AGGREGATOR_SLAVE, DEVICE_REGISTER_START, 5);
+    if (!aggregator) {
+      this.emit('debug', 'battery aggregator did not respond, skipping high-voltage battery scan');
+      return;
     }
-    // gen3 — includes HR 300-359 for timed discharge toggle at HR(318) (#31)
-    return full
-      ? [{ base: 0, count: 60 }, { base: 60, count: 60 }, { base: 180, count: 60 }, { base: 240, count: 60 }, { base: 300, count: 60 }, { base: 4080, count: 60 }]
-      : [{ base: 0, count: 60 }, { base: 180, count: 60 }, { base: 4080, count: 60 }];
+    const stackCount = Math.min(aggregator[BATTERY_AGGREGATOR_STACK_COUNT_REGISTER - DEVICE_REGISTER_START] ?? 0, MAX_BATTERY_STACKS);
+    this.emit('debug', `battery aggregator reports ${stackCount} stack(s)`);
+
+    for (let stack = 0; stack < stackCount; stack++) {
+      const controlUnitSlave = BATTERY_CONTROL_UNIT_BASE_SLAVE + stack;
+      this.emit('debug', `reading battery control unit ${stack} (slave=0x${controlUnitSlave.toString(16)})`);
+      const controlUnit = await this._readDeviceInput(controlUnitSlave, DEVICE_REGISTER_START, DEVICE_REGISTER_COUNT);
+      await this._delay(this.timing.interReadDelayMs);
+      if (!controlUnit) {
+        this.emit('debug', `battery control unit ${stack} did not respond, continuing scan`);
+        continue;
+      }
+      const moduleCount = Math.min(
+        controlUnit[BATTERY_CONTROL_UNIT_MODULE_COUNT_REGISTER - DEVICE_REGISTER_START] ?? 0,
+        MAX_BATTERY_MODULES,
+      );
+      this.emit('debug', `battery control unit ${stack} has ${moduleCount} module(s)`);
+      for (let module = 0; module < moduleCount; module++) {
+        const base = DEVICE_REGISTER_START + BATTERY_MODULE_STACK_OFFSET * stack;
+        const slave = BATTERY_MODULE_BASE_SLAVE + module;
+        this.emit('debug', `reading battery module ${module} of stack ${stack} (slave=0x${slave.toString(16)}, base=${base})`);
+        const values = await this._readDeviceInput(slave, base, DEVICE_REGISTER_COUNT);
+        await this._delay(this.timing.interReadDelayMs);
+        if (!values) this.emit('debug', `battery module ${module} of stack ${stack} did not respond, continuing scan`);
+      }
+    }
+  }
+
+  /** CT meters on all 8 addresses; they can be non-contiguous, so every address is tried. */
+  private async _scanMeters(): Promise<void> {
+    this._forget(METER_SLAVES);
+    for (const slave of METER_SLAVES) {
+      this.emit('debug', `reading meter data (slave=0x${slave.toString(16)}, base=${DEVICE_REGISTER_START}, count=${METER_DATA_REGISTER_COUNT})`);
+      const data = await this._readDeviceInput(slave, DEVICE_REGISTER_START, METER_DATA_REGISTER_COUNT);
+      if (!data) {
+        this.emit('debug', `meter 0x${slave.toString(16)} did not respond, continuing scan`);
+        continue;
+      }
+      this.emit('debug', `reading meter product (slave=0x${slave.toString(16)}, base=${DEVICE_REGISTER_START}, count=${METER_PRODUCT_REGISTER_COUNT})`);
+      const frame = encodeReadMeterProductRegistersRequest({
+        dataAdapterSerial: this.client.dataAdapterSerial,
+        slaveAddress: slave,
+        baseRegister: DEVICE_REGISTER_START,
+        registerCount: METER_PRODUCT_REGISTER_COUNT,
+      });
+      try {
+        await this.client.sendRequest(frame);
+      } catch {
+        this.emit('debug', `meter 0x${slave.toString(16)} product registers did not respond`);
+      }
+    }
   }
 
   private _delay(ms: number): Promise<void> {
