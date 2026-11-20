@@ -246,7 +246,7 @@ describe('PollManager', () => {
  * Short timeouts, no retries and no inter-read delay. A full refresh still waits out a timeout for
  * each empty battery and meter slot (13 on the reference unit), about a second.
  */
-const FAST: PollTiming = { requestTimeoutMs: 60, requestRetries: 0, scanRetries: 1, retryDelayMs: 0, interReadDelayMs: 0, pushSoakMs: 30 };
+const FAST: Partial<PollTiming> = { requestTimeoutMs: 60, requestRetries: 0, scanRetries: 1, retryDelayMs: 0, interReadDelayMs: 0, frameSpacingMs: 0, pushSoakMs: 30 };
 
 const isInverterRead = (request: MockRequest, functionCode: number, base: number) =>
   request.slaveAddress === 0x11 && request.functionCode === functionCode && request.baseRegister === base;
@@ -615,6 +615,58 @@ describe('PollManager against a mock inverter', { timeout: 20_000 }, () => {
       expect(pm.getData().meters).toHaveLength(1);
       expect(pm.getData().battery.modules).toHaveLength(1);
     });
+
+    it('pipelines the meter scan and matches replies that arrive out of order and in a burst', async () => {
+      // Four meters with different phase 1 voltages. Their data replies are held back until all
+      // four requests are outstanding, then sent at once in reverse order.
+      const devices = referenceDevices();
+      const [template] = capture('hybrid_gen2_arm920.log').meters!;
+      const volts = [2301, 2302, 2303, 2304];
+      volts.forEach((raw, i) => devices.set(i + 1, { input: new Map([...template.input, [60, raw]]), product: new Map() }));
+      // Empty battery slots answer (zeros), so the pipeline isn't held up waiting for them.
+      for (let slave = 0x33; slave <= 0x37; slave++) devices.set(slave, { input: new Map() });
+      const held: MockRequest[] = [];
+      const { mock, pm } = await setUp(devices, {
+        timing: { requestTimeoutMs: 2000 },
+        silent: (request) => {
+          const isMeterData = request.functionCode === 0x04 && request.slaveAddress >= 1 && request.slaveAddress <= 4;
+          if (!isMeterData) return false;
+          held.push(request);
+          if (held.length === 4) {
+            for (const reply of [...held].reverse()) {
+              mock.push(reply.slaveAddress, 0x04, 60, mock.valuesOf(devices.get(reply.slaveAddress)!, 0x04, 60, 29)!);
+            }
+          }
+          return true;
+        },
+      });
+      await pm.start();
+      expect(held.map((request) => request.slaveAddress)).toEqual([1, 2, 3, 4]);
+      expect(pm.getData().meters.map((meter) => [meter.slaveAddress, meter.voltage[0]])).toEqual([[1, 230.1], [2, 230.2], [3, 230.3], [4, 230.4]]);
+      // Each meter was asked once: the burst answered every outstanding request.
+      expect(mock.requests.filter((request) => request.functionCode === 0x04 && request.slaveAddress <= 4)).toHaveLength(4);
+    });
+
+    it('keeps 250 ms between frames, pipelined or not, and scans one device at a time with a pipeline of 1', async () => {
+      const scanGaps = async (scanPipeline: number) => {
+        const { mock, pm } = await setUp(referenceDevices(), {
+          // Silent devices time out after 600 ms, well over the 250 ms frame spacing.
+          timing: { frameSpacingMs: 250, scanPipeline, requestTimeoutMs: 600, scanRetries: 0 },
+        });
+        await pm.start();
+        const times = mock.requests.map((request) => request.receivedAt!);
+        const gaps = times.slice(1).map((time, i) => time - times[i]);
+        expect(Math.min(...gaps)).toBeGreaterThanOrEqual(240);
+        // Gaps between the scan reads after 0x32, which are all silent.
+        const silentScan = mock.requests.filter((request) => request.slaveAddress !== 0x11 && request.slaveAddress !== 0x32);
+        const silentTimes = silentScan.map((request) => request.receivedAt!);
+        return silentTimes.slice(1).map((time, i) => time - silentTimes[i]);
+      };
+      // Pipelined: the silent addresses are asked 250 ms apart, without waiting for each other.
+      expect(Math.max(...await scanGaps(8))).toBeLessThan(500);
+      // Sequential: each waits for the one before it to time out.
+      expect(Math.min(...await scanGaps(1))).toBeGreaterThanOrEqual(590);
+    }, 60_000);
 
     it('reads meter product registers once per session, and only for meters that answered', async () => {
       const { mock, pm, poll } = await setUp(devicesWithMeter());

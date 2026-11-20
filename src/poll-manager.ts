@@ -55,8 +55,15 @@ export interface PollTiming {
   scanRetries: number;
   /** Pause before a retry, as the client's own retries. Default 500 ms. */
   retryDelayMs: number;
-  /** Pause between sequential reads. Default 250 ms, GivTCP's inter-frame delay. */
+  /**
+   * Battery and meter scan reads outstanding at once. Default 8. The client still sends frames at
+   * least 250 ms apart; 1 makes the scans sequential, if a data adapter can't cope.
+   */
+  scanPipeline: number;
+  /** Pause between sequential inverter block reads. Default 250 ms, GivTCP's inter-frame delay. */
   interReadDelayMs: number;
+  /** Minimum time between any two frames sent, including pipelined scan reads. Default 250 ms. */
+  frameSpacingMs: number;
   /** Wait after the reads for the rest of the push data. Default 3 s. */
   pushSoakMs: number;
 }
@@ -66,7 +73,9 @@ const DEFAULT_TIMING: PollTiming = {
   requestRetries: 3,
   scanRetries: 1,
   retryDelayMs: 500,
+  scanPipeline: 8,
   interReadDelayMs: 250,
+  frameSpacingMs: 250,
   pushSoakMs: 3000,
 };
 
@@ -97,6 +106,11 @@ const MAX_BATTERY_STACKS = 8;
 const BATTERY_MODULE_BASE_SLAVE = 0x50;
 const BATTERY_MODULE_STACK_OFFSET = 120;
 const MAX_BATTERY_MODULES = 16;
+const HIGH_VOLTAGE_BATTERY_SLAVES = [
+  BATTERY_AGGREGATOR_SLAVE,
+  ...Array.from({ length: MAX_BATTERY_STACKS }, (_, n) => BATTERY_CONTROL_UNIT_BASE_SLAVE + n),
+  ...Array.from({ length: MAX_BATTERY_MODULES }, (_, k) => BATTERY_MODULE_BASE_SLAVE + k),
+];
 
 /**
  * A read (inverter block, battery slot, meter address) that goes unanswered this many live polls
@@ -218,6 +232,7 @@ export class PollManager extends EventEmitter {
       port: this.options.port,
       timeout: this.timing.requestTimeoutMs,
       retries: this.timing.requestRetries,
+      frameSpacingMs: this.timing.frameSpacingMs,
       onDebug: (msg) => this.emit('debug', msg),
       // Store ALL register data the inverter sends, whether or not it matches a pending
       // request. GivEnergy inverters enter "push mode" after receiving requests and
@@ -566,8 +581,8 @@ export class PollManager extends EventEmitter {
   }
 
   /**
-   * Request each read not yet dropped as unanswered, one after another, and return the ones
-   * requested (for `_recordMisses`).
+   * Request each inverter block not yet dropped as unanswered, one after another, and return the
+   * ones requested (for `_recordMisses`).
    */
   private async _requestEach(requests: readonly ReadRequest[], retries: number): Promise<ReadRequest[]> {
     const requested = requests.filter((request) => !this._unanswered.has(requestKey(request)));
@@ -575,6 +590,23 @@ export class PollManager extends EventEmitter {
       await this._request(request, retries);
       await this._delay(this.timing.interReadDelayMs);
     }
+    return requested;
+  }
+
+  /**
+   * Request battery or meter scan reads, up to `timing.scanPipeline` outstanding at once, and
+   * return the ones requested (for `_recordMisses`). Replies are matched by device address and
+   * shape, so they may arrive in any order. Only called after the inverter blocks, so a scan read
+   * is never outstanding while an inverter block request is in flight.
+   */
+  private async _requestBatch(requests: readonly ReadRequest[], retries: number): Promise<ReadRequest[]> {
+    const requested = requests.filter((request) => !this._unanswered.has(requestKey(request)));
+    let next = 0;
+    const worker = async () => {
+      while (next < requested.length) await this._request(requested[next++], retries);
+    };
+    const workers = Math.min(Math.max(1, this.timing.scanPipeline), requested.length);
+    await Promise.all(Array.from({ length: workers }, worker));
     return requested;
   }
 
@@ -633,10 +665,7 @@ export class PollManager extends EventEmitter {
       ]));
 
       if (doFull) {
-        const capabilities = this._context()!.capabilities;
-        if (capabilities.highVoltageBattery) await this._scanHighVoltageBatteries();
-        else await this._scanLowVoltageBatteries();
-        await this._scanMeters();
+        await this._scanDevices(this._context()!.capabilities.highVoltageBattery);
         this._lastFullRefresh = now;
       }
 
@@ -672,70 +701,66 @@ export class PollManager extends EventEmitter {
     for (const slave of slaves) this._devices.get(slave)?.input.clear();
   }
 
-  /** Low-voltage battery modules. Slots can be non-contiguous (#6), so every slot is tried. */
-  private async _scanLowVoltageBatteries(): Promise<void> {
-    this._forget(LOW_VOLTAGE_BATTERY_SLAVES);
-    const reads = LOW_VOLTAGE_BATTERY_SLAVES.map((slave): ReadRequest =>
-      ({ slave, functionCode: FUNCTION_READ_INPUT, base: DEVICE_REGISTER_START, count: DEVICE_REGISTER_COUNT }));
-    this._recordMisses(await this._requestEach(reads, this.timing.scanRetries));
-  }
-
   /**
-   * High-voltage battery stacks: the aggregator (0xA0, IR 60–64) gives the number of control
-   * units; each control unit (0x70 + n) gives its module count; each module (0x50 + k) is read at
-   * IR 60 + 120 × n. An aggregator that doesn't answer three full refreshes in a row is dropped
-   * like any other read, which ends the high-voltage scan for the session.
+   * Scan the battery and meter devices. Every address is tried, because they can be
+   * non-contiguous (#6), until it goes unanswered three full refreshes in a row.
+   *
+   * 1. Low-voltage battery modules (0x32–0x37), or the high-voltage aggregator (0xA0, IR 60–64),
+   *    together with the CT meters' data (0x01–0x08, IR 60–88), in one pipelined batch.
+   * 2. High-voltage only: each control unit (0x70 + n), for its module count (IR 64), then each
+   *    module (0x50 + k) at IR 60 + 120 × n. An aggregator dropped as unanswered ends the
+   *    high-voltage scan for the session.
+   * 3. Meter product registers (function 22): static, so read once per session, for meters whose
+   *    data answered.
    */
-  private async _scanHighVoltageBatteries(): Promise<void> {
-    const moduleSlaves = Array.from({ length: MAX_BATTERY_MODULES }, (_, k) => BATTERY_MODULE_BASE_SLAVE + k);
-    const controlUnitSlaves = Array.from({ length: MAX_BATTERY_STACKS }, (_, n) => BATTERY_CONTROL_UNIT_BASE_SLAVE + n);
-    this._forget([BATTERY_AGGREGATOR_SLAVE, ...controlUnitSlaves, ...moduleSlaves]);
+  private async _scanDevices(highVoltageBattery: boolean): Promise<void> {
     const input = (slave: number, base: number, count: number): ReadRequest =>
       ({ slave, functionCode: FUNCTION_READ_INPUT, base, count });
+    const batteryReads = highVoltageBattery
+      ? [input(BATTERY_AGGREGATOR_SLAVE, DEVICE_REGISTER_START, 5)]
+      : LOW_VOLTAGE_BATTERY_SLAVES.map((slave) => input(slave, DEVICE_REGISTER_START, DEVICE_REGISTER_COUNT));
+    const meterReads = METER_SLAVES.map((slave) => input(slave, DEVICE_REGISTER_START, METER_DATA_REGISTER_COUNT));
 
-    const aggregatorRead = input(BATTERY_AGGREGATOR_SLAVE, DEVICE_REGISTER_START, 5);
-    this._recordMisses(await this._requestEach([aggregatorRead], this.timing.scanRetries));
-    const aggregator = this._devices.get(BATTERY_AGGREGATOR_SLAVE)?.input;
-    const reportedStacks = aggregator?.get(BATTERY_AGGREGATOR_STACK_COUNT_REGISTER);
+    this._forget(highVoltageBattery ? HIGH_VOLTAGE_BATTERY_SLAVES : LOW_VOLTAGE_BATTERY_SLAVES);
+    this._forget(METER_SLAVES);
+    this._recordMisses(await this._requestBatch([...batteryReads, ...meterReads], this.timing.scanRetries));
+
+    if (highVoltageBattery) await this._scanBatteryStacks();
+
+    const productReads = meterReads
+      .filter((read) => this._answeredThisPoll(read) && !this._meterProductRead.has(read.slave))
+      .map((read): ReadRequest => ({ ...read, functionCode: FUNCTION_READ_METER_PRODUCT, count: METER_PRODUCT_REGISTER_COUNT }));
+    const requested = await this._requestBatch(productReads, this.timing.scanRetries);
+    this._recordMisses(requested);
+    for (const read of requested) {
+      if (this._answeredThisPoll(read)) this._meterProductRead.add(read.slave);
+    }
+  }
+
+  /** Step 2 of `_scanDevices`: the high-voltage control units and their modules. */
+  private async _scanBatteryStacks(): Promise<void> {
+    const reportedStacks = this._devices.get(BATTERY_AGGREGATOR_SLAVE)?.input.get(BATTERY_AGGREGATOR_STACK_COUNT_REGISTER);
     if (reportedStacks === undefined) {
       this.emit('debug', 'battery aggregator did not answer; skipping the high-voltage battery scan');
       return;
     }
     const stackCount = Math.min(reportedStacks, MAX_BATTERY_STACKS);
     this.emit('debug', `battery aggregator reports ${stackCount} stack(s)`);
+    const input = (slave: number, base: number): ReadRequest =>
+      ({ slave, functionCode: FUNCTION_READ_INPUT, base, count: DEVICE_REGISTER_COUNT });
 
     const controlUnitReads = Array.from({ length: stackCount }, (_, stack) =>
-      input(BATTERY_CONTROL_UNIT_BASE_SLAVE + stack, DEVICE_REGISTER_START, DEVICE_REGISTER_COUNT));
-    this._recordMisses(await this._requestEach(controlUnitReads, this.timing.scanRetries));
+      input(BATTERY_CONTROL_UNIT_BASE_SLAVE + stack, DEVICE_REGISTER_START));
+    this._recordMisses(await this._requestBatch(controlUnitReads, this.timing.scanRetries));
 
     const moduleReads = controlUnitReads.flatMap((read, stack) => {
       const moduleCount = this._devices.get(read.slave)?.input.get(BATTERY_CONTROL_UNIT_MODULE_COUNT_REGISTER);
       if (moduleCount === undefined) return [];
       this.emit('debug', `battery control unit ${stack} has ${moduleCount} module(s)`);
       return Array.from({ length: Math.min(moduleCount, MAX_BATTERY_MODULES) }, (_, module) =>
-        input(BATTERY_MODULE_BASE_SLAVE + module, DEVICE_REGISTER_START + BATTERY_MODULE_STACK_OFFSET * stack, DEVICE_REGISTER_COUNT));
+        input(BATTERY_MODULE_BASE_SLAVE + module, DEVICE_REGISTER_START + BATTERY_MODULE_STACK_OFFSET * stack));
     });
-    this._recordMisses(await this._requestEach(moduleReads, this.timing.scanRetries));
-  }
-
-  /**
-   * CT meters on all 8 addresses; they can be non-contiguous, so every address is tried. Product
-   * registers (function 22) are static: read once per session, for meters whose data answered.
-   */
-  private async _scanMeters(): Promise<void> {
-    this._forget(METER_SLAVES);
-    const dataReads = METER_SLAVES.map((slave): ReadRequest =>
-      ({ slave, functionCode: FUNCTION_READ_INPUT, base: DEVICE_REGISTER_START, count: METER_DATA_REGISTER_COUNT }));
-    this._recordMisses(await this._requestEach(dataReads, this.timing.scanRetries));
-
-    const productReads = dataReads
-      .filter((read) => this._answeredThisPoll(read) && !this._meterProductRead.has(read.slave))
-      .map((read): ReadRequest => ({ ...read, functionCode: FUNCTION_READ_METER_PRODUCT, count: METER_PRODUCT_REGISTER_COUNT }));
-    const requested = await this._requestEach(productReads, this.timing.scanRetries);
-    this._recordMisses(requested);
-    for (const read of requested) {
-      if (this._answeredThisPoll(read)) this._meterProductRead.add(read.slave);
-    }
+    this._recordMisses(await this._requestBatch(moduleReads, this.timing.scanRetries));
   }
 
   private _delay(ms: number): Promise<void> {

@@ -30,6 +30,8 @@ export interface MockRequest {
   baseRegister: number;
   /** The register count, or for a write the value. */
   registerCount: number;
+  /** When the mock received it, `Date.now()`. */
+  receivedAt?: number;
 }
 
 export interface MockInverterOptions {
@@ -149,7 +151,7 @@ export async function startMockInverter(options: MockInverterOptions): Promise<M
           continue;
         }
         const { type: _type, ...read } = request;
-        mock.requests.push(read);
+        mock.requests.push({ ...read, receivedAt: Date.now() });
         if (read.functionCode === 0x06) {
           if (mock.silent(read)) continue;
           mock.writes.push({ register: read.baseRegister, value: read.registerCount });
