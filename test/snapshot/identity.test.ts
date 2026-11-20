@@ -29,8 +29,8 @@ describe('buildIdentity on the Gen3 reference unit', () => {
       ratedPower: 5000,
       // 20xx family with ARM firmware century 3.
       batteryMaxPower: 3600,
-      // HR 22 reads 2: see the USB device quirk test below.
-      usbDevice: 'unknown',
+      // HR 22 reads 2, and the unit has a Wi-Fi dongle: see the USB device quirk test below.
+      usbDevice: 'wifi',
       ammeterEnabled: true,
       // HR 2 = 0x0C32: first two hex digits 0x0C = 12.
       certification: 'g99',
@@ -68,21 +68,21 @@ describe('buildIdentity quirks', () => {
     expect(singlePhase({ 54: 7 }).batteryType).toBe('lithium');
   });
 
-  it('decodes HR 22 = 2 as "unknown" because the sources conflict', () => {
-    // Quirk: HR 22 reads 2 on the reference unit and on every capture. GivTCP's UsbDevice is
-    // 0 none, 1 Wi-Fi, 8 disk, so 2 has no name. The external library's UsbDevice is
-    // 0 none, 1 Wi-Fi, 2 disk, which would make the reference unit a disk, yet it has a
-    // Wi-Fi dongle. Until that is resolved, 2 decodes as 'unknown'.
-    expect(singlePhase({ 22: 2 }).usbDevice).toBe('unknown');
+  it('quirk: decodes HR 22 = 2 as Wi-Fi: the reference unit has a Wi-Fi dongle and reads 2', () => {
+    // The owner confirmed the reference unit's USB port holds the Wi-Fi dongle, and it reads
+    // HR 22 = 2, as does every capture. That contradicts the external library's UsbDevice
+    // (0 none, 1 Wi-Fi, 2 disk); GivTCP's (0 none, 1 Wi-Fi, 8 disk) has no name for 2.
+    expect(singlePhase({ 22: 2 }).usbDevice).toBe('wifi');
     for (const name of INVERTER_CAPTURES.map((c) => c.name).filter((n) => !n.startsWith('hybrid_hv_gen3'))) {
       expect(capture(name).holding.get(22)).toBe(2);
     }
   });
 
-  it('names the USB devices it knows', () => {
+  it('decodes 0 and 1 as the sources agree, and the disputed disk value as unknown', () => {
     expect(singlePhase({ 22: 0 }).usbDevice).toBe('none');
     expect(singlePhase({ 22: 1 }).usbDevice).toBe('wifi');
-    expect(singlePhase({ 22: 8 }).usbDevice).toBe('disk');
+    // GivTCP says 8 is a disk, the external library says 2 is (wrong, above): not resolved.
+    expect(singlePhase({ 22: 8 }).usbDevice).toBe('unknown');
   });
 
   it('gives Gen1/Gen2 firmware centuries their own battery power', () => {
