@@ -71,8 +71,9 @@ export type WritableOnBothLayouts = WritableSettingKey<'single_phase'> & Writabl
 /**
  * The events a `GivEnergyInverter<L>` emits, with their arguments:
  * - `data`: a new snapshot, after each successful poll and each accepted write.
- * - `lost`: the connection was lost after repeated failed polls (and reconnecting starts, if
- *   `autoReconnect`), or a later poll found an unsupported device.
+ * - `lost`: the connection was lost (and reconnecting starts, if `autoReconnect`): on the first
+ *   failed poll after the socket closed, or after 3 failed polls in a row on an open socket that
+ *   the inverter stopped answering. Also when a later poll found an unsupported device.
  * - `reconnecting`: a reconnect attempt is about to start, after `nextRetryMs`.
  * - `reconnected`: a reconnect succeeded and polling resumed.
  * - `debug`: a diagnostic message.

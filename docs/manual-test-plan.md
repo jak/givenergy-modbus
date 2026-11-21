@@ -48,7 +48,7 @@ show it. Pull to refresh.
 | R7 | Battery pause | Same mode and window as the app | |
 | R8 | `settings` | Eco mode, battery reserve, charge and discharge rate, export priority etc. match the app | |
 | R9 | Leave it running 30 min | "data updates" keeps rising; "last … s ago" stays under ~5 min | |
-| R10 | Turn the computer's Wi-Fi off for 1–2 min, then on | "connection lost", "reconnecting", then "reconnected"; the panel updates again | |
+| R10 | Turn the computer's Wi-Fi off for 1–2 min, then on. Note the times | "connection lost" within about 1–2 min of Wi-Fi off (the OS may take a minute to fail the socket), then "reconnecting", then "reconnected" soon after Wi-Fi is back; the panel updates again. Before the fix: 3.5 min to "lost" | |
 | R11 | A write command in `--read-only` | "Read-only mode: writes are off." | |
 | R12 | `quit` | Exits cleanly and prints the log path | |
 
