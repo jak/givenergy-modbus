@@ -1,6 +1,6 @@
 // Interactive console for trying the library against a real inverter.
 //
-// Usage: node scripts/try.mjs [host] [--port 8899] [--read-only] [--debug]
+// Usage: node scripts/tui.mjs [host] [--port 8899] [--read-only] [--debug]
 //
 // Shows a live status panel and lets you edit charge/discharge slots, the battery pause and
 // any safe catalogue setting. Every write shows the current and new value and needs `y`.
@@ -32,7 +32,7 @@ const interactive = process.stdout.isTTY === true;
 // ── Session log (dumps/ is gitignored) ───────────────────────────────────────
 const dumpsDir = new URL('../dumps/', import.meta.url);
 mkdirSync(dumpsDir, { recursive: true });
-const logFile = new URL(`try-${new Date().toISOString().replace(/[:.]/g, '-')}.log`, dumpsDir);
+const logFile = new URL(`tui-${new Date().toISOString().replace(/[:.]/g, '-')}.log`, dumpsDir);
 function log(event, details = {}) {
   appendFileSync(logFile, JSON.stringify({ at: new Date().toISOString(), event, ...details }) + '\n');
 }
@@ -111,9 +111,10 @@ function panel() {
   }
   lines.push('');
   lines.push(bold('Key settings'));
-  const keys = ['ecoMode', 'acCharge', 'dcDischarge', 'batteryReserve', 'batteryChargeRate', 'batteryDischargeRate', 'acChargeUpperLimit', 'exportPriority'];
-  const shown = keys.filter((k) => s.settings[k] !== undefined).map((k) => `${k}=${show(s.settings[k])}`);
-  for (let i = 0; i < shown.length; i += 4) lines.push('  ' + shown.slice(i, i + 4).join('   '));
+  const keys = ['ecoMode', 'acCharge', 'dcDischarge', 'batteryReserve', 'acChargeUpperLimit', 'exportPriority',
+    'batteryChargeRate', 'batteryDischargeRate', 'inverterChargePowerPercent', 'inverterDischargePowerPercent'];
+  const shown = keys.filter((k) => s.settings[k] !== undefined).map((k) => `${k} ${dim(`HR ${registerOf(k)}`)} = ${show(s.settings[k])}`);
+  for (let i = 0; i < shown.length; i += 2) lines.push('  ' + shown.slice(i, i + 2).map((t) => t.padEnd(interactive ? 56 : 48)).join(''));
   lines.push('');
   if (events.length) lines.push(dim(events.join('\n')), '');
   if (changes.size) lines.push(`${changes.size} change(s) this session; "undo" puts them back.`);
@@ -235,6 +236,12 @@ function writableSettings() {
   return Object.entries(SETTINGS).filter(([key, def]) => def.writable !== false && !def.unsafe && inverter.supports(key));
 }
 
+/** The holding register a setting lives in on this inverter's layout. */
+function registerOf(key) {
+  const register = SETTINGS[key].register;
+  return typeof register === 'number' ? register : register[inverter.layout];
+}
+
 function describe(def) {
   switch (def.kind) {
     case 'boolean': return 'on|off';
@@ -268,7 +275,7 @@ function listSettings() {
   for (const [key, def] of Object.entries(SETTINGS)) {
     if (!inverter.supports(key)) continue;
     const access = def.unsafe ? 'unsafe, not offered' : def.writable === false ? 'read-only' : describe(def);
-    console.log(`  ${key.padEnd(32)} ${show(s.settings[key]).padEnd(10)} ${dim(access)}`);
+    console.log(`  ${`HR ${registerOf(key)}`.padEnd(7)} ${key.padEnd(32)} ${show(s.settings[key]).padEnd(10)} ${dim(`${def.appName ?? ''}${def.appName ? ' · ' : ''}${access}`)}`);
   }
 }
 

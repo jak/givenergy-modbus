@@ -1,18 +1,18 @@
 # Manual test plan: real inverter
 
-Checks for a release against a real inverter, run with `scripts/try.mjs`. The automated
+Checks for a release against a real inverter, run with `scripts/tui.mjs`. The automated
 tests cover every model from wire captures, so this plan checks what they can't: real
 timing, and the dongle's push mode and reconnects. It also checks that writes land and
 the GivEnergy app agrees with them.
 
 ```sh
 npm run build
-npm run script:try -- <host> --read-only   # part 1
-npm run script:try -- <host>               # part 2 (writes)
+npm run script:tui -- <host> --read-only   # part 1
+npm run script:tui -- <host>               # part 2 (writes)
 ```
 
 Leave out the host and the script finds the inverter itself. Each session writes a log to
-`dumps/try-*.log`, which is gitignored because it can contain serials. Type `log` in the
+`dumps/tui-*.log`, which is gitignored because it can contain serials. Type `log` in the
 console to see its path.
 
 Console commands:
