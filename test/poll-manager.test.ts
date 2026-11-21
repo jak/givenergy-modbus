@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { PollManager, type PollTiming } from '../src/poll-manager.js';
+import { LOST_AFTER_FAILED_POLLS, PollManager, type PollTiming } from '../src/poll-manager.js';
 import { UnsupportedDeviceError } from '../src/errors.js';
 import type { InverterSnapshot } from '../src/model/snapshot.js';
 import { buildSnapshot } from '../src/snapshot/index.js';
@@ -63,6 +63,7 @@ describe('PollManager', () => {
     // PollManager should track consecutive failures.
     const pm = new PollManager({ host: '127.0.0.1' });
     (pm as any)._started = true; // _handlePollResult ignores results after stop()
+      (pm as any)._startPollDone = true; // and reports 'lost' only after start()'s first poll
     (pm as any)._failCount = 0;
     (pm as any)._handlePollResult(null, null);
     expect((pm as any)._failCount).toBe(1);
@@ -71,22 +72,52 @@ describe('PollManager', () => {
   it('resets failure count after a successful poll', () => {
     const pm = new PollManager({ host: '127.0.0.1' });
     (pm as any)._started = true; // _handlePollResult ignores results after stop()
+      (pm as any)._startPollDone = true; // and reports 'lost' only after start()'s first poll
     (pm as any)._failCount = 5;
     (pm as any)._handlePollResult(mockSnapshot, null);
     expect((pm as any)._failCount).toBe(0);
   });
 
-  it('emits lost event after 10 consecutive failures', () => {
-    // Python: if failcount >= 10: rebootaddon() — we emit 'lost' instead
+  it(`emits lost after ${LOST_AFTER_FAILED_POLLS} consecutive failed polls on an open socket`, () => {
+    // Quirk: GivTCP restarts its add-on after 10 failed polls. A reconnect is cheap, and 10 polls
+    // of ~40 s HR 0 retries meant 'lost' came ~23 minutes after the inverter went silent.
     const pm = new PollManager({ host: '127.0.0.1', autoReconnect: false });
     const lostEvents: Error[] = [];
     pm.on('lost', (err: Error) => lostEvents.push(err));
+    (pm as any)._started = true;
+    (pm as any)._startPollDone = true;
+    Object.defineProperty((pm as any).client, 'connected', { get: () => true });
 
-    (pm as any)._started = true; // _handlePollResult ignores results after stop()
-
-    (pm as any)._failCount = 9;
-    (pm as any)._handlePollResult(null, new Error('connection lost'));
+    for (let poll = 1; poll < LOST_AFTER_FAILED_POLLS; poll++) (pm as any)._handlePollResult(null, new Error('no response from inverter'));
+    expect(lostEvents).toHaveLength(0);
+    (pm as any)._handlePollResult(null, new Error('no response from inverter'));
     expect(lostEvents).toHaveLength(1);
+  });
+
+  it('emits lost on the first failed poll after the socket closed', () => {
+    // A closed socket can't recover by itself, so there's nothing to wait for.
+    const pm = new PollManager({ host: '127.0.0.1', autoReconnect: false });
+    const lostEvents: Error[] = [];
+    pm.on('lost', (err: Error) => lostEvents.push(err));
+    (pm as any)._started = true;
+    (pm as any)._startPollDone = true;
+    Object.defineProperty((pm as any).client, 'connected', { get: () => false });
+
+    (pm as any)._handlePollResult(null, new Error('no response from inverter'));
+    expect(lostEvents).toHaveLength(1);
+  });
+
+  it("does not emit lost for start()'s own first poll", () => {
+    // connect() reports a failed first poll itself; emitting 'lost' there would also start a
+    // reconnect loop alongside start()'s poll timer.
+    const pm = new PollManager({ host: '127.0.0.1', autoReconnect: false });
+    const lostEvents: Error[] = [];
+    pm.on('lost', (err: Error) => lostEvents.push(err));
+    (pm as any)._started = true;
+    Object.defineProperty((pm as any).client, 'connected', { get: () => false });
+
+    (pm as any)._handlePollResult(null, new Error('no response from inverter'));
+    expect(lostEvents).toHaveLength(0);
   });
 
   it('extends EventEmitter', () => {
@@ -110,8 +141,9 @@ describe('PollManager', () => {
       pm.on('reconnecting', (attempt: number) => reconnectingEvents.push(attempt));
 
       (pm as any)._started = true; // _handlePollResult ignores results after stop()
+      (pm as any)._startPollDone = true; // and reports 'lost' only after start()'s first poll
 
-      (pm as any)._failCount = 9;
+      (pm as any)._failCount = LOST_AFTER_FAILED_POLLS - 1;
       (pm as any)._handlePollResult(null, new Error('connection lost'));
 
       expect(lostEvents).toHaveLength(1);
@@ -136,8 +168,9 @@ describe('PollManager', () => {
       (pm as any).client.close = vi.fn().mockResolvedValue(undefined);
 
       (pm as any)._started = true; // _handlePollResult ignores results after stop()
+      (pm as any)._startPollDone = true; // and reports 'lost' only after start()'s first poll
 
-      (pm as any)._failCount = 9;
+      (pm as any)._failCount = LOST_AFTER_FAILED_POLLS - 1;
       (pm as any)._handlePollResult(null, new Error('connection lost'));
 
       await vi.waitFor(() => expect(events.length).toBeGreaterThanOrEqual(4), { timeout: 2000 });
@@ -171,13 +204,15 @@ describe('PollManager', () => {
       (pm as any)._executePoll = vi.fn().mockImplementation(async () => {
         (pm as any)._cache = mockSnapshot;
         (pm as any)._started = true; // _handlePollResult ignores results after stop()
+      (pm as any)._startPollDone = true; // and reports 'lost' only after start()'s first poll
         (pm as any)._failCount = 0;
         (pm as any)._started = true;
       });
 
       (pm as any)._started = true; // _handlePollResult ignores results after stop()
+      (pm as any)._startPollDone = true; // and reports 'lost' only after start()'s first poll
 
-      (pm as any)._failCount = 9;
+      (pm as any)._failCount = LOST_AFTER_FAILED_POLLS - 1;
       (pm as any)._handlePollResult(null, new Error('connection lost'));
 
       await vi.waitFor(() => expect(reconnected).toBe(true), { timeout: 2000 });
@@ -201,8 +236,9 @@ describe('PollManager', () => {
       (pm as any).client.close = vi.fn().mockResolvedValue(undefined);
 
       (pm as any)._started = true; // _handlePollResult ignores results after stop()
+      (pm as any)._startPollDone = true; // and reports 'lost' only after start()'s first poll
 
-      (pm as any)._failCount = 9;
+      (pm as any)._failCount = LOST_AFTER_FAILED_POLLS - 1;
       (pm as any)._handlePollResult(null, new Error('connection lost'));
 
       await vi.waitFor(() => expect(events.length).toBeGreaterThanOrEqual(1), { timeout: 1000 });
@@ -237,13 +273,15 @@ describe('PollManager', () => {
       (pm as any)._executePoll = vi.fn().mockImplementation(async () => {
         (pm as any)._cache = mockSnapshot;
         (pm as any)._started = true; // _handlePollResult ignores results after stop()
+      (pm as any)._startPollDone = true; // and reports 'lost' only after start()'s first poll
         (pm as any)._failCount = 0;
         (pm as any)._started = true;
       });
 
       (pm as any)._started = true; // _handlePollResult ignores results after stop()
+      (pm as any)._startPollDone = true; // and reports 'lost' only after start()'s first poll
 
-      (pm as any)._failCount = 9;
+      (pm as any)._failCount = LOST_AFTER_FAILED_POLLS - 1;
       (pm as any)._handlePollResult(null, new Error('lost'));
 
       await vi.waitFor(() => expect((pm as any)._reconnecting).toBe(false), { timeout: 2000 });

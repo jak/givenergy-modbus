@@ -68,6 +68,14 @@ export interface PollTiming {
   pushSoakMs: number;
 }
 
+/**
+ * Consecutive failed polls before the connection is reported lost and the reconnect starts.
+ * GivTCP waits for 10, but its response is to restart the whole add-on; a reconnect is cheap,
+ * and 10 meant 'lost' came 2.5 minutes after a closed socket and about 23 minutes after the
+ * inverter went silent on an open one. A closed socket is reported on the first failed poll.
+ */
+export const LOST_AFTER_FAILED_POLLS = 3;
+
 const DEFAULT_TIMING: PollTiming = {
   requestTimeoutMs: 10_000,
   requestRetries: 3,
@@ -682,6 +690,12 @@ export class PollManager extends EventEmitter {
 
       // HR 0 first: it identifies the model, which decides every other block.
       await read('holding', { base: 0, count: 60 });
+      // Nothing at all from the inverter after HR 0's retries means it isn't there: stop here
+      // rather than wait out every other block's retries too (about 40 s each).
+      if (!this._heardFromInverter()) {
+        this._handlePollResult(null, new Error('no response from inverter'));
+        return;
+      }
       let identified = this._identify();
       if (identified) {
         for (const registerBlock of inputBlocksFor(identified.layout, doFull)) await read('input', registerBlock);
@@ -700,7 +714,7 @@ export class PollManager extends EventEmitter {
       // A poll where the inverter sent nothing — no matched response and no push data — means
       // the transport is dead, even though a stale snapshot could still be built from the
       // caches. Count it as a failed poll so _failCount climbs toward the reconnect threshold.
-      if (!this._receivedThisPoll.some((range) => range.slave === INVERTER_SLAVE)) {
+      if (!this._heardFromInverter()) {
         this.emit('debug', 'no live response from inverter this cycle — treating poll as failed');
         this._handlePollResult(null, new Error('no response from inverter'));
         return;
@@ -836,6 +850,11 @@ export class PollManager extends EventEmitter {
     return [...controlUnitReads, ...moduleReads];
   }
 
+  /** Whether any frame from the inverter itself (a reply or push data) arrived this poll. */
+  private _heardFromInverter(): boolean {
+    return this._receivedThisPoll.some((range) => range.slave === INVERTER_SLAVE);
+  }
+
   /** Wait `ms`, or less if `stop()` is called meanwhile. */
   private _delay(ms: number): Promise<void> {
     if (this._stopped) return Promise.resolve();
@@ -864,8 +883,10 @@ export class PollManager extends EventEmitter {
       this.emit('data', snapshot);
     } else {
       this._failCount++;
-      if (this._failCount >= 10 && !this._reconnecting) {
-        this.emit('lost', err ?? new Error('too many consecutive failures'));
+      const transportClosed = !this.client.connected;
+      // Not during start(): its first poll failing is reported by connect(), not as 'lost'.
+      if ((this._failCount >= LOST_AFTER_FAILED_POLLS || transportClosed) && this._startPollDone && !this._reconnecting) {
+        this.emit('lost', err ?? new Error(transportClosed ? 'connection closed' : 'too many consecutive failures'));
         if (this.options.autoReconnect) {
           if (this._pollTimer) {
             clearInterval(this._pollTimer);

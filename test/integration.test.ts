@@ -376,13 +376,6 @@ describe('Integration: GivEnergyInverter with mock inverter', () => {
     inv.on('reconnecting', () => { events.reconnecting++; });
     inv.on('reconnected', () => { events.reconnected++; });
 
-    // Pin _failCount just below the threshold until 'lost' fires, so the test hits the
-    // failure threshold in one dead poll instead of waiting for ten (~40s of soak delays).
-    const pm = (inv as any).pollManager;
-    const pin = setInterval(() => {
-      if (events.lost === 0 && !pm._reconnecting) pm._failCount = 9;
-    }, 20);
-
     try {
       // Baseline: live data.
       expect(inv.getData().identity.serialNumber).toBe('SA1234B567');
@@ -395,7 +388,6 @@ describe('Integration: GivEnergyInverter with mock inverter', () => {
         expect(events.lost).toBeGreaterThanOrEqual(1);
         expect(events.reconnecting).toBeGreaterThanOrEqual(1);
       }, { timeout: 20000, interval: 50 });
-      clearInterval(pin);
 
       // The reconnect loop should re-establish the connection and resume polling.
       await vi.waitFor(() => {
@@ -404,7 +396,6 @@ describe('Integration: GivEnergyInverter with mock inverter', () => {
 
       expect(inv.getData().identity.serialNumber).toBe('SA1234B567');
     } finally {
-      clearInterval(pin);
       await inv.stop();
       await mock.close();
     }

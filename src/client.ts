@@ -42,6 +42,11 @@ export class Client {
   private _dataAdapterSerial = '**********';
 
   /** The data adapter serial, learned from the first heartbeat */
+  /** True while a socket is open. A 'close' or 'error' on the socket sets it false at once. */
+  get connected(): boolean {
+    return this.socket !== null;
+  }
+
   get dataAdapterSerial(): string {
     return this._dataAdapterSerial;
   }
