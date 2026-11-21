@@ -1,5 +1,71 @@
 # Changelog
 
+## [3.0.0](https://github.com/jak/givenergy-modbus/compare/givenergy-modbus-v2.0.2...givenergy-modbus-v3.0.0) (2026-11-21)
+
+
+### ⚠ BREAKING CHANGES
+
+* deep imports into dist/ (for example givenergy-modbus/dist/pdu/encode.js) are no longer supported; import from givenergy-modbus.
+* LowVoltageBatteryModule.current is removed.
+* the 2.x generation model ('gen2' | 'gen3' | 'three_phase'), DeviceType and detectModel, the flat 2.x snapshot types, detectBatteries and the register lookup tables are removed. Use model, layout and capabilities on the v3 snapshot.
+* these 2.x exports are removed: Gen2Inverter, Gen3Inverter, detectGeneration, modelToGeneration, InverterGeneration, Gen2Snapshot, Gen3Snapshot, BatteryPauseMode, BatterySnapshot, MeterSnapshot and TimeSlot. ThreePhaseInverter, InverterSnapshot, ThreePhaseSnapshot, TimeSlotConfig, TimeSlotInput, InverterIdentity and DiscoveredDevice keep their names but are the v3 types (ThreePhase is now readonly [T, T, T]).
+* setEcoMode, setTimedExport, setTimedCharge, setChargeTarget, setChargeRate(Percent), setDischargeRate(Percent), setBatteryReserve, setBatteryPowerReserve, setExportLimit, setBatteryPauseMode, setTimedDischarge and setTimedDischargeSlot are removed. Use setSetting / setBatteryPause / setChargeSlot.
+* InverterSnapshot is regrouped (identity, status, solar, battery, grid, inverter, eps, load, settings, schedules), discriminated on `layout` instead of `generation`. See website/migration-v3.md.
+* drop EOL Node 20, add Node 26 ([#40](https://github.com/jak/givenergy-modbus/issues/40))
+
+### ci
+
+* drop EOL Node 20, add Node 26 ([#40](https://github.com/jak/givenergy-modbus/issues/40)) ([41fe60d](https://github.com/jak/givenergy-modbus/commit/41fe60da3eed54158fada57186b59039bd5fc89f))
+
+
+### Features
+
+* assemble the v3 snapshot ([43e3d8e](https://github.com/jak/givenergy-modbus/commit/43e3d8e88e3d2b50e233ea0961bbc7482384470b))
+* build settings and schedules from the catalogue and capabilities ([86cb9e0](https://github.com/jak/givenergy-modbus/commit/86cb9e0ffd84cbf6063f351c1de2386931a11945))
+* capability-aware schedule and battery pause writes ([67cb213](https://github.com/jak/givenergy-modbus/commit/67cb21378fdef7555fc611df40bc32ade54f43d2))
+* compute capabilities from model and firmware ([8dce319](https://github.com/jak/givenergy-modbus/commit/8dce319eba873e80011405b93761530d1299ddcb))
+* decode identity, status and fault registers ([282fe08](https://github.com/jak/givenergy-modbus/commit/282fe081ebdb6aa35df88d491804a10c6d008b98))
+* decode power groups for both layouts ([9e84564](https://github.com/jak/givenergy-modbus/commit/9e8456497abc14fce7e45291b7d904ffd5462400))
+* derive polled blocks from capabilities and stop requesting unanswered blocks ([0b07480](https://github.com/jak/givenergy-modbus/commit/0b0748073b0fb9984d927c6c480a9d7595ca73ba))
+* resolve inverter model from device type code and firmware ([1132e26](https://github.com/jak/givenergy-modbus/commit/1132e26af68e68c41974b0559806c40dc6fb6f4b))
+* restrict the package entry points with an exports map ([3a9e7c8](https://github.com/jak/givenergy-modbus/commit/3a9e7c81a6f58845494ce36a99d0474f9d4227d7))
+* setSetting and unsafe_setSetting replace per-setting methods ([ff35d76](https://github.com/jak/givenergy-modbus/commit/ff35d768fc51c7b02fd7030be4718a12d93bb35e))
+* settings catalogue for every single-register setting ([d32f444](https://github.com/jak/givenergy-modbus/commit/d32f444aae2d40d5bb4389f9da034cc830bb10c6))
+* settings catalogue types and value codec ([a0beed1](https://github.com/jak/givenergy-modbus/commit/a0beed17c63072c759f8fa4c5e9cd4111375671d))
+* typed inverter events and warning-free API docs ([bc58097](https://github.com/jak/givenergy-modbus/commit/bc580977bbd36768df594e97732666a982aa04a8))
+* v3 public exports ([fb4bda8](https://github.com/jak/givenergy-modbus/commit/fb4bda8334311b6149760cf47b7ea72a230eef2c))
+* v3 snapshot types grouped by subsystem ([72288bc](https://github.com/jak/givenergy-modbus/commit/72288bc26b32b79e43952703be8bdb0110c1da6b))
+
+
+### Bug Fixes
+
+* decode HR 22 = 2 as a Wi-Fi dongle ([329bd06](https://github.com/jak/givenergy-modbus/commit/329bd06fb57f9ce6235f8ba4461953d42ec65056))
+* drop HR 4109-4112 from battery totals (write-only seed registers) ([a650451](https://github.com/jak/givenergy-modbus/commit/a6504514231351634817208c357a16321258362f))
+* drop the inverter power factor and zero unused meter phases ([efa21a0](https://github.com/jak/givenergy-modbus/commit/efa21a0fb7b6832440fb52961124b8fd6a470aa1))
+* drop three-phase per-phase load, which contradicts the load total ([41da546](https://github.com/jak/givenergy-modbus/commit/41da5463179cd7f5b27068d8ef28c07e96564333))
+* emit one data event per write call ([bb6d20e](https://github.com/jak/givenergy-modbus/commit/bb6d20ebde92f6da4b55db39d35749958b8d07d3))
+* inverter review fixes from Phase D ([784ba6a](https://github.com/jak/givenergy-modbus/commit/784ba6a504e889a8896a6a606310a991ffa6c835))
+* keep pushed meter data and skip product reads for absent meters ([676f5a4](https://github.com/jak/givenergy-modbus/commit/676f5a412c5779d220d23e74bcd4ceb088d5721b))
+* keep re-resolving the model until a snapshot passes the sanity check ([4c073a9](https://github.com/jak/givenergy-modbus/commit/4c073a99e7771f81e5604fd9f0436afea50f864d))
+* leave battery totals absent instead of falling back to the AC charge total ([f6c0eef](https://github.com/jak/givenergy-modbus/commit/f6c0eefd5619aea4891a68a9790a7aabae1dcbeb))
+* leave derived consumption out on AC-coupled models ([538e1ba](https://github.com/jak/givenergy-modbus/commit/538e1baf33cd93eba33a17845f012defc9631551))
+* leave unread registers out instead of zero-filling them ([b8828a5](https://github.com/jak/givenergy-modbus/commit/b8828a516d32f099bce9582896de27fd77a5c433))
+* number each time slot from its registers ([17030ef](https://github.com/jak/givenergy-modbus/commit/17030efc780292fdcfa25b80ba1591b5f6aa80fc))
+* pipeline the battery and meter scans ([098d149](https://github.com/jak/givenergy-modbus/commit/098d149b0757f9cfe481b94dd2b164b59be5cd38))
+* read battery and inverter temperatures as signed ([3778fef](https://github.com/jak/givenergy-modbus/commit/3778fef6bd523e448537653c4cb135f76748ad2b))
+* read IR 1083-1085 as per-phase grid power ([dbc55d3](https://github.com/jak/givenergy-modbus/commit/dbc55d3c573b9ab6eec244008cf3c36b19dfedda))
+* report a lost inverter after 3 failed polls, or at once when the socket closes ([5265949](https://github.com/jak/givenergy-modbus/commit/52659495c23d21a56c9c5355e27107ad832824e1))
+* skip pushed blocks, accept late replies and stop rescanning silent meters ([5b86296](https://github.com/jak/givenergy-modbus/commit/5b86296c3f228f2cf76ada57935c51d93a0db948))
+* stop cleanly, keep answered blocks and isolate listener errors ([b4256aa](https://github.com/jak/givenergy-modbus/commit/b4256aaf6508f9c044dc83f0de504688a0359131))
+* stop exposing the low-voltage battery module current (IR 95) ([3eca384](https://github.com/jak/givenergy-modbus/commit/3eca3840cc0d43a1ca891fedf02b33f256446afa))
+* take battery stack and module indexes from the device address ([2c86be4](https://github.com/jak/givenergy-modbus/commit/2c86be4d7a17ffacb013a6134307cf74ba4a80bd))
+* update the snapshot clock on setDateTime with one data event ([e784e3c](https://github.com/jak/givenergy-modbus/commit/e784e3c5e7c57bb7d77b0464c797398b22897976))
+
+
+### Refactoring
+
+* remove 2.x generation model and flat snapshot ([abb0c15](https://github.com/jak/givenergy-modbus/commit/abb0c1529fd6862ab59c1cbe95b6f3151834f927))
+
 ## [2.0.2](https://github.com/jak/givenergy-modbus/compare/givenergy-modbus-v2.0.1...givenergy-modbus-v2.0.2) (2026-07-06)
 
 
