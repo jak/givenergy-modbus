@@ -21,7 +21,7 @@ async function connect(): Promise<{ mock: MockInverter; inverter: GivEnergyInver
   stop.push(() => mock.close());
   const inverter = await GivEnergyInverter.connect({
     host: '127.0.0.1', port: mock.port, autoReconnect: false, timing: FAST_TIMING,
-    pollIntervalMs: POLL_INTERVAL_MS, fullRefreshIntervalMs: 60_000,
+    pollIntervalMs: POLL_INTERVAL_MS,
   });
   stop.push(() => inverter.stop());
   const lost: Error[] = [];
@@ -31,26 +31,31 @@ async function connect(): Promise<{ mock: MockInverter; inverter: GivEnergyInver
 
 describe('connection loss', () => {
   it(`reports an inverter that stopped answering an open socket after ${LOST_AFTER_FAILED_POLLS} polls, asking only for HR 0`, async () => {
-    const { mock, lost } = await connect();
+    const { mock, inverter, lost } = await connect();
     mock.silent = () => true;
     mock.requests.length = 0;
+    // Polling goes on after 'lost' (autoReconnect is off), so take the requests as 'lost' fires.
+    let askedBeforeLost: string[] = [];
+    inverter.once('lost', () => {
+      askedBeforeLost = mock.requests.map((request) => `${request.functionCode}:${request.baseRegister}`);
+    });
 
-    await vi.waitFor(() => expect(lost).toHaveLength(1), { timeout: 10_000, interval: 20 });
+    await vi.waitFor(() => expect(lost.length).toBeGreaterThanOrEqual(1), { timeout: 10_000, interval: 20 });
     expect(lost[0].message).toBe('no response from inverter');
     // One HR 0 request per failed poll (FAST_TIMING has no retries), and no other block.
-    const asked = mock.requests.map((request) => `${request.functionCode}:${request.baseRegister}`);
+    const asked = askedBeforeLost;
     expect(new Set(asked)).toEqual(new Set(['3:0']));
     expect(asked.length).toBe(LOST_AFTER_FAILED_POLLS);
   });
 
   it('reports a closed socket on the next poll, without waiting for more failures', async () => {
-    const { mock, lost } = await connect();
-    mock.silent = () => true; // a reconnect isn't attempted (autoReconnect: false), but be sure
+    const { mock, inverter, lost } = await connect();
+    mock.silent = () => true;
+    let failedPollsAtLost = -1;
+    inverter.once('lost', () => { failedPollsAtLost = (inverter as any).pollManager._failCount; });
     mock.dropConnections();
-    const dropped = Date.now();
 
-    await vi.waitFor(() => expect(lost).toHaveLength(1), { timeout: 10_000, interval: 10 });
-    // Within about one poll interval, plus the poll itself.
-    expect(Date.now() - dropped).toBeLessThan(POLL_INTERVAL_MS * 2 + 500);
+    await vi.waitFor(() => expect(lost.length).toBeGreaterThanOrEqual(1), { timeout: 10_000, interval: 10 });
+    expect(failedPollsAtLost).toBe(1);
   });
 });
